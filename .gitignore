@@ -1,0 +1,7 @@
+# privat / groß – niemals hochladen
+data/
+models/
+engine/
+workspace/
+__pycache__/
+*.pyc

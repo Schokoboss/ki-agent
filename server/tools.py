@@ -1,0 +1,693 @@
+"""Werkzeuge des Agenten.
+
+Jedes Werkzeug ist eine Funktion (args: dict, ctx: ToolContext) -> str.
+TOOL_SPECS beschreibt sie im OpenAI-Format für llama-server.
+approval_reason() entscheidet, ob der Nutzer am Handy zustimmen muss.
+"""
+
+import ast
+import ctypes
+import html
+import ipaddress
+import json
+import math
+import operator
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from html.parser import HTMLParser
+from pathlib import Path
+
+UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")
+CREATE_NO_WINDOW = 0x08000000
+CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+MAX_RESULT = 7000
+WEEKDAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
+
+
+class ToolError(Exception):
+    pass
+
+
+class ToolContext:
+    def __init__(self, workspace: Path, memory_path: Path, python_exe: str):
+        self.workspace = workspace
+        self.memory_path = memory_path
+        self.python_exe = python_exe
+
+
+# ---------------------------------------------------------------- Hilfsfunktionen
+
+def _clip(text: str, limit: int = MAX_RESULT) -> str:
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"\n\n[... gekürzt, {len(text) - limit} Zeichen ausgelassen]"
+
+
+def _check_public_host(url: str) -> None:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ToolError("Nur http- und https-Adressen sind erlaubt.")
+    host = parsed.hostname
+    if not host:
+        raise ToolError("Ungültige Adresse.")
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        raise ToolError(f"Adresse {host} nicht gefunden.")
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+            raise ToolError("Lokale oder private Netzwerkadressen sind gesperrt.")
+
+
+class _SafeRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _check_public_host(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_opener = urllib.request.build_opener(_SafeRedirect)
+
+
+def _fetch(url: str, data: bytes | None = None, headers: dict | None = None,
+           timeout: int = 20, max_bytes: int = 3_000_000):
+    _check_public_host(url)
+    hdrs = {"User-Agent": UA, "Accept-Language": "de-DE,de;q=0.9,en;q=0.7"}
+    hdrs.update(headers or {})
+    req = urllib.request.Request(url, data=data, headers=hdrs)
+    try:
+        with _opener.open(req, timeout=timeout) as resp:
+            raw = resp.read(max_bytes)
+            charset = resp.headers.get_content_charset() or "utf-8"
+            return raw, resp.headers.get("Content-Type", ""), charset, resp.geturl()
+    except urllib.error.HTTPError as e:
+        raise ToolError(f"HTTP-Fehler {e.code} bei {url}")
+    except urllib.error.URLError as e:
+        raise ToolError(f"Verbindung fehlgeschlagen: {e.reason}")
+    except TimeoutError:
+        raise ToolError("Zeitüberschreitung beim Laden.")
+
+
+def _fetch_json(url: str, **kw):
+    raw, _, charset, _ = _fetch(url, headers={"Accept": "application/json"}, **kw)
+    return json.loads(raw.decode(charset, "replace"))
+
+
+class _TextExtractor(HTMLParser):
+    SKIP = {"script", "style", "noscript", "svg", "nav", "footer", "form", "iframe",
+            "template", "aside", "button", "select"}
+    BLOCK = {"p", "div", "br", "li", "tr", "section", "article", "header", "blockquote",
+             "pre", "table", "ul", "ol", "dd", "dt", "figcaption", "main"}
+    HEADINGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.main_parts: list[str] = []  # nur Text innerhalb von <main>/<article>
+        self.skip = 0
+        self.main = 0
+        self.title = ""
+        self._in_title = False
+
+    def _add(self, s):
+        self.parts.append(s)
+        if self.main:
+            self.main_parts.append(s)
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "title":
+            self._in_title = True
+        elif tag in self.SKIP:
+            self.skip += 1
+        elif tag in ("main", "article"):
+            self.main += 1
+        elif tag in self.HEADINGS:
+            self._add("\n\n## ")
+        elif tag in self.BLOCK:
+            self._add("\n")
+            if tag == "li":
+                self._add("• ")
+
+    def handle_endtag(self, tag):
+        if tag == "title":
+            self._in_title = False
+        elif tag in self.SKIP:
+            self.skip = max(0, self.skip - 1)
+        elif tag in ("main", "article"):
+            self.main = max(0, self.main - 1)
+        elif tag in self.HEADINGS or tag in self.BLOCK:
+            self._add("\n")
+
+    def handle_data(self, data):
+        if self._in_title:
+            self.title += data
+        elif not self.skip:
+            self._add(data)
+
+    def text(self) -> str:
+        main = "".join(self.main_parts)
+        raw = main if len(main.strip()) > 400 else "".join(self.parts)
+        lines = [re.sub(r"[ \t\r\f\v ]+", " ", ln).strip() for ln in raw.split("\n")]
+        out, blank = [], 0
+        for ln in lines:
+            if ln and ln not in ("##", "•"):
+                out.append(ln)
+                blank = 0
+            elif blank == 0:
+                out.append("")
+                blank = 1
+        return "\n".join(out).strip()
+
+
+def _strip_tags(s: str) -> str:
+    return html.unescape(re.sub(r"<[^>]+>", "", s)).strip()
+
+
+def _resolve(path: str, ctx: ToolContext) -> Path:
+    p = Path(os.path.expandvars(os.path.expanduser(path or ".")))
+    if not p.is_absolute():
+        p = ctx.workspace / p
+    return p.resolve()
+
+
+def _inside_workspace(p: Path, ctx: ToolContext) -> bool:
+    ws = ctx.workspace.resolve()
+    return p == ws or ws in p.parents
+
+
+def _decode(b: bytes) -> str:
+    try:
+        return b.decode("utf-8")
+    except UnicodeDecodeError:
+        return b.decode("cp1252", "replace")
+
+
+# ---------------------------------------------------------------- Werkzeuge: Web
+
+def web_search(args, ctx):
+    query = (args.get("query") or "").strip()
+    if not query:
+        raise ToolError("Leere Suchanfrage.")
+    results = _search_duckduckgo(query)
+    if not results:
+        results = _search_bing(query)
+    if not results:
+        return "Keine Suchergebnisse gefunden."
+    lines = [f"Suchergebnisse für: {query}\n"]
+    for i, (title, url, snippet) in enumerate(results[:7], 1):
+        lines.append(f"{i}. {title}\n   {url}\n   {snippet}")
+    lines.append("\nTipp: Mit open_webpage kannst du ein Ergebnis im Detail lesen.")
+    return "\n".join(lines)
+
+
+def _search_duckduckgo(query):
+    data = urllib.parse.urlencode({"q": query, "kl": "de-de"}).encode()
+    try:
+        raw, _, charset, _ = _fetch("https://html.duckduckgo.com/html/", data=data, headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": "https://html.duckduckgo.com/"})
+    except ToolError:
+        return []
+    page = raw.decode(charset, "replace")
+    results = []
+    for block in re.split(r'class="[^"]*\bresult__body\b', page)[1:]:
+        m = re.search(r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', block, re.S)
+        if not m:
+            continue
+        href = html.unescape(m.group(1))
+        if "duckduckgo.com/y.js" in href:  # Anzeige
+            continue
+        if "uddg=" in href:
+            href = urllib.parse.parse_qs(urllib.parse.urlparse(href).query).get("uddg", [href])[0]
+        if href.startswith("//"):
+            href = "https:" + href
+        sn = re.search(r'class="result__snippet"[^>]*>(.*?)</(?:a|div)>', block, re.S)
+        results.append((_strip_tags(m.group(2)), href, _strip_tags(sn.group(1)) if sn else ""))
+    return results
+
+
+def _search_bing(query):
+    url = "https://www.bing.com/search?" + urllib.parse.urlencode({"q": query, "setlang": "de", "cc": "DE"})
+    try:
+        raw, _, charset, _ = _fetch(url)
+    except ToolError:
+        return []
+    page = raw.decode(charset, "replace")
+    results = []
+    for block in page.split('<li class="b_algo"')[1:]:
+        m = re.search(r'<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', block, re.S)
+        if not m:
+            continue
+        sn = re.search(r"<p[^>]*>(.*?)</p>", block, re.S)
+        results.append((_strip_tags(m.group(2)), _bing_target(html.unescape(m.group(1))),
+                        _strip_tags(sn.group(1)) if sn else ""))
+    return results
+
+
+def _bing_target(href):
+    """Bing verpackt Ziele als /ck/a?...&u=a1<base64url>; das echte Ziel auspacken."""
+    if "bing.com/ck/a" not in href:
+        return href
+    u = urllib.parse.parse_qs(urllib.parse.urlparse(href).query).get("u", [""])[0]
+    if u.startswith("a1"):
+        try:
+            import base64
+            b = u[2:]
+            return base64.urlsafe_b64decode(b + "=" * (-len(b) % 4)).decode("utf-8")
+        except ValueError:
+            pass
+    return href
+
+
+def open_webpage(args, ctx):
+    url = (args.get("url") or "").strip()
+    if not re.match(r"^https?://", url):
+        url = "https://" + url
+    raw, ctype, charset, final_url = _fetch(url)
+    if "html" not in ctype and "text" not in ctype and "json" not in ctype and "xml" not in ctype:
+        return f"Die Adresse liefert keinen Text ({ctype or 'unbekannter Typ'}, {len(raw)} Bytes)."
+    text = raw.decode(charset, "replace")
+    title = ""
+    if "html" in ctype or "<html" in text[:2000].lower():
+        ex = _TextExtractor()
+        try:
+            ex.feed(text)
+        except Exception:
+            pass
+        title = ex.title.strip()
+        text = ex.text()
+    head = f"Seite: {title}\n" if title else ""
+    return head + f"Adresse: {final_url}\n\n" + _clip(text, 9000)
+
+
+def wikipedia(args, ctx):
+    query = (args.get("query") or "").strip()
+    lang = (args.get("lang") or "de").strip().lower()
+    if not re.fullmatch(r"[a-z]{2,3}", lang):
+        lang = "de"
+    api = f"https://{lang}.wikipedia.org/w/api.php?"
+    found = _fetch_json(api + urllib.parse.urlencode({
+        "action": "query", "list": "search", "srsearch": query, "srlimit": 4, "format": "json"}))
+    hits = found.get("query", {}).get("search", [])
+    if not hits:
+        return f"Kein Wikipedia-Artikel zu '{query}' gefunden."
+    title = hits[0]["title"]
+    data = _fetch_json(api + urllib.parse.urlencode({
+        "action": "query", "prop": "extracts", "explaintext": 1, "redirects": 1,
+        "titles": title, "format": "json"}))
+    page = next(iter(data.get("query", {}).get("pages", {}).values()), {})
+    extract = page.get("extract", "")
+    link = f"https://{lang}.wikipedia.org/wiki/" + urllib.parse.quote(title.replace(" ", "_"))
+    others = ", ".join(h["title"] for h in hits[1:])
+    out = f"# {title}\n{link}\n\n{_clip(extract, 7000)}"
+    if others:
+        out += f"\n\nWeitere Treffer: {others}"
+    return out
+
+
+WEATHER_CODES = {
+    0: "klar", 1: "überwiegend klar", 2: "teils bewölkt", 3: "bedeckt", 45: "Nebel", 48: "Reifnebel",
+    51: "leichter Nieselregen", 53: "Nieselregen", 55: "starker Nieselregen", 56: "gefrierender Niesel",
+    57: "starker gefrierender Niesel", 61: "leichter Regen", 63: "Regen", 65: "starker Regen",
+    66: "gefrierender Regen", 67: "starker gefrierender Regen", 71: "leichter Schneefall", 73: "Schneefall",
+    75: "starker Schneefall", 77: "Schneegriesel", 80: "leichte Regenschauer", 81: "Regenschauer",
+    82: "heftige Regenschauer", 85: "Schneeschauer", 86: "starke Schneeschauer", 95: "Gewitter",
+    96: "Gewitter mit Hagel", 99: "schweres Gewitter mit Hagel",
+}
+
+
+def weather(args, ctx):
+    place = (args.get("location") or "").strip()
+    if not place:
+        raise ToolError("Ort fehlt.")
+    geo = _fetch_json("https://geocoding-api.open-meteo.com/v1/search?" + urllib.parse.urlencode(
+        {"name": place, "count": 1, "language": "de", "format": "json"}))
+    if not geo.get("results"):
+        return f"Ort '{place}' nicht gefunden."
+    g = geo["results"][0]
+    fc = _fetch_json("https://api.open-meteo.com/v1/forecast?" + urllib.parse.urlencode({
+        "latitude": g["latitude"], "longitude": g["longitude"], "timezone": "auto", "forecast_days": 4,
+        "current": "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,precipitation",
+        "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset",
+    }))
+    c = fc["current"]
+    name = ", ".join(x for x in (g.get("name"), g.get("admin1"), g.get("country")) if x)
+    lines = [f"Wetter in {name} (Stand {c['time'].replace('T', ' ')}):",
+             f"Jetzt: {c['temperature_2m']} °C (gefühlt {c['apparent_temperature']} °C), "
+             f"{WEATHER_CODES.get(c['weather_code'], 'unbekannt')}, Wind {c['wind_speed_10m']} km/h, "
+             f"Luftfeuchte {c['relative_humidity_2m']} %, Niederschlag {c['precipitation']} mm", "", "Vorhersage:"]
+    d = fc["daily"]
+    for i, day in enumerate(d["time"]):
+        lines.append(f"- {day}: {WEATHER_CODES.get(d['weather_code'][i], '?')}, "
+                     f"{d['temperature_2m_min'][i]} bis {d['temperature_2m_max'][i]} °C, "
+                     f"Regenrisiko {d['precipitation_probability_max'][i]} %, "
+                     f"Sonne {d['sunrise'][i][-5:]}–{d['sunset'][i][-5:]}")
+    lines.append("Quelle: open-meteo.com")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- Werkzeuge: Rechnen & Code
+
+_OPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod, ast.Pow: operator.pow,
+        ast.USub: operator.neg, ast.UAdd: operator.pos}
+_FUNCS = {n: getattr(math, n) for n in ("sqrt", "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "log",
+                                         "log10", "log2", "exp", "floor", "ceil", "factorial", "radians",
+                                         "degrees", "hypot", "gcd")}
+_FUNCS.update({"abs": abs, "round": round, "min": min, "max": max})
+_NAMES = {"pi": math.pi, "e": math.e, "tau": math.tau}
+
+
+def _eval_node(node):
+    if isinstance(node, ast.Expression):
+        return _eval_node(node.body)
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return node.value
+    if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
+        left, right = _eval_node(node.left), _eval_node(node.right)
+        if isinstance(node.op, ast.Pow) and (abs(right) > 2000 or abs(left) > 1e12):
+            raise ToolError("Zahl zu groß.")
+        return _OPS[type(node.op)](left, right)
+    if isinstance(node, ast.UnaryOp) and type(node.op) in _OPS:
+        return _OPS[type(node.op)](_eval_node(node.operand))
+    if isinstance(node, ast.Name) and node.id in _NAMES:
+        return _NAMES[node.id]
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _FUNCS:
+        vals = [_eval_node(a) for a in node.args]
+        if node.func.id == "factorial" and vals and vals[0] > 1000:
+            raise ToolError("Zahl zu groß.")
+        return _FUNCS[node.func.id](*vals)
+    raise ToolError("Nicht erlaubter Ausdruck. Erlaubt: Zahlen, + - * / // % **, Klammern, math-Funktionen.")
+
+
+def _normalize_expr(expr: str) -> str:
+    expr = expr.replace("^", "**").replace("×", "*").replace("÷", "/").replace("·", "*")
+    if "(" not in expr:
+        expr = re.sub(r"(\d),(\d)", r"\1.\2", expr)          # 17,5 -> 17.5
+    expr = re.sub(r"\b(von|of)\b", "*", expr, flags=re.I)    # 17.5 % von 240
+    expr = re.sub(r"(\d+(?:\.\d+)?)\s*%", r"(\1/100)", expr)  # 17.5% -> (17.5/100)
+    return re.sub(r"\bmod\b", "%", expr)                       # Modulo als "mod"
+
+
+def calculate(args, ctx):
+    original = (args.get("expression") or "").strip()
+    expr = _normalize_expr(original)
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError:
+        raise ToolError("Ausdruck ist ungültig.")
+    value = _eval_node(tree)
+    if isinstance(value, float):
+        value = round(value, 10)
+        if value.is_integer() and abs(value) < 1e15:
+            value = int(value)
+    return f"{original} = {value}"
+
+
+def _run_process(cmd, ctx, timeout):
+    env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+    try:
+        p = subprocess.run(cmd, cwd=ctx.workspace, capture_output=True, timeout=timeout,
+                           creationflags=CREATE_NO_WINDOW, env=env, stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired as e:
+        out = _decode(e.stdout or b"") + _decode(e.stderr or b"")
+        return f"Abgebrochen nach {timeout} s (Zeitlimit).\n{_clip(out, 3000)}"
+    out = _decode(p.stdout)
+    err = _decode(p.stderr)
+    parts = [f"Exit-Code: {p.returncode}"]
+    if out.strip():
+        parts.append("Ausgabe:\n" + _clip(out, 6000))
+    if err.strip():
+        parts.append("Fehler/Stderr:\n" + _clip(err, 3000))
+    if not out.strip() and not err.strip():
+        parts.append("(keine Ausgabe)")
+    return "\n".join(parts)
+
+
+def run_python(args, ctx):
+    code = args.get("code") or ""
+    runs = ctx.workspace / ".runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    script = runs / f"run_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}.py"
+    script.write_text(code, encoding="utf-8")
+    return _run_process([ctx.python_exe, "-X", "utf8", str(script)], ctx, timeout=120)
+
+
+def run_powershell(args, ctx):
+    command = args.get("command") or ""
+    prefix = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; $ProgressPreference='SilentlyContinue'; "
+    return _run_process(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                         "-Command", prefix + command], ctx, timeout=120)
+
+
+# ---------------------------------------------------------------- Werkzeuge: Dateien & Laptop
+
+def list_files(args, ctx):
+    p = _resolve(args.get("path") or ".", ctx)
+    if not p.exists():
+        raise ToolError(f"Ordner nicht gefunden: {p}")
+    if p.is_file():
+        return f"{p} ist eine Datei ({p.stat().st_size} Bytes)."
+    entries = []
+    for child in sorted(p.iterdir(), key=lambda c: (not c.is_dir(), c.name.lower())):
+        if child.name.startswith(".runs"):
+            continue
+        try:
+            if child.is_dir():
+                entries.append(f"[Ordner] {child.name}")
+            else:
+                entries.append(f"{child.name}  ({_human(child.stat().st_size)})")
+        except OSError:
+            continue
+        if len(entries) >= 300:
+            entries.append("... (weitere ausgelassen)")
+            break
+    return f"Inhalt von {p}:\n" + ("\n".join(entries) if entries else "(leer)")
+
+
+def _human(n):
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} TB"
+
+
+def read_file(args, ctx):
+    p = _resolve(args.get("path") or "", ctx)
+    if not p.is_file():
+        raise ToolError(f"Datei nicht gefunden: {p}")
+    size = p.stat().st_size
+    if size > 5_000_000:
+        raise ToolError(f"Datei zu groß ({_human(size)}).")
+    raw = p.read_bytes()
+    if b"\x00" in raw[:4000]:
+        return f"{p} ist eine Binärdatei ({_human(size)}), kein Text."
+    return f"Datei {p} ({_human(size)}):\n\n" + _clip(_decode(raw), 12000)
+
+
+def write_file(args, ctx):
+    p = _resolve(args.get("path") or "", ctx)
+    content = args.get("content") or ""
+    p.parent.mkdir(parents=True, exist_ok=True)
+    mode = "a" if args.get("append") else "w"
+    with open(p, mode, encoding="utf-8", newline="") as f:
+        f.write(content)
+    verb = "angehängt an" if mode == "a" else "gespeichert in"
+    return f"{len(content)} Zeichen {verb} {p}"
+
+
+def open_on_laptop(args, ctx):
+    target = (args.get("target") or "").strip()
+    if not target:
+        raise ToolError("Ziel fehlt.")
+    if not re.match(r"^[a-z]+://", target, re.I):
+        candidate = _resolve(target, ctx)
+        if candidate.exists():
+            target = str(candidate)
+    cmd = ["cmd.exe", "/c", "start", "", target]
+    try:
+        subprocess.Popen(cmd, creationflags=CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB)
+    except OSError:
+        subprocess.Popen(cmd, creationflags=CREATE_NO_WINDOW)
+    return f"Auf dem Laptop geöffnet: {target}"
+
+
+class _PowerStatus(ctypes.Structure):
+    _fields_ = [("ACLineStatus", ctypes.c_ubyte), ("BatteryFlag", ctypes.c_ubyte),
+                ("BatteryLifePercent", ctypes.c_ubyte), ("SystemStatusFlag", ctypes.c_ubyte),
+                ("BatteryLifeTime", ctypes.c_ulong), ("BatteryFullLifeTime", ctypes.c_ulong)]
+
+
+class _MemStatus(ctypes.Structure):
+    _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+
+def _cpu_load(interval=0.4):
+    k32 = ctypes.windll.kernel32
+    def times():
+        idle, kern, user = (ctypes.c_ulonglong() for _ in range(3))
+        k32.GetSystemTimes(ctypes.byref(idle), ctypes.byref(kern), ctypes.byref(user))
+        return idle.value, kern.value + user.value
+    i1, t1 = times()
+    time.sleep(interval)
+    i2, t2 = times()
+    total = t2 - t1
+    return 0 if total <= 0 else round(100 * (1 - (i2 - i1) / total))
+
+
+def laptop_status(args, ctx):
+    k32 = ctypes.windll.kernel32
+    ps = _PowerStatus()
+    k32.GetSystemPowerStatus(ctypes.byref(ps))
+    mem = _MemStatus()
+    mem.dwLength = ctypes.sizeof(_MemStatus)
+    k32.GlobalMemoryStatusEx(ctypes.byref(mem))
+    k32.GetTickCount64.restype = ctypes.c_ulonglong
+    up = k32.GetTickCount64() // 1000
+    disk = shutil.disk_usage(os.environ.get("SystemDrive", "C:") + "\\")
+    if ps.BatteryFlag == 128 or ps.BatteryLifePercent == 255:
+        battery = "kein Akku erkannt"
+    else:
+        battery = f"{ps.BatteryLifePercent} %, " + ("lädt / am Netz" if ps.ACLineStatus == 1 else "im Akkubetrieb")
+        if ps.ACLineStatus != 1 and ps.BatteryLifeTime not in (0xFFFFFFFF, -1):
+            battery += f", noch ca. {ps.BatteryLifeTime // 3600} h {ps.BatteryLifeTime % 3600 // 60} min"
+    return "\n".join([
+        f"Akku: {battery}",
+        f"CPU-Auslastung: {_cpu_load()} %",
+        f"Arbeitsspeicher: {_human(mem.ullTotalPhys - mem.ullAvailPhys)} von {_human(mem.ullTotalPhys)} belegt ({mem.dwMemoryLoad} %)",
+        f"Festplatte C: {_human(disk.free)} frei von {_human(disk.total)}",
+        f"Läuft seit: {up // 86400} Tagen, {up % 86400 // 3600} h {up % 3600 // 60} min",
+        f"Jetzt: {WEEKDAYS[time.localtime().tm_wday]}, {time.strftime('%d.%m.%Y, %H:%M:%S Uhr')}",
+    ])
+
+
+# ---------------------------------------------------------------- Werkzeuge: Gedächtnis
+
+def load_memory(ctx) -> list[dict]:
+    try:
+        return json.loads(ctx.memory_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+
+
+def save_memory(ctx, items):
+    ctx.memory_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = ctx.memory_path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(items, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, ctx.memory_path)
+
+
+def remember(args, ctx):
+    fact = (args.get("fact") or "").strip()
+    if not fact:
+        raise ToolError("Nichts zum Merken angegeben.")
+    items = load_memory(ctx)
+    next_id = max((int(m["id"][1:]) for m in items if m["id"][1:].isdigit()), default=0) + 1
+    items.append({"id": f"m{next_id}", "text": fact[:500], "created": time.strftime("%Y-%m-%d %H:%M")})
+    save_memory(ctx, items)
+    return f"Gemerkt als m{next_id}: {fact}"
+
+
+def forget(args, ctx):
+    mid = (args.get("id") or "").strip()
+    items = load_memory(ctx)
+    keep = [m for m in items if m["id"] != mid]
+    if len(keep) == len(items):
+        return f"Keine Erinnerung mit ID {mid} gefunden."
+    save_memory(ctx, keep)
+    return f"Erinnerung {mid} gelöscht."
+
+
+# ---------------------------------------------------------------- Register
+
+def _spec(name, desc, props=None, required=None):
+    return {"type": "function", "function": {
+        "name": name, "description": desc,
+        "parameters": {"type": "object", "properties": props or {}, "required": required or []}}}
+
+
+def _s(desc):
+    return {"type": "string", "description": desc}
+
+
+TOOL_SPECS = [
+    _spec("web_search", "Search the internet. Use for current events, news, prices, facts you are unsure about.",
+          {"query": _s("Search query")}, ["query"]),
+    _spec("open_webpage", "Load a web page and return its readable text.", {"url": _s("Full URL")}, ["url"]),
+    _spec("wikipedia", "Look up a Wikipedia article.",
+          {"query": _s("Topic"), "lang": _s("Language code, default 'de'")}, ["query"]),
+    _spec("weather", "Current weather and 4-day forecast for a place.", {"location": _s("City or place")},
+          ["location"]),
+    _spec("calculate", "Evaluate a math expression exactly. Use for every calculation. Percent is supported: "
+          "'17.5% * 240' means 17.5 percent of 240. Examples: '(12+8)*3', 'sqrt(2)*3', '19% * 49.99'.",
+          {"expression": _s("Math expression")}, ["expression"]),
+    _spec("run_python", "Run a Python 3 script on the laptop (working dir = workspace). Print results. "
+          "Use for calculations, data, files, charts, automation.", {"code": _s("Complete Python code")}, ["code"]),
+    _spec("run_powershell", "Run a PowerShell command on the Windows laptop.", {"command": _s("PowerShell command")},
+          ["command"]),
+    _spec("list_files", "List a folder on the laptop. Relative paths are inside the workspace.",
+          {"path": _s("Folder path, default workspace")}),
+    _spec("read_file", "Read a text file on the laptop.", {"path": _s("File path")}, ["path"]),
+    _spec("write_file", "Create or overwrite a text file on the laptop (relative = workspace).",
+          {"path": _s("File path"), "content": _s("Full file content"),
+           "append": {"type": "boolean", "description": "Append instead of overwrite"}}, ["path", "content"]),
+    _spec("open_on_laptop", "Open a URL, file, folder or program on the laptop screen.",
+          {"target": _s("URL, path or program name")}, ["target"]),
+    _spec("laptop_status", "Live laptop data: battery %, charging, CPU load, RAM, free disk, uptime, exact current "
+          "time. You cannot know these values – always call this instead of guessing."),
+    _spec("remember", "Save a long-term fact about the user for future chats.", {"fact": _s("The fact")}, ["fact"]),
+    _spec("forget", "Delete a saved fact by its id (e.g. 'm3').", {"id": _s("Memory id")}, ["id"]),
+    _spec("update_notes", "Overwrite your working notes for the current task: plan, progress, next steps, file names. "
+          "Use regularly during long tasks.", {"notes": _s("Complete notes")}, ["notes"]),
+]
+
+TOOLS = {
+    "web_search": web_search, "open_webpage": open_webpage, "wikipedia": wikipedia, "weather": weather,
+    "calculate": calculate, "run_python": run_python, "run_powershell": run_powershell,
+    "list_files": list_files, "read_file": read_file, "write_file": write_file,
+    "open_on_laptop": open_on_laptop, "laptop_status": laptop_status, "remember": remember, "forget": forget,
+}
+
+
+def approval_reason(name: str, args: dict, ctx: ToolContext) -> str | None:
+    """Gibt einen Grund zurück, wenn der Nutzer zustimmen muss, sonst None."""
+    if name == "run_python":
+        return "Python-Code auf dem Laptop ausführen"
+    if name == "run_powershell":
+        return "PowerShell-Befehl auf dem Laptop ausführen"
+    if name in ("read_file", "list_files", "write_file"):
+        p = _resolve(args.get("path") or ".", ctx)
+        if not _inside_workspace(p, ctx):
+            verb = {"read_file": "Datei lesen", "list_files": "Ordner ansehen", "write_file": "Datei schreiben"}[name]
+            return f"{verb} außerhalb des Arbeitsordners: {p}"
+    if name == "open_on_laptop" and not re.match(r"^https?://", (args.get("target") or "").strip(), re.I):
+        return "Etwas auf dem Laptop öffnen"
+    return None
+
+
+def run_tool(name: str, args: dict, ctx: ToolContext) -> tuple[bool, str]:
+    fn = TOOLS.get(name)
+    if not fn:
+        return False, f"Unbekanntes Werkzeug: {name}"
+    try:
+        return True, _clip(fn(args, ctx), 12000)
+    except ToolError as e:
+        return False, f"Fehler: {e}"
+    except Exception as e:  # Werkzeugfehler dürfen den Agenten nie abstürzen lassen
+        return False, f"Fehler ({type(e).__name__}): {e}"
