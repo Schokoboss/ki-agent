@@ -13,7 +13,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 const state = {
   conn: LS.get('nova.conn', null),          // { t: Token, g: Gist-ID, u: Laptop-URL }
-  settings: Object.assign({ thinking: false, free_hand: false, speak: false }, LS.get('nova.settings', {})),
+  settings: Object.assign({ thinking: false, free_hand: false, speak: false, mode: 'auto', phoneModel: 'Qwen3.5-2B' },
+    LS.get('nova.settings', {})),
+  localRunning: false,
   online: false,
   status: null,
   conv: null,
@@ -160,8 +162,61 @@ function readPairing() {
   toast('Gekoppelt ✓');
 }
 
+/* ------------------------------------------------------------ Handy-Modus (ohne Laptop) */
+
+const LOCAL_KEY = 'nova.localConvs';
+function localConvs() { return LS.get(LOCAL_KEY, {}); }
+function saveLocalConvs(all) {
+  const keep = Object.values(all).sort((a, b) => b.updated - a.updated).slice(0, 30);
+  LS.set(LOCAL_KEY, Object.fromEntries(keep.map(c => [c.id, c])));
+}
+const isLocalConv = id => !!id && id.startsWith('h_');
+const phoneLabel = () => (NovaLocal.MODELS.find(m => m.id === state.settings.phoneModel) || NovaLocal.MODELS[0]).label;
+
+function useLocal() {
+  if (isLocalConv(state.conv) || state.settings.mode === 'phone') return true;
+  if (state.settings.mode === 'laptop') return false;
+  return !state.online;
+}
+
+function showPhoneStatus(extra) {
+  setStatus('phone', `Handy-KI · ${phoneLabel()}${extra || ''}`);
+}
+
+async function sendLocal(text) {
+  if (state.pendingImages.length) toast('Fotos gehen nur mit dem Laptop – ich schicke nur den Text.');
+  if (!text) return;
+  if (state.conv && !isLocalConv(state.conv)) { newChat(); toast('Neuer Chat mit der Handy-KI'); }
+  const all = localConvs();
+  let conv = state.conv && all[state.conv];
+  if (!conv) {
+    conv = { id: 'h_' + Date.now().toString(36), title: text.replace(/\s+/g, ' ').slice(0, 48), updated: Date.now() / 1000, messages: [] };
+    state.conv = conv.id;
+    LS.set('nova.lastConv', conv.id);
+  }
+  conv.messages.push({ role: 'user', content: text, _display: text });
+  const save = () => { conv.updated = Date.now() / 1000; const a = localConvs(); a[conv.id] = conv; saveLocalConvs(a); };
+  save();
+  els.input.value = '';
+  autoGrow();
+  state.pendingImages = [];
+  renderAttachments();
+  addUser(text);
+  const ctx = { view: new TurnView(true) };
+  state.localRunning = true;
+  setRunning(true);
+  try {
+    await NovaLocal.run({ modelId: state.settings.phoneModel, messages: conv.messages, user: state.status?.user,
+      emit: ev => handleEvent(ev, ctx), onSave: save });
+  } catch (e) {
+    ctx.view.error('Handy-KI: ' + (e.message || e));
+  }
+  state.localRunning = false;
+  setRunning(false);
+}
+
 function setStatus(s, text) {
-  const labels = { online: 'bereit', loading: 'Modell lädt …', connecting: 'verbinde …', offline: 'Laptop offline', unpaired: 'nicht gekoppelt' };
+  const labels = { online: 'bereit', loading: 'Modell lädt …', connecting: 'verbinde …', offline: 'Laptop offline', unpaired: 'nicht gekoppelt', phone: 'Handy-KI' };
   els.status.dataset.s = s;
   $('b', els.status).textContent = text || labels[s] || s;
   $('#infoStatus').textContent = text || labels[s] || s;
@@ -204,9 +259,12 @@ function connect() {
 
 async function doConnect() {
   clearTimeout(retryTimer);
-  if (!state.conn?.t) { showPair(true); setStatus('unpaired'); return false; }
+  if (!state.conn?.t) {
+    if (state.settings.mode === 'phone') { showPair(false); showPhoneStatus(); return false; }
+    showPair(true); setStatus('unpaired'); return false;
+  }
   showPair(false);
-  setStatus('connecting');
+  if (state.settings.mode !== 'phone') setStatus('connecting');
   const tried = new Set();
   const attempt = async url => {
     if (!url || tried.has(url)) return false;
@@ -224,7 +282,8 @@ async function doConnect() {
   if (!url && isLocalPage()) url = await attempt(location.origin);
   if (!url) {
     state.online = false;
-    setStatus('offline');
+    if (state.settings.mode === 'laptop') setStatus('offline');
+    else showPhoneStatus(state.settings.mode === 'auto' ? ' (Laptop aus)' : '');
     retryTimer = setTimeout(connect, 12000);
     return false;
   }
@@ -242,7 +301,9 @@ function applyStatus() {
   $('#hello').textContent = `Hey${st.user ? ' ' + st.user : ''}! Was soll ich für dich tun?`;
   $('#infoModel').textContent = st.model || '–';
   $('#infoUrl').textContent = state.conn?.u ? state.conn.u.replace(/^https?:\/\//, '') : '–';
-  if (st.llama && st.llama !== 'bereit') {
+  if (state.settings.mode === 'phone') {
+    showPhoneStatus();
+  } else if (st.llama && st.llama !== 'bereit') {
     setStatus('loading');
     clearTimeout(retryTimer);
     retryTimer = setTimeout(async () => { if (await ping(state.conn.u) === 'ok') applyStatus(); }, 4000);
@@ -425,6 +486,10 @@ class TurnView {
   }
   prep() {
     this.showTyping();
+  }
+  progress(p) {
+    if (!this.loadEl) { this.loadEl = h('div', 'status-line'); this.append(this.loadEl); this.showTyping(); }
+    this.loadEl.textContent = p >= 1 ? `Handy-Modell ${phoneLabel()} bereit` : `Lade Handy-Modell ${phoneLabel()} … ${Math.round(p * 100)} %`;
   }
   work(info) {
     if (!info || !info.deadline) return;
@@ -648,6 +713,7 @@ function handleEvent(ev, ctx) {
       refreshConvs();
       break;
     case 'user': break;  // steht schon im Verlauf
+    case 'load': view().progress(ev.p); break;
     case 'work': view().work(ev); break;
     case 'think': view().think(ev.d); break;
     case 'text': view().text(ev.d); break;
@@ -718,7 +784,15 @@ async function send(textOverride) {
   const text = (textOverride ?? els.input.value).trim();
   const images = state.pendingImages.slice();
   if (!text && !images.length) return;
-  if (!state.online && !(await connect())) { toast('Laptop ist nicht erreichbar.'); return; }
+  let local = useLocal();
+  if (!local && !state.online && !(await connect())) {
+    if (state.settings.mode === 'laptop') { toast('Laptop ist nicht erreichbar.'); return; }
+    local = true;
+  }
+  if (local) {
+    if (state.work.minutes) { toast('Arbeitszeit-Aufträge gehen nur mit dem Laptop.'); state.work.minutes = 0; updateWorkChip(); }
+    return sendLocal(text);
+  }
   const work = state.work.minutes;
   const settings = { ...state.settings, work_minutes: work, free_hand: state.settings.free_hand || (work > 0 && state.work.free) };
   els.input.value = '';
@@ -749,6 +823,7 @@ async function send(textOverride) {
 }
 
 async function stop() {
+  if (state.localRunning) { NovaLocal.stop(); return; }
   if (!state.conv) return;
   try { await apiJSON('/api/stop', { method: 'POST', body: JSON.stringify({ conversation_id: state.conv }) }); } catch { /* egal */ }
 }
@@ -764,10 +839,13 @@ function relTime(ts) {
 }
 
 async function refreshConvs() {
-  if (!state.online) return;
   try {
-    const [{ conversations }, status] = await Promise.all([apiJSON('/api/conversations'), apiJSON('/api/status').catch(() => ({}))]);
+    const [{ conversations: server }, status] = state.online
+      ? await Promise.all([apiJSON('/api/conversations'), apiJSON('/api/status').catch(() => ({}))])
+      : [{ conversations: [] }, {}];
     const live = new Set((status.active || []).map(a => a.id));
+    const local = Object.values(localConvs()).map(c => ({ id: c.id, title: c.title, updated: c.updated, local: true }));
+    const conversations = [...server, ...local].sort((a, b) => b.updated - a.updated);
     els.convList.innerHTML = conversations.length ? '' : '<p class="muted small" style="padding:10px">Noch keine Chats.</p>';
     for (const c of conversations) {
       const row = h('div', 'conv' + (c.id === state.conv ? ' active' : ''));
@@ -775,10 +853,12 @@ async function refreshConvs() {
         <button class="del" type="button" aria-label="Chat löschen">${icon('trash')}</button>`;
       $('.t', row).textContent = c.title || 'Chat';
       if (live.has(c.id)) $('.d', row).insertAdjacentHTML('beforeend', '<span class="live">arbeitet</span>');
+      if (c.local) $('.d', row).insertAdjacentHTML('beforeend', '<span class="phone">Handy</span>');
       $('.open', row).onclick = () => { closeDrawer(); openConv(c.id); };
       $('.del', row).onclick = async () => {
         if (!confirm(`Chat „${c.title}“ löschen?`)) return;
-        await apiJSON('/api/conversations/' + c.id, { method: 'DELETE' }).catch(e => toast(e.message));
+        if (c.local) { const a = localConvs(); delete a[c.id]; LS.set(LOCAL_KEY, a); }
+        else await apiJSON('/api/conversations/' + c.id, { method: 'DELETE' }).catch(e => toast(e.message));
         if (c.id === state.conv) newChat();
         refreshConvs();
       };
@@ -791,6 +871,11 @@ async function openConv(id) {
   if (state.running && id !== state.conv) setRunning(false);
   state.conv = id;
   LS.set('nova.lastConv', id);
+  if (isLocalConv(id)) {
+    const c = localConvs()[id];
+    if (c) renderHistory(c.messages, false); else newChat();
+    return;
+  }
   try {
     const c = await apiJSON('/api/conversations/' + id);
     if (state.conv !== id) return;
@@ -933,12 +1018,99 @@ async function loadMemory() {
   }
 }
 
+function renderModeSeg() {
+  document.querySelectorAll('#modeSeg button').forEach(b => b.classList.toggle('sel', b.dataset.mode === state.settings.mode));
+}
+
+function setMode(mode) {
+  state.settings.mode = mode;
+  LS.set('nova.settings', state.settings);
+  renderModeSeg();
+  if (mode === 'phone') showPhoneStatus();
+  else { state.online = false; connect(); }
+}
+
+async function loadLaptopModels() {
+  const box = $('#laptopModels');
+  if (!state.online) { box.innerHTML = '<p class="muted">Laptop nicht verbunden.</p>'; return; }
+  try {
+    const { models } = await apiJSON('/api/models');
+    box.innerHTML = '';
+    for (const m of models) {
+      const row = h('button', 'model-row' + (m.active ? ' sel' : '') + (m.installed ? '' : ' off'),
+        `<span class="pick"></span><span class="mi"><b></b><small></small></span>`);
+      row.type = 'button';
+      $('b', row).textContent = m.label;
+      $('small', row).textContent = m.installed ? m.desc : m.desc + ' – wird noch geladen';
+      row.onclick = async () => {
+        if (m.active || !m.installed) return;
+        try {
+          await apiJSON('/api/model', { method: 'POST', body: JSON.stringify({ id: m.id }) });
+          toast(`${m.label} wird geladen …`);
+          setStatus('loading');
+          setTimeout(async () => { if (await ping(state.conn.u) === 'ok') applyStatus(); }, 3000);
+          loadLaptopModels();
+        } catch (e) { toast(e.message); }
+      };
+      box.append(row);
+    }
+  } catch (e) {
+    box.innerHTML = `<p class="muted">${esc(e.message)}</p>`;
+  }
+}
+
+async function loadPhoneModels() {
+  const box = $('#phoneModels');
+  const gi = await NovaLocal.gpuInfo();
+  if (!gi.ok) { box.innerHTML = `<p class="muted">${esc(gi.why)}</p>`; return; }
+  box.innerHTML = '';
+  for (const m of NovaLocal.MODELS) {
+    const cached = await NovaLocal.isCached(m.id);
+    const sel = state.settings.phoneModel === m.id;
+    const row = h('div', 'model-row' + (sel ? ' sel' : ''),
+      `<span class="pick"></span><span class="mi"><b></b><small></small></span><button type="button" class="btn act"></button>`);
+    $('b', row).textContent = m.label;
+    $('small', row).textContent = `${m.desc} · ${cached ? 'auf dem Handy ✓' : m.size}`;
+    const act = $('.act', row);
+    act.textContent = cached ? 'Löschen' : 'Laden';
+    row.querySelector('.mi').onclick = row.querySelector('.pick').onclick = () => {
+      state.settings.phoneModel = m.id;
+      LS.set('nova.settings', state.settings);
+      if (state.settings.mode !== 'laptop' && !state.online) showPhoneStatus();
+      loadPhoneModels();
+    };
+    act.onclick = async () => {
+      act.disabled = true;
+      try {
+        if (cached) {
+          if (!confirm(`${m.label} vom Handy löschen?`)) { act.disabled = false; return; }
+          await NovaLocal.remove(m.id);
+        } else {
+          await NovaLocal.load(m.id, p => { act.textContent = `${Math.round(p * 100)} %`; });
+          toast(`${m.label} ist jetzt auf dem Handy`);
+        }
+      } catch (e) { toast('Fehler: ' + (e.message || e), 5000); }
+      loadPhoneModels();
+    };
+    box.append(row);
+  }
+}
+
 function openSettings() {
   closeDrawer();
   $('#btnInstall').hidden = !state.installPrompt;
+  renderModeSeg();
   loadMemory();
+  loadLaptopModels();
+  loadPhoneModels();
   els.settings.showModal();
 }
+
+$('#modeSeg').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (b) setMode(b.dataset.mode);
+});
+$('#btnPhoneOnly').onclick = () => { setMode('phone'); showPair(false); openSettings(); };
 
 /* ------------------------------------------------------------ Arbeitszeit */
 
@@ -1032,8 +1204,7 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
   setRunning(false);
   updateWorkChip();
   autoGrow();
-  if (await connect()) {
-    const last = LS.get('nova.lastConv', null);
-    if (last) openConv(last);
-  }
+  const online = await connect();
+  const last = LS.get('nova.lastConv', null);
+  if (last && (online || isLocalConv(last))) openConv(last);
 })();

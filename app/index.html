@@ -84,6 +84,20 @@
           <input type="checkbox" id="setFree"><i></i></label>
       </div>
 
+      <h3>KI-Modus</h3>
+      <div class="seg" id="modeSeg">
+        <button type="button" data-mode="auto"><b>Automatisch</b><small>Laptop, sonst Handy</small></button>
+        <button type="button" data-mode="laptop"><b>Laptop</b><small>stark, alle Werkzeuge</small></button>
+        <button type="button" data-mode="phone"><b>Nur Handy</b><small>ohne Laptop</small></button>
+      </div>
+
+      <h3>Laptop-Modell</h3>
+      <div class="group" id="laptopModels"><p class="muted">Nicht verbunden.</p></div>
+
+      <h3>Handy-Modell</h3>
+      <div class="group" id="phoneModels"><p class="muted">Lädt …</p></div>
+      <p class="muted small">Das Handy-Modell wird einmal heruntergeladen (WLAN!) und läuft danach direkt auf deinem Handy – auch ohne Laptop. Werkzeuge im Handy-Modus: Wetter, Wikipedia, Rechnen, Merken.</p>
+
       <h3>Gedächtnis</h3>
       <div class="group" id="memoryList"><p class="muted">Lädt …</p></div>
 
@@ -143,6 +157,7 @@
         <li>Den QR-Code mit der <b>Handy-Kamera</b> scannen.</li>
         <li>Danach im Chrome-Menü <b>„Zum Startbildschirm hinzufügen“</b> → fertig ist die App.</li>
       </ol>
+      <button type="button" class="btn" id="btnPhoneOnly" style="margin-top:18px">Ohne Laptop nutzen (Handy-KI)</button>
     </div>
   </section>
 
@@ -183,6 +198,7 @@
     <symbol id="i-retry" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4"/></symbol>
   </svg>
 
+  <script src="local.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

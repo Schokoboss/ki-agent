@@ -163,6 +163,7 @@ class Llama:
         self.state = "aus"
         self.restarts = 0
         self._stopping = False
+        self.switching = False
 
     @property
     def url(self):
@@ -189,19 +190,21 @@ class Llama:
             log("KI-Modell läuft bereits.")
             return
         exe = self._exe()
-        model, mmproj = MODELS / CFG["model"], MODELS / CFG["mmproj"]
-        if not exe or not model.exists():
-            self.state = "fehlt"
-            log(f"FEHLER: llama-server.exe oder Modell fehlt ({exe}, {model}).")
-            return
-        args = [str(exe), "-m", str(model), "--host", "127.0.0.1", "--port", str(CFG["llama_port"]),
-                "-c", str(CFG["ctx_size"]), "-np", "1", "--jinja", "-t", str(CFG["threads"]),
-                "-ngl", str(CFG["gpu_layers"]), "--cache-ram", str(CFG["cache_ram_mb"]), "--no-webui"]
-        if mmproj.exists():
-            args += ["--mmproj", str(mmproj)]
         while not self._stopping:
+            info = current_model()
+            model, mmproj = MODELS / info["file"], MODELS / (info.get("mmproj") or "-")
+            if not exe or not model.exists():
+                self.state = "fehlt"
+                log(f"FEHLER: llama-server.exe oder Modell fehlt ({exe}, {model}).")
+                return
+            args = [str(exe), "-m", str(model), "--host", "127.0.0.1", "--port", str(CFG["llama_port"]),
+                    "-c", str(CFG["ctx_size"]), "-np", "1", "--jinja", "-t", str(CFG["threads"]),
+                    "-ngl", str(CFG["gpu_layers"]), "--cache-ram", str(CFG["cache_ram_mb"]), "--no-webui"]
+            if mmproj.is_file():
+                args += ["--mmproj", str(mmproj)]
             self.state = "lädt"
-            log("KI-Modell wird geladen …")
+            self.switching = False
+            log(f"KI-Modell {info['label']} wird geladen …")
             logf = open(LOGS / "llama.log", "ab")
             self.proc = subprocess.Popen(args, stdout=logf, stderr=subprocess.STDOUT, cwd=exe.parent,
                                          creationflags=CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
@@ -210,12 +213,14 @@ class Llama:
                 time.sleep(1)
             if self.proc.poll() is None:
                 self.state = "bereit"
-                log(f"KI-Modell bereit ({time.time() - t0:.0f} s).")
+                log(f"KI-Modell {info['label']} bereit ({time.time() - t0:.0f} s).")
                 threading.Thread(target=warm_up, daemon=True, name="warmup").start()
                 self.proc.wait()
             logf.close()
             if self._stopping:
                 break
+            if self.switching:
+                continue  # gewollter Neustart mit anderem Modell
             self.state = "abgestürzt"
             self.restarts += 1
             log(f"KI-Modell beendet (Code {self.proc.returncode}). Siehe data/logs/llama.log")
@@ -237,10 +242,50 @@ class Llama:
                 raise LlamaError("Das KI-Modell ist nicht rechtzeitig fertig geworden.")
             time.sleep(1)
 
+    def switch(self, model_id: str) -> None:
+        """Anderes Modell laden: llama-server beenden, die Schleife in _run startet ihn neu."""
+        CFG["model_id"] = model_id
+        save_config(CFG)
+        self.switching = True
+        self.restarts = 0
+        self.state = "lädt"
+        if self.proc and self.proc.poll() is None:
+            self.proc.terminate()
+
     def stop(self) -> None:
         self._stopping = True
         if self.proc and self.proc.poll() is None:
             self.proc.terminate()
+
+
+# Modelle für den Laptop. Sampling nach Empfehlung der Hersteller.
+MODEL_CATALOG = {
+    "qwen35-4b": {"label": "Qwen3.5 4B", "desc": "Standard – schlau, versteht Bilder",
+                  "file": "Qwen3.5-4B-Q4_K_M.gguf", "mmproj": "mmproj-F16.gguf", "family": "qwen",
+                  "min_bytes": 2_700_000_000},
+    "qwen35-2b": {"label": "Qwen3.5 2B", "desc": "Schnell – für einfache Sachen",
+                  "file": "Qwen3.5-2B-UD-Q4_K_XL.gguf", "mmproj": "mmproj-Qwen3.5-2B-F16.gguf", "family": "qwen",
+                  "min_bytes": 1_300_000_000},
+    "gemma4-e4b": {"label": "Gemma 4 E4B", "desc": "Google – gut in Sprache, versteht Bilder, etwas langsamer",
+                   "file": "gemma-4-E4B_q4_0-it.gguf", "mmproj": "gemma-4-E4B-it-mmproj.gguf", "family": "gemma",
+                   "min_bytes": 5_100_000_000},
+}
+SAMPLING = {"qwen": {"temperature": 0.7, "top_p": 0.8, "top_k": 20},
+            "gemma": {"temperature": 1.0, "top_p": 0.95, "top_k": 64}}
+
+
+def current_model() -> dict:
+    mid = CFG.get("model_id") or "qwen35-4b"
+    return {"id": mid, **MODEL_CATALOG.get(mid, MODEL_CATALOG["qwen35-4b"])}
+
+
+def models_list() -> list[dict]:
+    active = current_model()["id"]
+    def installed(v):
+        p = MODELS / v["file"]
+        return p.is_file() and p.stat().st_size >= v["min_bytes"]
+    return [{"id": k, "label": v["label"], "desc": v["desc"], "active": k == active, "installed": installed(v)}
+            for k, v in MODEL_CATALOG.items()]
 
 
 LLAMA = Llama()
@@ -622,9 +667,8 @@ def llm_stream(messages: list[dict], run: Run):
         "tools": tools.TOOL_SPECS,
         "stream": True,
         "max_tokens": 6144 if thinking else 3072,
-        "temperature": 0.6 if thinking else 0.7,
-        "top_p": 0.95 if thinking else 0.8,
-        "top_k": 20,
+        **(SAMPLING[current_model()["family"]] if not thinking or current_model()["family"] != "qwen"
+           else {"temperature": 0.6, "top_p": 0.95, "top_k": 20}),
         "min_p": 0,
         "chat_template_kwargs": {"enable_thinking": thinking},
         "parallel_tool_calls": True,
@@ -1021,9 +1065,11 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/status":
                 return self._json(200, {"ok": True, "agent": CFG["agent_name"], "user": CFG["user_name"],
-                                        "model": CFG["model"].removesuffix(".gguf"), "llama": LLAMA.state,
+                                        "model": current_model()["label"], "model_id": current_model()["id"],
+                                        "llama": LLAMA.state,
                                         "version": VERSION, "workspace": str(WORKSPACE),
-                                        "vision": (MODELS / CFG["mmproj"]).exists(), "active": active_runs(),
+                                        "vision": (MODELS / (current_model().get("mmproj") or "-")).is_file(),
+                                        "active": active_runs(),
                                         "now": time.time()})
             if path == "/api/conversations":
                 return self._json(200, {"conversations": Store.list()})
@@ -1054,6 +1100,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._file(UPLOADS / m.group(1), cache="private, max-age=86400")
             if path == "/api/memory":
                 return self._json(200, {"memory": tools.load_memory(CTX)})
+            if path == "/api/models":
+                return self._json(200, {"models": models_list(), "llama": LLAMA.state})
             return self._json(404, {"error": "unbekannt"})
         except Exception as e:
             log("HTTP-Fehler:\n" + traceback.format_exc(), console=False)
@@ -1100,6 +1148,17 @@ class Handler(BaseHTTPRequestHandler):
                 if run:
                     run.cancel.set()
                 return self._json(200, {"ok": True})
+            if path == "/api/model":
+                mid = body.get("id") or ""
+                entry = next((m for m in models_list() if m["id"] == mid), None)
+                if not entry or not entry["installed"]:
+                    return self._json(400, {"error": "Dieses Modell ist nicht installiert."})
+                if active_runs():
+                    return self._json(409, {"error": "Gerade läuft noch eine Aufgabe – erst danach wechseln."})
+                if not entry["active"]:
+                    log(f"Wechsle Modell zu {MODEL_CATALOG[mid]['label']} …")
+                    LLAMA.switch(mid)
+                return self._json(200, {"models": models_list(), "llama": LLAMA.state})
             return self._json(404, {"error": "unbekannt"})
         except Exception as e:
             log("HTTP-Fehler:\n" + traceback.format_exc(), console=False)

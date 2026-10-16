@@ -33,6 +33,31 @@ Unten links über dem Eingabefeld ist der Knopf **„Normal“**. Tipp drauf und
   nächsten Öffnen. Der Laptop schläft währenddessen **nicht** ein – trotzdem: **Ladekabel dran und Deckel offen**.
 - Mit dem ■-Knopf brichst du ab.
 
+## Handy-Modus (ohne Laptop)
+
+Nova kann auch **direkt auf dem Handy** laufen – ganz ohne Laptop, sogar ohne Internet (nur Wetter/Wikipedia brauchen Netz).
+
+- In der App auf den Namen oben tippen → **Einstellungen → KI-Modus**:
+  - **Automatisch**: Laptop, wenn er an ist – sonst die Handy-KI.
+  - **Laptop**: immer der Laptop (stärker, alle Werkzeuge, Arbeitszeit-Aufträge).
+  - **Nur Handy**: immer die Handy-KI.
+- **Handy-Modell** einmal im WLAN laden: *Qwen3.5 2B* (Standard, ca. 1,3 GB), *0.8B* (Mini, schnell)
+  oder *4B* (groß, kann fürs Handy zu viel sein).
+- Werkzeuge im Handy-Modus: Wetter, Wikipedia, Rechnen, Merken. Fotos, Python, Dateien und
+  Arbeitszeit-Aufträge gehen nur mit dem Laptop.
+- Ohne Kopplung nutzbar: Auf dem Koppel-Bildschirm „Ohne Laptop nutzen“ tippen.
+- Chats der Handy-KI bleiben auf dem Handy (in der Chatliste mit „Handy“ markiert).
+
+## Laptop-Modelle
+
+Einstellungen → **Laptop-Modell** – umschalten dauert ein paar Sekunden:
+
+| Modell | Wofür |
+|---|---|
+| Qwen3.5 4B | Standard – schlau, versteht Bilder |
+| Qwen3.5 2B | Schnell – für einfache Sachen |
+| Gemma 4 E4B | Google – gut in Sprache, versteht Bilder, etwas langsamer (braucht ~7 GB RAM) |
+
 ## Was er kann (Werkzeuge)
 
 | Werkzeug | Fragt vorher? |
