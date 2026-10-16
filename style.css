@@ -221,6 +221,22 @@ textarea::placeholder { color: var(--muted); }
 .wc-notes summary { cursor: pointer; color: var(--muted); }
 .wc-notes pre { margin: 6px 0 0; white-space: pre-wrap; font: 12.5px/1.45 ui-monospace, Consolas, monospace; background: var(--code-bg); padding: 8px 10px; border-radius: 10px; max-height: 220px; overflow-y: auto; }
 .work-card.finished { border-color: var(--border); background: var(--surface); }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.seg button { display: flex; flex-direction: column; gap: 1px; padding: 10px 8px; border-radius: 14px; background: var(--surface-2); border: 1.5px solid transparent; text-align: center; }
+.seg button b { font-size: 14.5px; }
+.seg button small { color: var(--muted); font-size: 11.5px; line-height: 1.25; }
+.seg button.sel { border-color: var(--accent); background: var(--accent-soft); }
+.model-row { display: flex; align-items: center; gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--border); }
+.model-row:last-child { border-bottom: 0; }
+.model-row .pick { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--surface-3); flex: none; display: grid; place-items: center; }
+.model-row.sel .pick { border-color: var(--accent); }
+.model-row.sel .pick::after { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+.model-row .mi { flex: 1; min-width: 0; display: flex; flex-direction: column; text-align: left; }
+.model-row .mi small { color: var(--muted); font-size: 12.5px; }
+.model-row .act { font-size: 13px; padding: 7px 11px; }
+.model-row.off { opacity: .55; }
+.conv .phone { font-size: 11px; font-weight: 700; color: var(--accent-2); background: color-mix(in srgb, var(--accent-2) 14%, transparent); padding: 2px 7px; border-radius: 99px; margin-left: 6px; }
+.status[data-s="phone"] i { background: var(--accent-2); }
 .conv .live { font-size: 11px; font-weight: 700; color: var(--accent); background: var(--accent-soft); padding: 2px 7px; border-radius: 99px; margin-left: 6px; }
 .att { position: relative; flex: none; }
 .att img { width: 64px; height: 64px; object-fit: cover; border-radius: 12px; border: 1px solid var(--border); display: block; }
