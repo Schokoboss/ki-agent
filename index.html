@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#0e0f13" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f5f6fa" media="(prefers-color-scheme: light)">
+  <meta name="description" content="Dein persönlicher KI-Agent – läuft lokal auf deinem Laptop.">
+  <title>Nova</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header class="top">
+      <button class="icon-btn" id="btnMenu" aria-label="Chats öffnen"><svg><use href="#i-menu"/></svg></button>
+      <button class="title" id="btnTitle" aria-label="Einstellungen">
+        <span class="logo-dot"></span>
+        <span class="title-text">
+          <span class="name" id="agentName">Nova</span>
+          <span class="status" id="status" data-s="connecting"><i></i><b>verbinde …</b></span>
+        </span>
+      </button>
+      <button class="icon-btn" id="btnNew" aria-label="Neuer Chat"><svg><use href="#i-plus"/></svg></button>
+    </header>
+
+    <main id="scroller">
+      <section id="empty" class="empty">
+        <div class="hero-logo"><svg><use href="#i-spark"/></svg></div>
+        <h1 id="hello">Hey! Was soll ich für dich tun?</h1>
+        <p class="sub">Ich laufe komplett auf deinem Laptop – mit Websuche, Python, Dateien, Wetter und Gedächtnis.</p>
+        <div class="chips" id="suggestions">
+          <button data-q="Wie wird das Wetter morgen in Landshut?"><svg><use href="#i-cloud"/></svg>Wetter morgen</button>
+          <button data-q="Such die neuesten Minecraft-News und fass sie kurz zusammen."><svg><use href="#i-search"/></svg>Minecraft-News</button>
+          <button data-q="Wie voll ist der Akku am Laptop und wie viel RAM ist frei?"><svg><use href="#i-laptop"/></svg>Laptop-Status</button>
+          <button data-q="Schreib und starte ein Python-Skript, das die ersten 20 Primzahlen ausgibt."><svg><use href="#i-code"/></svg>Python testen</button>
+          <button data-photo="1"><svg><use href="#i-image"/></svg>Foto erklären</button>
+        </div>
+      </section>
+      <div id="messages" aria-live="polite"></div>
+    </main>
+
+    <footer class="composer">
+      <div class="composer-top">
+        <button type="button" class="mode-chip" id="btnWork" aria-label="Arbeitszeit wählen"><svg><use href="#i-clock"/></svg><span id="workLabel">Normal</span></button>
+        <div id="attachments" class="attachments"></div>
+      </div>
+      <div class="bar">
+        <button class="icon-btn" id="btnAttach" aria-label="Foto anhängen"><svg><use href="#i-image"/></svg></button>
+        <textarea id="input" rows="1" placeholder="Frag mich irgendwas …" enterkeyhint="send" autocomplete="off"></textarea>
+        <button class="icon-btn" id="btnMic" aria-label="Spracheingabe" hidden><svg><use href="#i-mic"/></svg></button>
+        <button class="send" id="btnSend" aria-label="Senden"><svg><use href="#i-up"/></svg></button>
+      </div>
+      <input type="file" id="file" accept="image/*" multiple hidden>
+    </footer>
+  </div>
+
+  <div id="scrim" class="scrim"></div>
+  <aside id="drawer" class="drawer" aria-label="Chats">
+    <div class="drawer-head">
+      <span>Chats</span>
+      <button class="icon-btn" id="btnDrawerClose" aria-label="Schließen"><svg><use href="#i-x"/></svg></button>
+    </div>
+    <button class="new-chat" id="btnNew2"><svg><use href="#i-plus"/></svg>Neuer Chat</button>
+    <div id="convList" class="conv-list"></div>
+    <button class="drawer-foot" id="btnSettings"><svg><use href="#i-sliders"/></svg>Einstellungen</button>
+  </aside>
+
+  <dialog id="settings" class="sheet">
+    <form method="dialog" class="sheet-inner">
+      <div class="sheet-head">
+        <h2>Einstellungen</h2>
+        <button class="icon-btn" value="close" aria-label="Schließen"><svg><use href="#i-x"/></svg></button>
+      </div>
+
+      <div class="group">
+        <label class="switch"><span><b>Denkmodus</b><small>Gründlicher bei kniffligen Aufgaben, aber langsamer.</small></span>
+          <input type="checkbox" id="setThinking"><i></i></label>
+        <label class="switch"><span><b>Antworten vorlesen</b><small>Liest jede fertige Antwort laut vor.</small></span>
+          <input type="checkbox" id="setSpeak"><i></i></label>
+        <label class="switch danger"><span><b>Freie Hand</b><small>Code, Befehle und Dateien ohne Nachfrage. Nur einschalten, wenn du weißt, was du tust.</small></span>
+          <input type="checkbox" id="setFree"><i></i></label>
+      </div>
+
+      <h3>Gedächtnis</h3>
+      <div class="group" id="memoryList"><p class="muted">Lädt …</p></div>
+
+      <h3>Verbindung</h3>
+      <div class="group info">
+        <div class="row"><span>Status</span><b id="infoStatus">–</b></div>
+        <div class="row"><span>Modell</span><b id="infoModel">–</b></div>
+        <div class="row"><span>Laptop-Adresse</span><b id="infoUrl" class="mono">–</b></div>
+        <div class="btn-row">
+          <button type="button" class="btn" id="btnReconnect">Neu verbinden</button>
+          <button type="button" class="btn" id="btnInstall" hidden>App installieren</button>
+          <button type="button" class="btn ghost-danger" id="btnUnpair">Entkoppeln</button>
+        </div>
+      </div>
+      <p class="muted small">Alles rechnet lokal auf deinem Laptop. Nur die Spracheingabe nutzt die Google-Spracherkennung deines Handys.</p>
+    </form>
+  </dialog>
+
+  <dialog id="work" class="sheet">
+    <form method="dialog" class="sheet-inner">
+      <div class="sheet-head">
+        <h2>Arbeitszeit</h2>
+        <button class="icon-btn" value="close" aria-label="Schließen"><svg><use href="#i-x"/></svg></button>
+      </div>
+      <p class="muted">Wie lange darf der Agent selbstständig an deinem nächsten Auftrag arbeiten? Er hört früher auf, wenn er fertig ist.</p>
+      <div class="work-grid" id="workGrid">
+        <button type="button" data-m="0"><b>Normal</b><small>schnelle Antwort</small></button>
+        <button type="button" data-m="15"><b>15 min</b><small>kleiner Auftrag</small></button>
+        <button type="button" data-m="30"><b>30 min</b><small>Recherche</small></button>
+        <button type="button" data-m="60"><b>1 h</b><small>Projekt</small></button>
+        <button type="button" data-m="120"><b>2 h</b><small>großes Projekt</small></button>
+        <button type="button" data-m="180"><b>3 h</b><small>sehr groß</small></button>
+        <button type="button" data-m="300"><b>5 h</b><small>über Nacht</small></button>
+        <button type="button" data-m="480"><b>8 h</b><small>ganze Nacht</small></button>
+      </div>
+      <div class="custom-time">
+        <span>Eigene Zeit</span>
+        <input type="number" id="workH" min="0" max="24" inputmode="numeric" aria-label="Stunden" value="0"><span>h</span>
+        <input type="number" id="workM" min="0" max="59" step="5" inputmode="numeric" aria-label="Minuten" value="45"><span>min</span>
+        <button type="button" class="btn" id="workCustom">OK</button>
+      </div>
+      <div class="group">
+        <label class="switch danger"><span><b>Ohne Nachfragen arbeiten</b><small>Code, Befehle und Dateien ohne Freigabe. Sonst wartet der Agent bei jeder solchen Aktion bis zu 10 min auf dich.</small></span>
+          <input type="checkbox" id="workFree"><i></i></label>
+      </div>
+      <p class="muted small">Tipp: Laptop ans Ladekabel und Deckel offen lassen – er schläft währenddessen nicht ein. Du kannst die App schließen, der Agent arbeitet am Laptop weiter.</p>
+    </form>
+  </dialog>
+
+  <section id="pair" class="pair" hidden>
+    <div class="pair-card">
+      <div class="hero-logo"><svg><use href="#i-spark"/></svg></div>
+      <h1>Mit dem Laptop koppeln</h1>
+      <ol>
+        <li>Am Laptop <b>„KI-Agent starten“</b> doppelklicken.</li>
+        <li>Es öffnet sich eine Seite mit einem <b>QR-Code</b>.</li>
+        <li>Den QR-Code mit der <b>Handy-Kamera</b> scannen.</li>
+        <li>Danach im Chrome-Menü <b>„Zum Startbildschirm hinzufügen“</b> → fertig ist die App.</li>
+      </ol>
+    </div>
+  </section>
+
+  <div id="toast" class="toast" role="status"></div>
+
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="g-brand" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7c6cff"/><stop offset="1" stop-color="#22c3ee"/></linearGradient>
+    </defs>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m21 16-5-5-9 9"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+    <symbol id="i-speaker" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 9a4 4 0 0 1 0 6M19 6.5a7.5 7.5 0 0 1 0 11"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 2.8 19.5h18.4z"/><path d="M12 10v4M12 16.8v.2"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 2.5l2.1 6.4 6.4 2.1-6.4 2.1L12 19.5l-2.1-6.4L3.5 11l6.4-2.1z" fill="url(#g-brand)" stroke="none"/><path d="M19 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z" fill="url(#g-brand)" stroke="none"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.6 3.5 5.6 3.5 8.5s-1 5.9-3.5 8.5M12 3.5C9.5 6.1 8.5 9.1 8.5 12s1 5.9 3.5 8.5"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3"/></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18.5a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 9.3a4.6 4.6 0 0 1-.5 9.2z"/></symbol>
+    <symbol id="i-calc" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2.5"/><path d="M8.5 7.5h7M8.5 12h1M14.5 12h1M8.5 16h1M14.5 16h1"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="m7 9 3 3-3 3M13 15h4"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2h7.5A2.5 2.5 0 0 1 21 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16.5z"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7.5A2.5 2.5 0 0 0 5 5.5v13A2.5 2.5 0 0 0 7.5 21h9a2.5 2.5 0 0 0 2.5-2.5V8z"/><path d="M14 3v5h5"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></symbol>
+    <symbol id="i-laptop" viewBox="0 0 24 24"><rect x="4.5" y="5" width="15" height="10.5" rx="1.5"/><path d="M2.5 19h19"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/></symbol>
+    <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.5A6 6 0 0 0 12 3z"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="i-retry" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4"/></symbol>
+  </svg>
+
+  <script src="app.js"></script>
+</body>
+</html>
