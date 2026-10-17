@@ -26,6 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import minecraft
+import remote
 import tools
 import video
 import webpush
@@ -945,6 +946,8 @@ So arbeitest du:
   • Erinnern / Timer / Wecker → set_reminder (kommt als Benachrichtigung aufs Handy)
   • Was ist auf dem Laptop-Bildschirm → laptop_screenshot
   • Musik, Lautstärke → media_control; Laptop sperren → lock_laptop
+  • Programme am Laptop bedienen (klicken, tippen, Tasten) → laptop_control; danach siehst du ein neues Bildschirmfoto.
+    Erst laptop_screenshot, dann Schritt für Schritt bedienen. Koordinaten x/y von 0 bis 1000.
   • Datei aufs Handy schicken → send_to_phone; Datei aus dem Netz laden → download_file
   • Etwas auf dem Handy tun (anrufen, SMS, WhatsApp, Navi/Maps, Kalendereintrag, Musik/YouTube, teilen) → phone_action
     („in den Kalender eintragen“/Termin = phone_action mit type calendar, NICHT set_reminder.
@@ -1261,8 +1264,10 @@ def execute_call(run: Run, call: dict) -> tuple[bool, str]:
         run.emit(t="result", id=cid, ok=True, preview="Notizen gespeichert.")
         return True, "Notizen gespeichert."
     if name in SERVER_TOOLS:
-        if name == "send_to_phone":
-            reason = tools.approval_reason("read_file", args, CTX)
+        if name in ("send_to_phone", "laptop_control"):
+            reason = (tools.approval_reason("read_file", args, CTX) if name == "send_to_phone" else
+                      f"Maus/Tastatur am Laptop steuern: {args.get('action')} "
+                      f"{args.get('text') or args.get('key') or (str(args.get('x')) + ',' + str(args.get('y')))}")
             if reason and not run.free_hand and not request_approval(run, cid, name, args, reason):
                 run.emit(t="result", id=cid, ok=False, denied=True, preview="Abgelehnt.")
                 return False, "Der Nutzer hat das NICHT erlaubt."
@@ -1531,8 +1536,38 @@ def tool_publish_web(run: Run, args: dict) -> str:
             "Der Link gilt bis zum nächsten Neustart des Agenten (dann ändert sich die Tunnel-Adresse).")
 
 
+def tool_laptop_control(run: Run, args: dict) -> str:
+    """Nova bedient Maus und Tastatur selbst. Koordinaten 0..1000 relativ zum Bildschirm (wie Qwen-VL)."""
+    action = str(args.get("action") or "").lower()
+    x = float(args.get("x", 500)) / 1000
+    y = float(args.get("y", 500)) / 1000
+    try:
+        if action in ("click", "left_click"):
+            msg = remote.click(x, y)
+        elif action == "double_click":
+            msg = remote.click(x, y, double=True)
+        elif action == "right_click":
+            msg = remote.click(x, y, button="right")
+        elif action == "move":
+            remote.move(x, y)
+            msg = "Maus bewegt"
+        elif action == "scroll":
+            msg = remote.scroll(int(args.get("amount") or -3), x, y)
+        elif action == "type":
+            msg = remote.type_text(str(args.get("text") or ""))
+        elif action == "key":
+            msg = remote.press(str(args.get("key") or ""))
+        else:
+            raise ValueError("action: click, double_click, right_click, move, scroll, type oder key")
+    except remote.RemoteError as e:
+        raise ValueError(str(e))
+    time.sleep(0.9)  # Fenster reagieren lassen, dann Ergebnis ansehen
+    shot = tool_laptop_screenshot(run, {})
+    return f"{msg}. {shot}"
+
+
 OFFERED: set[str] = set()  # Dateien außerhalb des Arbeitsordners, die der Nutzer ans Handy freigegeben hat
-SERVER_TOOLS = {"publish_web": tool_publish_web, "create_image": tool_create_image, "minecraft_shader": tool_minecraft_shader,
+SERVER_TOOLS = {"laptop_control": tool_laptop_control, "publish_web": tool_publish_web, "create_image": tool_create_image, "minecraft_shader": tool_minecraft_shader,
                 "make_video": tool_make_video, "record_screen": tool_record_screen, "edit_video": tool_edit_video, "phone_action": tool_phone_action, "routine": lambda run, args: ROUTINES.tool(run, args),
                 "set_reminder": tool_set_reminder, "reminders": tool_list_reminders,
                 "send_to_phone": tool_send_to_phone, "laptop_screenshot": tool_laptop_screenshot}
@@ -1779,6 +1814,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, {"memory": tools.load_memory(CTX)})
             if path == "/api/models":
                 return self._json(200, {"models": models_list(), "llama": LLAMA.state})
+            if path == "/api/remote/frame":
+                q = urllib.parse.parse_qs(url.query)
+                data, sw, sh = remote.frame(int(q.get("w", ["960"])[0]), int(q.get("q", ["55"])[0]))
+                REMOTE_SEEN[0] = time.time()
+                self.send_response(200)
+                self._cors()
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Screen", f"{sw}x{sh}")
+                self.send_header("Access-Control-Expose-Headers", "X-Screen")
+                self.end_headers()
+                self.wfile.write(data)
+                return
             if path == "/api/push/key":
                 return self._json(200, {"key": PUSH.vapid.public, "devices": len(PUSH.subs())})
             if path == "/api/routines":
@@ -1847,6 +1896,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, {"ok": ROUTINES.fire(m.group(1))})
             if path == "/api/conversations/import":
                 return self._json(*import_phone_chat(body.get("conv") or {}))
+            if path == "/api/remote/input":
+                return self._json(*remote_input(body))
             if path == "/api/push/subscribe":
                 n = PUSH.add(body.get("subscription") or {}, body.get("device") or "")
                 return self._json(200, {"ok": True, "devices": n})
@@ -1937,6 +1988,36 @@ def import_phone_chat(conv: dict) -> tuple[int, dict]:
     return 200, {"ok": True, "messages": len(msgs)}
 
 
+REMOTE_SEEN = [0.0]
+_remote_logged = [0.0]
+
+
+def remote_input(body: dict) -> tuple[int, dict]:
+    if time.time() - _remote_logged[0] > 600:
+        log("Fernsteuerung vom Handy aktiv.")
+        _remote_logged[0] = time.time()
+    kind = str(body.get("type") or "")
+    x, y = body.get("x"), body.get("y")
+    try:
+        if kind in ("click", "right", "double"):
+            msg = remote.click(float(x), float(y), "right" if kind == "right" else "left", kind == "double")
+        elif kind == "move":
+            remote.move(float(x), float(y))
+            msg = "bewegt"
+        elif kind == "scroll":
+            msg = remote.scroll(int(body.get("amount") or -3), float(x) if x is not None else None,
+                                float(y) if y is not None else None)
+        elif kind == "text":
+            msg = remote.type_text(str(body.get("text") or ""))
+        elif kind == "key":
+            msg = remote.press(str(body.get("key") or ""))
+        else:
+            return 400, {"error": "unbekannte Eingabe"}
+    except (remote.RemoteError, ValueError, TypeError) as e:
+        return 400, {"error": str(e)}
+    return 200, {"ok": True, "msg": msg}
+
+
 def local_info() -> dict:
     owner = (urllib.parse.urlparse(CFG["app_url"]).hostname or "").split(".")[0]
     frag = {"t": CFG["token"], "g": CFG.get("gist_id", ""), "o": owner}
@@ -1964,6 +2045,7 @@ def main() -> None:
         d.mkdir(parents=True, exist_ok=True)
     CFG = load_config()
     CTX = tools.ToolContext(WORKSPACE, DATA / "memory.json", sys.executable)
+    remote.make_dpi_aware()
     PUSH.setup()
     global VIDEO
     VIDEO = video.Video(ENGINE, WORKSPACE, LOGS)

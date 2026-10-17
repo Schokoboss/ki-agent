@@ -50,6 +50,8 @@ Nova kann auch **direkt auf dem Handy** laufen – ganz ohne Laptop, sogar ohne 
 
 ## Was Nova noch kann
 
+- **Laptop fernsteuern:** Chatliste → „Laptop fernsteuern“ – Bildschirm live, Tippen = Klick, lange drücken =
+  Rechtsklick, Tasten-Leiste, Text tippen, Zoom. Und Nova kann den Laptop selbst bedienen (fragt vorher).
 - **Minecraft-Shader bauen:** „Bau mir einen warmen Shader mit hohen Wellen“ – Nova stellt deine geprüften
   Packs AuroraCraft/BedRush ein (Stile: warm, kalt, bunt, düster, hell, realistisch, traumhaft; Profile;
   einzelne Optionen), packt sie und installiert sie als `Nova-….zip` in `.minecraft\shaderpacks`.
