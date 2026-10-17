@@ -1727,8 +1727,18 @@ def tool_publish_web(run: Run, args: dict) -> str:
         raise ValueError(f"Nicht gefunden: {src}")
     if not tools._inside_workspace(src, CTX):
         raise ValueError("Nur Dateien aus dem Arbeitsordner können veröffentlicht werden.")
-    pid = secrets.token_urlsafe(9).replace("-", "x").replace("_", "y")
+    # Dieselbe Datei/derselbe Ordner behält seine ID → nach Verbesserungen bleibt der Link gleich
+    index_path = DATA / "published" / "index.json"
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        index = {}
+    key = str(src.resolve()).lower()
+    pid = index.get(key) or secrets.token_urlsafe(9).replace("-", "x").replace("_", "y")
     dest = DATA / "published" / pid
+    again = dest.exists()
+    if again:
+        shutil.rmtree(dest)
     if src.is_dir():
         shutil.copytree(src, dest)
         entry = "index.html" if (dest / "index.html").is_file() else next((f.name for f in dest.glob("*.htm*")), "")
@@ -1736,13 +1746,23 @@ def tool_publish_web(run: Run, args: dict) -> str:
         dest.mkdir(parents=True)
         entry = "index.html" if src.suffix.lower() in (".html", ".htm") else src.name
         shutil.copy(src, dest / entry)
-    base = TUNNEL.url or f"http://localhost:{CFG['port']}"
-    url = f"{base}/p/{pid}/{entry}"
+    index[key] = pid
+    index_path.write_text(json.dumps(index, ensure_ascii=False, indent=1), encoding="utf-8")
+    url = page_link(pid, entry)
     action = {"type": "web", "url": url, "label": f"{str(args.get('title') or 'App')[:40]} öffnen"}
     run.tool_extra[run.current_call] = {"_action": action}
     run.emit(t="action", action=action)
-    return (f"Veröffentlicht: {url} – am Handy gibt es jetzt einen Knopf zum Öffnen. "
-            "Der Link gilt bis zum nächsten Neustart des Agenten (dann ändert sich die Tunnel-Adresse).")
+    return (f"{'Aktualisiert' if again else 'Veröffentlicht'}: {url} – am Handy gibt es jetzt einen Knopf zum Öffnen. "
+            "Der Link bleibt immer gleich (auch nach Neustarts und Verbesserungen) und funktioniert, solange der Laptop läuft.")
+
+
+def page_link(pid: str, entry: str) -> str:
+    """Fester Link über GitHub Pages (go.html holt die aktuelle Tunnel-Adresse aus dem Gist)."""
+    entry = urllib.parse.quote(entry)
+    if CFG.get("gist_id") and CFG.get("tunnel"):
+        owner = (urllib.parse.urlparse(CFG["app_url"]).hostname or "").split(".")[0]
+        return f"{CFG['app_url'].rstrip('/')}/go.html#{owner}/{CFG['gist_id']}/{pid}/{entry}"
+    return f"{TUNNEL.url or 'http://localhost:' + str(CFG['port'])}/p/{pid}/{entry}"
 
 
 def tool_laptop_control(run: Run, args: dict) -> str:
