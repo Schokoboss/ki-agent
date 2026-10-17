@@ -207,6 +207,7 @@ class Llama:
                     "-ngl", str(CFG["gpu_layers"]), "--cache-ram", str(CFG["cache_ram_mb"]), "--no-webui"]
             if mmproj.is_file():
                 args += ["--mmproj", str(mmproj)]
+            args += info.get("extra_args") or []
             self.state = "lädt"
             self.switching = False
             log(f"KI-Modell {info['label']} wird geladen …")
@@ -265,6 +266,10 @@ class Llama:
 
 # Modelle für den Laptop. Sampling nach Empfehlung der Hersteller.
 MODEL_CATALOG = {
+    "qwen35-4b-turbo": {"label": "Qwen3.5 4B Turbo", "desc": "Experimentell: schneller nur mit viel freiem RAM (Spiele zu) – ohne Bilderkennung",
+                        "file": "Qwen3.5-4B-MTP-Q4_K_M.gguf", "mmproj": None, "family": "qwen",
+                        "extra_args": ["--spec-type", "draft-mtp", "--spec-draft-n-max", "3"],
+                        "min_bytes": 2_800_000_000},
     "qwen35-4b": {"label": "Qwen3.5 4B", "desc": "Standard – schlau, versteht Bilder",
                   "file": "Qwen3.5-4B-Q4_K_M.gguf", "mmproj": "mmproj-F16.gguf", "family": "qwen",
                   "min_bytes": 2_700_000_000},
@@ -896,7 +901,8 @@ So arbeitest du:
 - WERKZEUG-PFLICHT – diese Dinge weißt du nie von selbst, du MUSST das Werkzeug aufrufen:
   • Akku, Ladezustand, CPU, RAM, Speicherplatz, Uhrzeit des Laptops → laptop_status
   • Wetter → weather
-  • News, Preise, Ergebnisse, Termine, alles Aktuelle oder nach 2025 → web_search, danach die beste Quelle mit open_webpage lesen und erst dann antworten
+  • Fakten, News, Preise, Ergebnisse, Termine, alles Aktuelle oder nach 2025 → research (liest mehrere Quellen; nenne sie als [1], [2])
+  • Bild malen / zeichnen / generieren → create_image (Prompt auf Englisch, ausführlich)
   • Rechnungen → calculate (Prozent: "17.5% * 240"), bei viel Daten run_python
   • Inhalte von Dateien oder Ordnern → list_files / read_file
   • Erinnern / Timer / Wecker → set_reminder (kommt als Benachrichtigung aufs Handy)
@@ -1330,8 +1336,46 @@ def tool_phone_action(run: Run, args: dict) -> str:
     return f"Aktionskarte „{action['label']}“ ist am Handy zu sehen – der Nutzer muss nur noch drauftippen."
 
 
+IMAGE_SIZES = {"square": (512, 512), "portrait": (448, 640), "landscape": (640, 448)}
+
+
+def tool_create_image(run: Run, args: dict) -> str:
+    """Malt ein Bild lokal mit stable-diffusion.cpp (SD-Turbo) auf der iGPU."""
+    prompt = str(args.get("prompt") or "").strip()
+    if not prompt:
+        raise ValueError("Bildbeschreibung fehlt.")
+    exe = next((p for name in ("sd-cli.exe", "sd.exe") for p in (ENGINE / "sd").rglob(name)), None)
+    model = MODELS / "sd_turbo-f16-q8_0.gguf"
+    if not exe or not model.is_file():
+        raise ValueError("Bildgenerator ist nicht installiert.")
+    w, h = IMAGE_SIZES.get(str(args.get("format") or "square").lower(), (512, 512))
+    folder = WORKSPACE / "Bilder"
+    folder.mkdir(parents=True, exist_ok=True)
+    out = folder / f"bild_{time.strftime('%Y%m%d_%H%M%S')}.png"
+    negative = "blurry, low quality, deformed, watermark, text, ugly, bad anatomy"
+    cmd = [str(exe), "-m", str(model), "-p", prompt[:900], "-n", negative, "--steps", "4", "--cfg-scale", "1.0",
+           "-W", str(w), "-H", str(h), "--sampling-method", "euler_a", "-s", str(int(args.get("seed") or -1)), "-o", str(out)]
+    t0 = time.time()
+    run.emit(t="status", d="Male das Bild …")
+    with open(LOGS / "sd.log", "ab") as logf:
+        p = subprocess.run(cmd, stdout=logf, stderr=subprocess.STDOUT, cwd=exe.parent, timeout=600,
+                           creationflags=CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
+    if p.returncode != 0 or not out.is_file():
+        raise ValueError(f"Bildgenerator ist fehlgeschlagen (Code {p.returncode}) – siehe data/logs/sd.log.")
+    from PIL import Image
+    img = Image.open(out).convert("RGB")
+    img_id = f"{uuid.uuid4().hex}.jpg"
+    UPLOADS.mkdir(parents=True, exist_ok=True)
+    img.save(UPLOADS / img_id, quality=90)
+    run.emit(t="image", id=img_id)
+    run.emit(t="file", path=str(out), name=out.name, size=out.stat().st_size)
+    run.tool_extra[run.current_call] = {"_image": img_id, "_imgfile": str(out)}
+    log(f"Bild gemalt in {time.time() - t0:.0f} s: {out.name}")
+    return f"Bild fertig ({w}×{h}, {time.time() - t0:.0f} s) und im Chat zu sehen. Gespeichert unter {out}."
+
+
 OFFERED: set[str] = set()  # Dateien außerhalb des Arbeitsordners, die der Nutzer ans Handy freigegeben hat
-SERVER_TOOLS = {"phone_action": tool_phone_action, "routine": lambda run, args: ROUTINES.tool(run, args),
+SERVER_TOOLS = {"create_image": tool_create_image, "phone_action": tool_phone_action, "routine": lambda run, args: ROUTINES.tool(run, args),
                 "set_reminder": tool_set_reminder, "reminders": tool_list_reminders,
                 "send_to_phone": tool_send_to_phone, "laptop_screenshot": tool_laptop_screenshot}
 
@@ -1610,6 +1654,12 @@ class Handler(BaseHTTPRequestHandler):
                 existing = RUNS.get(conv["id"])
                 if existing and not existing.done:
                     return self._json(409, {"error": "In diesem Chat läuft noch eine Aufgabe."})
+                if body.get("replace_last"):  # „Neu erzeugen“ / „Bearbeiten“: letzte Frage samt Antwort ersetzen
+                    idx = next((i for i in range(len(conv["messages"]) - 1, -1, -1)
+                                if conv["messages"][i]["role"] == "user" and not conv["messages"][i].get("_system")), None)
+                    if idx is not None:
+                        conv["messages"] = conv["messages"][:idx]
+                        conv.pop("_window", None)
                 run = start_run(conv, text, images, body.get("settings") or {})
                 return self._stream(run)
             if path == "/api/approve":

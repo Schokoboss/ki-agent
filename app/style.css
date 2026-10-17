@@ -261,6 +261,8 @@ textarea::placeholder { color: var(--muted); }
 .routine-row small { display: block; color: var(--muted); font-size: 12.5px; }
 .routine-row button { color: var(--muted); width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; }
 .routine-row button svg { width: 17px; height: 17px; }
+.conv-search { width: 100%; padding: 10px 12px; margin-bottom: 8px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); font: inherit; font-size: 14.5px; }
+.conv-search:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
 .conv .live { font-size: 11px; font-weight: 700; color: var(--accent); background: var(--accent-soft); padding: 2px 7px; border-radius: 99px; margin-left: 6px; }
 .att { position: relative; flex: none; }
 .att img { width: 64px; height: 64px; object-fit: cover; border-radius: 12px; border: 1px solid var(--border); display: block; }

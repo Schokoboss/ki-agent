@@ -48,12 +48,26 @@ Nova kann auch **direkt auf dem Handy** laufen – ganz ohne Laptop, sogar ohne 
 - Ohne Kopplung nutzbar: Auf dem Koppel-Bildschirm „Ohne Laptop nutzen“ tippen.
 - Chats der Handy-KI bleiben auf dem Handy (in der Chatliste mit „Handy“ markiert).
 
+## Was Nova noch kann
+
+- **Bilder malen:** „Mal mir einen Drachen über einer Burg“ – lokal mit SD-Turbo auf der iGPU,
+  das Bild landet im Chat und unter `workspace\Bilder`.
+- **Recherche mit Quellen:** Fakten-Fragen beantwortet Nova aus mehreren Webseiten und nennt sie als [1], [2] …
+  Seiten, die nur per JavaScript laden, liest er unsichtbar über dein installiertes Chrome.
+- **Handy-Aktionen:** „Ruf … an“, „Navi zum Bahnhof“, „WhatsApp an …“, „Termin morgen 15 Uhr“ →
+  Ein-Tipp-Karte im Chat.
+- **Routinen:** „Jeden Morgen um 7 das Wetter“ – läuft am Laptop, Ergebnis als Benachrichtigung.
+- **Erinnerungen, Dateien Handy ↔ Laptop, Bildschirmfoto, Musik/Lautstärke, Laptop sperren.**
+- **Gesprächsmodus** (Kopfhörer oben rechts): sprechen, Nova antwortet laut, hört wieder zu.
+- **Neu erzeugen / Bearbeiten** unter der letzten Antwort, **Chat-Suche** in der Chatliste.
+
 ## Laptop-Modelle
 
 Einstellungen → **Laptop-Modell** – umschalten dauert ein paar Sekunden:
 
 | Modell | Wofür |
 |---|---|
+| Qwen3.5 4B Turbo | Experimentell (MTP): nur mit viel freiem RAM schneller – ohne Bilderkennung |
 | Qwen3.5 4B | Standard – schlau, versteht Bilder |
 | Qwen3.5 2B | Schnell – für einfache Sachen |
 | Gemma 4 E4B | Google – gut in Sprache, versteht Bilder, etwas langsamer (braucht ~7 GB RAM) |

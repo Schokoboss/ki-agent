@@ -127,7 +127,7 @@ class _TextExtractor(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         if tag == "title":
-            self._in_title = True
+            self._in_title = not self.title  # nur der erste <title> (nicht die in SVG-Icons)
         elif tag in self.SKIP:
             self.skip += 1
         elif tag in ("main", "article"):
@@ -270,25 +270,130 @@ def _bing_target(href):
     return href
 
 
+BROWSERS = [
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    os.path.join(os.environ.get("LOCALAPPDATA", ""), r"Google\Chrome\Application\chrome.exe"),
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+]
+
+
+def _render_with_browser(url: str, timeout: int = 40) -> str | None:
+    """Lädt eine Seite unsichtbar im installierten Chrome/Edge (für Seiten, die erst per JavaScript Inhalt zeigen).
+    Eigenes Wegwerf-Profil – das normale Browser-Profil des Nutzers bleibt unberührt."""
+    exe = next((b for b in BROWSERS if b and os.path.isfile(b)), None)
+    if not exe:
+        return None
+    import tempfile
+    profile = tempfile.mkdtemp(prefix="nova-browser-")
+    try:
+        p = subprocess.run([exe, "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+                            "--disable-extensions", "--mute-audio", f"--user-data-dir={profile}",
+                            "--virtual-time-budget=9000", "--dump-dom", url],
+                           capture_output=True, timeout=timeout, creationflags=CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
+        return p.stdout.decode("utf-8", "replace") if p.stdout else None
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    finally:
+        shutil.rmtree(profile, ignore_errors=True)
+
+
+def _html_to_text(html_text: str) -> tuple[str, str]:
+    ex = _TextExtractor()
+    try:
+        ex.feed(html_text)
+    except Exception:
+        pass
+    return ex.title.strip(), ex.text()
+
+
+def _page_text(url: str, allow_browser: bool = True) -> tuple[str, str, str, str]:
+    """(Titel, Text, End-Adresse, Weg). Erst schnell per HTTP, bei Sperre oder leerer JS-Seite per Browser."""
+    title, text, final, how, err = "", "", url, "http", None
+    try:
+        raw, ctype, charset, final = _fetch(url)
+        if not any(t in ctype for t in ("html", "text", "json", "xml")):
+            return "", f"Die Adresse liefert keinen Text ({ctype or 'unbekannter Typ'}, {len(raw)} Bytes).", final, how
+        decoded = raw.decode(charset, "replace")
+        if "html" in ctype or "<html" in decoded[:2000].lower():
+            title, text = _html_to_text(decoded)
+        else:
+            text = decoded
+    except ToolError as e:
+        err = e
+    if allow_browser and len(text.strip()) < 600:
+        rendered = _render_with_browser(final or url)
+        if rendered:
+            t2, x2 = _html_to_text(rendered)
+            if len(x2.strip()) > len(text.strip()):
+                title, text, how = t2 or title, x2, "browser"
+    if err and not text.strip():
+        raise err
+    return title, text, final, how
+
+
 def open_webpage(args, ctx):
     url = (args.get("url") or "").strip()
     if not re.match(r"^https?://", url):
         url = "https://" + url
-    raw, ctype, charset, final_url = _fetch(url)
-    if "html" not in ctype and "text" not in ctype and "json" not in ctype and "xml" not in ctype:
-        return f"Die Adresse liefert keinen Text ({ctype or 'unbekannter Typ'}, {len(raw)} Bytes)."
-    text = raw.decode(charset, "replace")
-    title = ""
-    if "html" in ctype or "<html" in text[:2000].lower():
-        ex = _TextExtractor()
-        try:
-            ex.feed(text)
-        except Exception:
-            pass
-        title = ex.title.strip()
-        text = ex.text()
+    _check_public_host(url)
+    title, text, final_url, how = _page_text(url)
     head = f"Seite: {title}\n" if title else ""
-    return head + f"Adresse: {final_url}\n\n" + _clip(text, 9000)
+    note = " (per Browser geladen)" if how == "browser" else ""
+    return head + f"Adresse: {final_url}{note}\n\n" + _clip(text, 9000)
+
+
+_STOP = set("der die das und oder ein eine einer eines ist sind war wer was wie wo wann warum the a an of to in on for is are was who what how when why with von zu im in am an auf für mit bei aus".split())
+
+
+def _best_passages(text: str, query: str, n: int = 3, size: int = 700) -> list[str]:
+    terms = {w for w in re.findall(r"\w{3,}", query.lower()) if w not in _STOP}
+    paras = [p.strip() for p in re.split(r"\n\s*\n|\n(?=## )", text) if len(p.strip()) > 60]
+    scored = []
+    for i, p in enumerate(paras):
+        words = re.findall(r"\w+", p.lower())
+        hits = sum(1 for w in words if w in terms)
+        scored.append((hits / (1 + len(words) ** 0.5) + (0.2 if i < 3 else 0), i, p))
+    best = sorted(scored, reverse=True)[:n]
+    return [p[:size] for _, _, p in sorted(best, key=lambda s: s[1])]
+
+
+def research(args, ctx):
+    """Sucht, liest mehrere Quellen parallel und liefert die passendsten Absätze mit Quellennummern."""
+    query = (args.get("query") or "").strip()
+    if not query:
+        raise ToolError("Frage fehlt.")
+    hits = _search_duckduckgo(query) or _search_bing(query)
+    seen, picks = set(), []
+    for title, url, snippet in hits:
+        host = urllib.parse.urlparse(url).hostname or ""
+        if host in seen or not url.startswith("http") or any(b in host for b in ("youtube.com", "facebook.com", "instagram.com", "tiktok.com")):
+            continue
+        seen.add(host)
+        picks.append((title, url, snippet))
+        if len(picks) >= 4:
+            break
+    if not picks:
+        return "Keine Quellen gefunden."
+    from concurrent.futures import ThreadPoolExecutor
+
+    def read(item):
+        title, url, snippet = item
+        try:
+            t, text, final, _ = _page_text(url, allow_browser=False)
+            return title or t, final, _best_passages(text, query) or [snippet]
+        except ToolError:
+            return title, url, [snippet] if snippet else []
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        sources = list(pool.map(read, picks))
+    out = [f"Recherche: {query}\n"]
+    for i, (title, url, passages) in enumerate(sources, 1):
+        if passages:
+            out.append(f"[{i}] {title}\n{url}\n" + "\n…\n".join(passages))
+    out.append("\nAntworte nur mit dem, was in diesen Quellen steht, und nenne die Quellen als [1], [2] … "
+               "Widersprechen sich Quellen, sag das.")
+    return _clip("\n\n".join(out), 9000)
 
 
 def wikipedia(args, ctx):
@@ -665,7 +770,16 @@ def _s(desc):
 TOOL_SPECS = [
     _spec("web_search", "Search the internet. Use for current events, news, prices, facts you are unsure about.",
           {"query": _s("Search query")}, ["query"]),
-    _spec("open_webpage", "Load a web page and return its readable text.", {"url": _s("Full URL")}, ["url"]),
+    _spec("create_image", "Paint/draw/generate a picture locally. Write the prompt in ENGLISH as a detailed visual "
+          "description (subject, style, colors, light), e.g. 'a cute red dragon flying over a medieval castle, "
+          "digital art, vibrant colors, sunset light'.",
+          {"prompt": _s("Detailed English image description"), "format": _s("square, portrait or landscape")},
+          ["prompt"]),
+    _spec("research", "Research a factual question on the web: searches, reads several sources at once and returns "
+          "the relevant passages with source numbers. Best for facts, results, news, prices.",
+          {"query": _s("The question or search words")}, ["query"]),
+    _spec("open_webpage", "Load a web page and return its readable text (also works for JavaScript-heavy sites).",
+          {"url": _s("Full URL")}, ["url"]),
     _spec("wikipedia", "Look up a Wikipedia article.",
           {"query": _s("Topic"), "lang": _s("Language code, default 'de'")}, ["query"]),
     _spec("weather", "Current weather and 4-day forecast for a place.", {"location": _s("City or place")},
@@ -722,7 +836,7 @@ TOOL_SPECS = [
 ]
 
 TOOLS = {
-    "web_search": web_search, "open_webpage": open_webpage, "wikipedia": wikipedia, "weather": weather,
+    "web_search": web_search, "open_webpage": open_webpage, "research": research, "wikipedia": wikipedia, "weather": weather,
     "calculate": calculate, "run_python": run_python, "run_powershell": run_powershell,
     "list_files": list_files, "read_file": read_file, "write_file": write_file,
     "open_on_laptop": open_on_laptop, "laptop_status": laptop_status, "remember": remember, "forget": forget,
