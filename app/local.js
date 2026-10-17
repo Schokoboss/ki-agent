@@ -13,7 +13,7 @@ const NovaLocal = (() => {
     { id: 'Qwen3.5-4B', label: 'Qwen3.5 4B', desc: 'Sehr groß – meist zu viel fürs Handy', size: 'ca. 2,5 GB' },
   ];
   const CONTEXT = 2048;          // halber Kontext = deutlich weniger Grafikspeicher
-  const HISTORY_CHARS = 3800;    // so viel Verlauf passt neben System-Prompt und Antwort
+  const HISTORY_CHARS = 2600;    // ~900 Tokens Verlauf + ~550 System + 600 Antwort < 2048
   const BUSY_KEY = 'nova.localBusy';
   let webllm = null;
   let engine = null;
@@ -159,6 +159,12 @@ const NovaLocal = (() => {
       ctx.file = { name: fname, data: 'data:text/plain;charset=utf-8,' + encodeURIComponent(text), size: text.length };
       return `Datei "${fname}" (${text.length} Zeichen) liegt im Chat zum Speichern bereit.`;
     },
+    async phone_action(args, ctx) {
+      const ok = ['call', 'sms', 'whatsapp', 'email', 'maps', 'calendar', 'youtube', 'spotify', 'search', 'web', 'share', 'copy'];
+      if (!ok.includes(args.type)) throw new Error('type muss eins davon sein: ' + ok.join(', '));
+      ctx.action = { ...args };
+      return 'Knopf ist am Handy zu sehen – der Nutzer muss nur noch drauftippen.';
+    },
     async notes({ text }, ctx) {
       ctx.conv._notes = String(text || '').slice(0, 1500);
       return 'Notizen gespeichert.';
@@ -185,6 +191,7 @@ Werkzeuge – schreibe zum Benutzen NUR diese Zeile:
 - remember {"fact": "..."}: dauerhaft merken
 - save_file {"name": "plan.txt", "content": "..."}: Text als Datei speichern
 - notes {"text": "..."}: Plan und Fortschritt notieren
+- phone_action {"type": "call|sms|whatsapp|maps|calendar|youtube|spotify|search|share", ...}: etwas auf dem Handy tun (z. B. {"type": "maps", "destination": "Bahnhof Landshut"}, {"type": "call", "number": "0871…"}, {"type": "calendar", "title": "Zahnarzt", "start": "2026-10-20 14:00"})
 Das Ergebnis kommt in <tool_response>. Für Wetter und Rechnungen IMMER das Werkzeug nutzen. Erfinde nichts.${work ? `
 
 AUFTRAG: Arbeite selbstständig bis ${until} Uhr ohne Rückfragen. Plane kurz, notiere Fortschritt mit notes, speichere Ergebnisse mit save_file. Wenn alles fertig ist, beginne deine Antwort mit FERTIG.` : ''}${mem.length ? '\nGemerkt:\n- ' + mem.join('\n- ') : ''}`;
@@ -303,7 +310,7 @@ AUFTRAG: Arbeite selbstständig bis ${until} Uhr ohne Rückfragen. Plane kurz, n
       messages.push(msg);
       const stream = await eng.chat.completions.create({
         messages: [{ role: 'system', content: systemPrompt(user, work) }, ...toModel({ ...conv, messages: messages.slice(0, -1) })],
-        stream: true, temperature: 0.7, top_p: 0.8, max_tokens: 700,
+        stream: true, temperature: 0.7, top_p: 0.8, max_tokens: 600,
         extra_body: { enable_thinking: false }, stream_options: { include_usage: true },
       });
       let raw = '', shown = '', lastSave = Date.now();
@@ -344,8 +351,9 @@ AUFTRAG: Arbeite selbstständig bis ${until} Uhr ohne Rückfragen. Plane kurz, n
       toolsUsed++;
       emit({ t: 'result', id, ok, preview: result });
       if (ctx.file) emit({ t: 'file', ...ctx.file, local: true });
+      if (ctx.action) emit({ t: 'action', action: ctx.action });
       if (work) result += `\n[Noch ${fmtLeft(work.deadline - Date.now())} Arbeitszeit]`;
-      messages.push({ role: 'tool', tool_call_id: id, name: call.name, content: result, _ok: ok, ...(ctx.file ? { _file: ctx.file } : {}) });
+      messages.push({ role: 'tool', tool_call_id: id, name: call.name, content: result, _ok: ok, ...(ctx.file ? { _file: ctx.file } : {}), ...(ctx.action ? { _action: ctx.action } : {}) });
       onSave();
     }
     const secs = (performance.now() - t0) / 1000;

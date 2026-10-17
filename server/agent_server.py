@@ -40,6 +40,7 @@ MODELS = ROOT / "models"
 CONFIG_PATH = DATA / "config.json"
 PUSH_PATH = DATA / "push.json"
 REMINDER_PATH = DATA / "reminders.json"
+ROUTINE_PATH = DATA / "routines.json"
 VERSION = "1.2"
 MAX_STEPS = 15
 CREATE_NO_WINDOW = 0x08000000
@@ -553,6 +554,11 @@ def _plain(text: str, limit: int) -> str:
 
 
 def notify_done(run: "Run", stats: dict, why: str) -> None:
+    if run.routine and not stats["cancelled"]:
+        last = next((m["content"] for m in reversed(run.conv["messages"])
+                     if m["role"] == "assistant" and (m.get("content") or "").strip()), "")
+        PUSH.notify("done", f"🔁 {run.routine}", _plain(last, 300) or "Erledigt.", run, ttl=12 * 3600)
+        return
     if stats["cancelled"] or (not stats["long"] and stats["seconds"] < 25):
         return  # selbst abgebrochen oder so schnell, dass die App sicher noch offen ist
     last = next((m["content"] for m in reversed(run.conv["messages"])
@@ -663,6 +669,123 @@ class Reminders:
 REMINDERS = Reminders()
 
 
+# ---------------------------------------------------------------- Routinen (wiederkehrende Aufträge)
+
+DAY_NAMES = {"mo": 0, "di": 1, "mi": 2, "do": 3, "fr": 4, "sa": 5, "so": 6}
+DAY_SETS = {"täglich": list(range(7)), "taeglich": list(range(7)), "jeden tag": list(range(7)), "daily": list(range(7)),
+            "werktags": [0, 1, 2, 3, 4], "wochentags": [0, 1, 2, 3, 4], "wochenende": [5, 6]}
+
+
+class Routines:
+    """Aufträge, die der Laptop zu festen Zeiten selbst startet – das Ergebnis kommt als Benachrichtigung."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+
+    def _load(self) -> list[dict]:
+        try:
+            return json.loads(ROUTINE_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+
+    def _save(self, items: list[dict]) -> None:
+        tmp = ROUTINE_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(items, ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(tmp, ROUTINE_PATH)
+
+    def list(self) -> list[dict]:
+        with self.lock:
+            return self._load()
+
+    @staticmethod
+    def parse_days(raw) -> list[int]:
+        s = str(raw or "täglich").strip().lower()
+        if s in DAY_SETS:
+            return DAY_SETS[s]
+        days = sorted({DAY_NAMES[p[:2]] for p in re.split(r"[\s,;/+]+|und", s) if p[:2] in DAY_NAMES})
+        if not days:
+            raise ValueError("Tage nicht verstanden – z. B. 'täglich', 'werktags', 'wochenende' oder 'mo, mi, fr'.")
+        return days
+
+    @staticmethod
+    def days_text(days: list[int]) -> str:
+        for name, ds in (("täglich", list(range(7))), ("werktags", [0, 1, 2, 3, 4]), ("am Wochenende", [5, 6])):
+            if days == ds:
+                return name
+        return ", ".join(WEEKDAYS[d] for d in days)
+
+    def tool(self, run: Run, args: dict) -> str:
+        action = str(args.get("action") or "add").lower()
+        if action == "list":
+            items = self.list()
+            return "\n".join(f"- {r['id']}: {r['name']} – {self.days_text(r['days'])} um {r['time']} Uhr: {r['prompt'][:80]}"
+                             for r in items) or "Keine Routinen."
+        if action == "delete":
+            return "Routine gelöscht." if self.delete(str(args.get("id") or "")) else "Keine Routine mit dieser ID."
+        prompt = str(args.get("prompt") or "").strip()
+        m = re.fullmatch(r"(\d{1,2})(?:[:.](\d{2}))?", str(args.get("time") or "").strip().removesuffix("uhr").strip())
+        if not prompt or not m or int(m.group(1)) > 23:
+            raise ValueError("Es fehlen prompt (was zu tun ist) und time (z. B. '07:00').")
+        item = {"id": uuid.uuid4().hex[:8], "name": str(args.get("name") or prompt)[:40], "prompt": prompt[:1500],
+                "time": f"{int(m.group(1)):02d}:{int(m.group(2) or 0):02d}", "days": self.parse_days(args.get("days")),
+                "created": time.time(), "last": "", "conv": ""}
+        with self.lock:
+            items = self._load()
+            items.append(item)
+            self._save(items)
+        out = (f"Routine „{item['name']}“ angelegt: {self.days_text(item['days'])} um {item['time']} Uhr (ID {item['id']}). "
+               "Der Laptop muss dafür an und wach sein.")
+        if not PUSH.subs():
+            out += " Hinweis für deine Antwort: Benachrichtigungen sind am Handy noch aus – bitte den Nutzer, sie einzuschalten."
+        return out
+
+    def delete(self, rid: str) -> bool:
+        with self.lock:
+            items = self._load()
+            keep = [r for r in items if r["id"] != rid]
+            self._save(keep)
+            return len(keep) != len(items)
+
+    def fire(self, rid: str) -> bool:
+        with self.lock:
+            items = self._load()
+            r = next((x for x in items if x["id"] == rid), None)
+            if not r:
+                return False
+            conv = Store.load(r["conv"]) if r.get("conv") else None
+            if not conv:
+                conv = {"id": uuid.uuid4().hex[:16], "title": f"🔁 {r['name']}", "created": time.time(), "messages": []}
+                r["conv"] = conv["id"]
+            r["last"] = time.strftime("%Y-%m-%d")
+            self._save(items)
+        active = RUNS.get(conv["id"])
+        if active and not active.done:
+            return False
+        log(f"Routine startet: {r['name']}")
+        start_run(conv, f"[Routine „{r['name']}“ – automatisch gestartet. Erledige das und antworte kurz fürs Handy.] {r['prompt']}",
+                  [], {"routine": r["name"]})
+        return True
+
+    def loop(self) -> None:
+        while True:
+            time.sleep(30)
+            now = time.time()
+            lt = time.localtime(now)
+            today = time.strftime("%Y-%m-%d", lt)
+            for r in self.list():
+                hh, mm = map(int, r["time"].split(":"))
+                at = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, hh, mm, 0, 0, 0, -1))
+                # verpasst, weil der Laptop schlief? Bis 6 h später noch nachholen
+                if lt.tm_wday in r["days"] and r.get("last") != today and 0 <= now - at < 6 * 3600:
+                    try:
+                        self.fire(r["id"])
+                    except Exception:
+                        log("Routine-Fehler:\n" + traceback.format_exc(), console=False)
+
+
+ROUTINES = Routines()
+
+
 # ---------------------------------------------------------------- Agent
 
 CTX: tools.ToolContext | None = None
@@ -715,6 +838,9 @@ class Run:
         self.thinking = bool(settings.get("thinking"))
         self.step = 0
         self.after_tools: list[dict] = []  # z. B. Bildschirmfoto, das nach den Werkzeug-Ergebnissen folgt
+        self.tool_extra: dict[str, dict] = {}  # Zusatzfelder für die Werkzeug-Nachricht (z. B. Handy-Aktion)
+        self.current_call = ""
+        self.routine = settings.get("routine")  # Name, wenn dieser Lauf eine Routine ist
 
     def emit(self, **ev) -> None:
         with self.cond:
@@ -777,6 +903,10 @@ So arbeitest du:
   • Was ist auf dem Laptop-Bildschirm → laptop_screenshot
   • Musik, Lautstärke → media_control; Laptop sperren → lock_laptop
   • Datei aufs Handy schicken → send_to_phone; Datei aus dem Netz laden → download_file
+  • Etwas auf dem Handy tun (anrufen, SMS, WhatsApp, Navi/Maps, Kalendereintrag, Musik/YouTube, teilen) → phone_action
+    („in den Kalender eintragen“/Termin = phone_action mit type calendar, NICHT set_reminder.
+     Danach sagen, dass der Nutzer auf den Knopf tippen soll – erst dann ist es erledigt.)
+  • Wiederkehrend („jeden Morgen“, „jeden Montag“, „täglich um …“) → routine
 - Dateien, die der Nutzer vom Handy schickt, liegen im Arbeitsordner unter „Vom Handy“.
   Bei mehreren Fragen in einer Nachricht rufst du für jede das passende Werkzeug auf.
 - Wenn du ein Werkzeug brauchst, rufe es SOFORT auf und schreibe vorher KEINE Antwort. Antworte erst, wenn alle Werkzeug-Ergebnisse da sind.
@@ -1040,7 +1170,7 @@ def agent_loop(run: Run) -> None:
                         result += f"\n\n[Noch {fmt_dur(run.remaining())} Arbeitszeit]"
                     stats["tools"] += 1
                     run.commit({"role": "tool", "tool_call_id": c["id"], "name": c["name"], "content": result,
-                                "_ok": ok})
+                                "_ok": ok, **run.tool_extra.pop(c["id"], {})})
                 for extra in run.after_tools:
                     run.commit(extra)
                 run.after_tools.clear()
@@ -1094,6 +1224,7 @@ def execute_call(run: Run, call: dict) -> tuple[bool, str]:
                 run.emit(t="result", id=cid, ok=False, denied=True, preview="Abgelehnt.")
                 return False, "Der Nutzer hat das NICHT erlaubt."
         try:
+            run.current_call = cid
             ok, result = True, SERVER_TOOLS[name](run, args)
         except (tools.ToolError, ValueError, OSError) as e:
             ok, result = False, f"Fehler: {e}"
@@ -1168,8 +1299,40 @@ def tool_laptop_screenshot(run: Run, args: dict) -> str:
     return f"Bildschirmfoto gemacht ({img.width}×{img.height}) und gespeichert unter {full}. Das Bild folgt als nächste Nachricht."
 
 
+PHONE_ACTIONS = {
+    "call": ("Anrufen", ["number"]), "sms": ("SMS schreiben", ["number"]), "whatsapp": ("WhatsApp öffnen", []),
+    "email": ("E-Mail schreiben", ["to"]), "maps": ("In Google Maps öffnen", []), "calendar": ("In den Kalender", ["title", "start"]),
+    "youtube": ("Auf YouTube suchen", ["query"]), "spotify": ("Auf Spotify suchen", ["query"]),
+    "search": ("Google-Suche", ["query"]), "web": ("Webseite öffnen", ["url"]), "share": ("Teilen", ["text"]),
+    "copy": ("Kopieren", ["text"]),
+}
+ACTION_FIELDS = ("type", "number", "text", "to", "subject", "query", "destination", "mode", "title", "start", "end",
+                 "place", "url", "label")
+
+
+def tool_phone_action(run: Run, args: dict) -> str:
+    kind = str(args.get("type") or "").strip().lower()
+    if kind not in PHONE_ACTIONS:
+        raise ValueError("Unbekannter Typ. Erlaubt: " + ", ".join(PHONE_ACTIONS))
+    label, needed = PHONE_ACTIONS[kind]
+    missing = [f for f in needed if not str(args.get(f) or "").strip()]
+    if kind == "maps" and not (args.get("destination") or args.get("query")):
+        missing.append("destination oder query")
+    if missing:
+        raise ValueError("Es fehlt: " + ", ".join(missing))
+    if kind == "web" and not re.match(r"^https?://", str(args.get("url"))):
+        raise ValueError("Nur http/https-Links.")
+    action = {k: str(args[k])[:1500] for k in ACTION_FIELDS if args.get(k) not in (None, "")}
+    action["type"] = kind
+    action.setdefault("label", label)
+    run.tool_extra[run.current_call] = {"_action": action}
+    run.emit(t="action", action=action)
+    return f"Aktionskarte „{action['label']}“ ist am Handy zu sehen – der Nutzer muss nur noch drauftippen."
+
+
 OFFERED: set[str] = set()  # Dateien außerhalb des Arbeitsordners, die der Nutzer ans Handy freigegeben hat
-SERVER_TOOLS = {"set_reminder": tool_set_reminder, "reminders": tool_list_reminders,
+SERVER_TOOLS = {"phone_action": tool_phone_action, "routine": lambda run, args: ROUTINES.tool(run, args),
+                "set_reminder": tool_set_reminder, "reminders": tool_list_reminders,
                 "send_to_phone": tool_send_to_phone, "laptop_screenshot": tool_laptop_screenshot}
 
 
@@ -1407,6 +1570,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, {"models": models_list(), "llama": LLAMA.state})
             if path == "/api/push/key":
                 return self._json(200, {"key": PUSH.vapid.public, "devices": len(PUSH.subs())})
+            if path == "/api/routines":
+                return self._json(200, {"routines": [{**r, "days_text": Routines.days_text(r["days"])} for r in ROUTINES.list()]})
             if path == "/api/reminders":
                 return self._json(200, {"reminders": REMINDERS.pending()})
             if path == "/api/download":
@@ -1460,6 +1625,9 @@ class Handler(BaseHTTPRequestHandler):
                 if run:
                     run.cancel.set()
                 return self._json(200, {"ok": True})
+            m = re.match(r"^/api/routines/([a-f0-9]{8})/run$", path)
+            if m:
+                return self._json(200, {"ok": ROUTINES.fire(m.group(1))})
             if path == "/api/conversations/import":
                 return self._json(*import_phone_chat(body.get("conv") or {}))
             if path == "/api/push/subscribe":
@@ -1511,6 +1679,10 @@ class Handler(BaseHTTPRequestHandler):
                     run.cancel.set()
                 Store.delete(m.group(1))
                 RUNS.pop(m.group(1), None)
+                return self._json(200, {"ok": True})
+            m = re.match(r"^/api/routines/([a-f0-9]{8})$", path)
+            if m:
+                ROUTINES.delete(m.group(1))
                 return self._json(200, {"ok": True})
             m = re.match(r"^/api/reminders/([a-f0-9]{8})$", path)
             if m:
@@ -1577,6 +1749,7 @@ def main() -> None:
     CTX = tools.ToolContext(WORKSPACE, DATA / "memory.json", sys.executable)
     PUSH.setup()
     threading.Thread(target=REMINDERS.loop, daemon=True, name="reminders").start()
+    threading.Thread(target=ROUTINES.loop, daemon=True, name="routines").start()
     port = CFG["port"]
     try:
         httpd = Server(("127.0.0.1", port), Handler)

@@ -691,13 +691,28 @@ TOOL_SPECS = [
     _spec("forget", "Delete a saved fact by its id (e.g. 'm3').", {"id": _s("Memory id")}, ["id"]),
     _spec("update_notes", "Overwrite your working notes for the current task: plan, progress, next steps, file names. "
           "Use regularly during long tasks.", {"notes": _s("Complete notes")}, ["notes"]),
-    _spec("set_reminder", "Remind the user later with a phone notification. Give either minutes from now or a time.",
+    _spec("set_reminder", "Remind the user later with a phone notification (NOT for calendar entries – use phone_action "
+          "type calendar for those). Give either minutes from now or a time.",
           {"text": _s("What to remind about"), "minutes": {"type": "number", "description": "Minutes from now"},
            "at": _s("Time like '18:30', 'morgen 08:00' or '2026-10-20 14:00'")}, ["text"]),
     _spec("reminders", "List open reminders, or cancel one by id.", {"cancel_id": _s("Optional id to cancel")}),
     _spec("send_to_phone", "Send a file from the laptop to the user's phone (shows a download button in the chat).",
           {"path": _s("File path, relative = workspace")}, ["path"]),
     _spec("laptop_screenshot", "Take a screenshot of the laptop screen; you will see it and the user gets it on the phone."),
+    _spec("phone_action", "Do something on the user's PHONE (also: add a calendar entry/appointment): shows a button the "
+          "user taps once – tell them to tap it. type = call (number) | "
+          "sms (number, text) | whatsapp (text, optional number with country code) | email (to, subject, text) | "
+          "maps (destination or query, mode drive/walk/transit/bike) | calendar (title, start 'YYYY-MM-DD HH:MM', "
+          "optional end, place) | youtube (query) | spotify (query) | search (query) | web (url) | share (text) | copy (text).",
+          {"type": _s("Action type"), "number": _s("Phone number"), "text": _s("Message or text"), "to": _s("E-mail address"),
+           "subject": _s("E-mail subject"), "query": _s("Search words"), "destination": _s("Place or address"),
+           "mode": _s("drive, walk, transit or bike"), "title": _s("Event title"), "start": _s("YYYY-MM-DD HH:MM"),
+           "end": _s("YYYY-MM-DD HH:MM"), "place": _s("Event location"), "url": _s("Link"),
+           "label": _s("Optional button text")}, ["type"]),
+    _spec("routine", "Recurring task the laptop runs automatically at a time, result is sent to the phone. "
+          "action = add (prompt, time 'HH:MM', days 'täglich'|'werktags'|'wochenende'|'mo,mi,fr', name) | list | delete (id).",
+          {"action": _s("add, list or delete"), "prompt": _s("What to do each time, as a full instruction"),
+           "time": _s("HH:MM"), "days": _s("Which days"), "name": _s("Short name"), "id": _s("Routine id")}),
     _spec("media_control", "Laptop media keys: play_pause, next, previous, stop, volume_up, volume_down, mute.",
           {"action": _s("One of the actions"), "times": {"type": "integer", "description": "Repeat count (volume: 1 step = 2%)"}},
           ["action"]),
