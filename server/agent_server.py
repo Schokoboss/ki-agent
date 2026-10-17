@@ -364,15 +364,48 @@ GAMES = {"javaw.exe": "Minecraft", "minecraft.windows.exe": "Minecraft", "roblox
 GAME = {"active": ""}  # Name des Spiels, für das Nova gerade Platz macht ("" = keins)
 
 
+def _window_pids() -> set[int]:
+    """Prozesse mit sichtbarem Fenster – im Tray wartende Spiele (Roblox „--launch-to-tray“) zählen nicht."""
+    import ctypes
+    from ctypes import wintypes
+    u32 = ctypes.WinDLL("user32")
+    proc_t = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    u32.EnumWindows.argtypes = [proc_t, wintypes.LPARAM]
+    u32.IsWindowVisible.argtypes = [wintypes.HWND]
+    u32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    u32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    pids = set()
+
+    def cb(hwnd, _):
+        if u32.IsWindowVisible(hwnd) and u32.GetWindowTextLengthW(hwnd) > 0:
+            pid = wintypes.DWORD()
+            u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            pids.add(pid.value)
+        return True
+
+    u32.EnumWindows(proc_t(cb), 0)
+    return pids
+
+
 def running_game() -> str:
     try:
         out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True, timeout=15,
                              creationflags=CREATE_NO_WINDOW).stdout.decode("utf-8", "replace")
     except (OSError, subprocess.TimeoutExpired):
         return ""
-    names = {line.split('","')[0].strip('"').lower() for line in out.splitlines() if line.startswith('"')}
     games = {**GAMES, **{k.lower(): v for k, v in (CFG.get("game_processes") or {}).items()}}
-    return next((label for exe, label in games.items() if exe in names), "")
+    found = []  # (Name, PID) der Spiel-Prozesse
+    for line in out.splitlines():
+        cols = line.strip().strip('"').split('","')
+        if len(cols) > 1 and cols[0].lower() in games and cols[1].isdigit():
+            found.append((games[cols[0].lower()], int(cols[1])))
+    if not found:
+        return ""
+    try:
+        shown = _window_pids()
+    except (OSError, AttributeError):
+        shown = None  # Fenster nicht prüfbar → Prozess reicht
+    return next((label for label, pid in found if shown is None or pid in shown), "")
 
 
 def game_watch() -> None:
