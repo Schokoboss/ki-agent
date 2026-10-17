@@ -58,8 +58,15 @@ Nova kann auch **direkt auf dem Handy** laufen – ganz ohne Laptop, sogar ohne 
 - **Videos:** „Mach ein Short über Füchse“ – Szenen mit gemalten Bildern, Stimme (Hedda), Untertiteln
   und Zoom; außerdem Bildschirm aufnehmen, schneiden, zusammenfügen, GIF, verkleinern, Musik drunter.
   Videos landen in `workspace\Videos` und lassen sich in der App abspielen.
-- **Apps & Spiele:** „Bau mir ein Snake-Spiel“ – Nova programmiert es und gibt dir einen Link zum Spielen
-  am Handy (gilt bis zum nächsten Neustart des Agenten).
+- **Spiele:** „Bau mir ein Spiel, wo ein Fisch Haien ausweicht“ – Nova nutzt die Spiele-Werkstatt
+  (`make_game`): Die Vorlage `server/game_template.html` bringt Joystick + Feuerknopf am Handy, Tastatur,
+  Ton, Highscore, Level, Pause, Effekte und Emoji-Figuren schon mit, Nova schreibt nur das eigentliche Spiel.
+  Jede Version wird im unsichtbaren Chrome ~4 s echt durchgespielt (Fehler mit Zeile, läuft die Schleife,
+  bewegt sich was, reagiert die Steuerung) und erst bei „OK“ veröffentlicht – mit Vorschaubild im Chat.
+- **Apps & Webseiten:** Nova programmiert sie und gibt dir einen **festen Link** (über GitHub Pages
+  `go.html`, findet den Laptop nach jedem Neustart wieder; dieselbe Datei behält ihren Link auch nach
+  Verbesserungen). Teilbar – funktioniert, solange der Laptop läuft. Wer den Link hat, sieht auch, wann
+  dein Laptop online ist.
 - **Wissensspeicher:** „Lern meinen Ordner Desktop\MINECRAFT\AuroraCraft“ – danach beantwortet Nova Fragen
   zu deinen Projekten aus deinen eigenen Dateien, mit Datei und Zeile als Quelle.
 - **Programmieren:** Projekte unter `workspace\Projekte`, Nova liest/durchsucht Code, ändert gezielt

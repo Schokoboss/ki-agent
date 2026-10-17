@@ -25,6 +25,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import games
 import minecraft
 import remote
 import tools
@@ -1080,8 +1081,9 @@ Regeln:
 - Nutze Werkzeuge statt zu raten; mehrere nacheinander sind ok. Brauchst du eins, ruf es SOFORT auf, ohne vorher zu antworten. Bei mehreren Fragen: für jede das passende Werkzeug.
 - Das weißt du NIE selbst – immer Werkzeug: Laptop-Akku/RAM/Uhrzeit → laptop_status · Wetter → weather · Fakten, News, Preise, Ergebnisse, alles Aktuelle → research (Quellen als [1], [2] nennen) · Rechnen → calculate (Prozent „17.5% * 240“) · Dateiinhalte → read_file/list_files.
 - Bild malen → create_image (englischer, ausführlicher Prompt). Brief/Bewerbung/Referat als Datei → make_document. Erinnern/Timer → set_reminder. Am Handy anrufen, SMS, WhatsApp, Navi, Kalendereintrag, Musik → phone_action (Termin = type calendar, NICHT set_reminder; danach sagen, dass der Nutzer auf den Knopf tippen soll).
-- Spezialaufgaben haben eigene Werkzeuge: Video (make_video, edit_video, record_screen), Minecraft-Shader (minecraft_shader, direkt create), Programmieren/Apps/Spiele (edit_file, project_tree, find_in_files, run_node, publish_web), Laptop bedienen (laptop_screenshot, laptop_control mit x/y 0–1000, media_control, open_on_laptop, run_powershell), Routinen „jeden Morgen …“ (routine). Fehlen sie dir, lade die Gruppe mit more_tools (video, minecraft, code, laptop, organize, web).
-- Programmieren: Projekte unter „Projekte/<Name>“ anlegen; Code erst verstehen, dann mit edit_file gezielt ändern, mit run_python/run_node/run_powershell (cwd = Projektordner) testen, bis es läuft. Apps/Spiele als EINE HTML-Datei schreiben und mit publish_web aufs Handy bringen.
+- Spezialaufgaben haben eigene Werkzeuge: Video (make_video, edit_video, record_screen), Minecraft-Shader (minecraft_shader, direkt create), Spiele (make_game), Programmieren/Apps (edit_file, project_tree, find_in_files, run_node, publish_web), Laptop bedienen (laptop_screenshot, laptop_control mit x/y 0–1000, media_control, open_on_laptop, run_powershell), Routinen „jeden Morgen …“ (routine). Fehlen sie dir, lade die Gruppe mit more_tools (video, minecraft, code, laptop, organize, web).
+- Programmieren: Projekte unter „Projekte/<Name>“ anlegen; Code erst verstehen, dann mit edit_file gezielt ändern, mit run_python/run_node/run_powershell (cwd = Projektordner) testen, bis es läuft. Apps als EINE HTML-Datei schreiben und mit publish_web aufs Handy bringen.
+- Spiele: IMMER make_game – erst create, dann code (nur das game-Objekt; Steuerung, Ton, Menü, Highscore hat die Vorlage). Figuren als Emoji, Schwierigkeit über state.level, jede Aktion mit sound(). „Fertig“ erst sagen, wenn der Test „ERGEBNIS: OK“ meldet – sonst Fehler beheben und erneut code senden. Spiel nie selbst als getestet ausgeben.
 - Fragen zu eigenen Projekten, Notizen oder Code von {u} → erst knowledge (search); „lern den Ordner …“ → knowledge (add).
 - Erfinde nie Fakten, Links, Zahlen oder Werkzeug-Ergebnisse. Klappt etwas nicht, versuch einen anderen Weg oder sag es ehrlich.
 - Arbeitsordner: {WORKSPACE} (neue Dateien dorthin; Dateien vom Handy liegen unter „Vom Handy“).
@@ -1182,7 +1184,7 @@ TOOL_GROUPS = {
     "web": {"web_search", "wikipedia", "download_file"},
     "laptop": {"run_powershell", "open_on_laptop", "laptop_screenshot", "laptop_control", "media_control",
                "lock_laptop", "record_screen"},
-    "code": {"edit_file", "project_tree", "find_in_files", "run_node", "run_powershell", "publish_web"},
+    "code": {"edit_file", "project_tree", "find_in_files", "run_node", "run_powershell", "publish_web", "make_game"},
     "video": {"make_video", "edit_video", "record_screen", "create_image"},
     "minecraft": {"minecraft_shader"},
     "organize": {"routine", "reminders"},
@@ -1756,6 +1758,60 @@ def tool_publish_web(run: Run, args: dict) -> str:
             "Der Link bleibt immer gleich (auch nach Neustarts und Verbesserungen) und funktioniert, solange der Laptop läuft.")
 
 
+def tool_make_game(run: Run, args: dict) -> str:
+    """Spiele-Werkstatt: Vorlage anlegen → nur das Spiel schreiben → automatisch testen → bei OK veröffentlichen."""
+    action = str(args.get("action") or "").strip().lower()
+    try:
+        if action == "test" and args.get("path"):
+            path = tools._resolve(str(args["path"]), CTX)
+            if not tools._inside_workspace(path, CTX):
+                raise games.GameError("Nur Spiele aus dem Arbeitsordner können getestet werden.")
+        else:
+            path = games.project_file(WORKSPACE, args.get("name") or "")
+        if action == "create":
+            path = games.create(WORKSPACE, args.get("name") or "", args.get("title") or args.get("name") or "",
+                                args.get("how_to") or "", args.get("controls") or "stick", args.get("lives") or 3)
+            return (f"Vorlage angelegt: {path}\n\n{games.API}\n\nJetzt make_game(action=code, name=\"{args.get('name')}\", "
+                    "code=…) mit dem kompletten `const game = {…};`.")
+        if not path.is_file():
+            raise games.GameError("Spiel nicht gefunden – zuerst make_game(action=create, name=…).")
+        if action == "show":
+            return "Aktueller Spiel-Code:\n" + games.get_code(path)
+        if action == "code":
+            games.set_code(path, args.get("code") or "")
+        elif action != "test":
+            raise games.GameError("action muss create, code, test oder show sein.")
+        run.emit(t="status", d="Spiele das Spiel im unsichtbaren Browser durch …")
+        shot = path.parent / "vorschau.png"
+        rep = games.test(path, shot)
+        ok, report = games.judge(rep)
+        extra = {}
+        if rep.get("shot"):
+            try:
+                from PIL import Image
+                img = Image.open(shot).convert("RGB")
+                img.thumbnail((720, 1280))
+                UPLOADS.mkdir(parents=True, exist_ok=True)
+                img_id = f"{uuid.uuid4().hex}.jpg"
+                img.save(UPLOADS / img_id, quality=82)
+                run.emit(t="image", id=img_id)
+                extra["_image"] = img_id
+            except (ImportError, OSError):
+                pass
+        log(f"Spieltest {path.parent.name}: {'OK' if ok else 'Probleme'} ({rep.get('frames', 0)} Bilder, "
+            f"{len(rep.get('errors') or [])} Fehler)")
+        if not ok:
+            run.tool_extra[run.current_call] = extra
+            return report + "\n\nNoch NICHT veröffentlicht. Behebe die Probleme und sende das ganze game-Objekt erneut (action=code)."
+        m = re.search(r'title:\s*("(?:[^"\\]|\\.)*")', path.read_text(encoding="utf-8", errors="replace"))
+        title = json.loads(m.group(1)) if m else path.parent.name
+        pub = tool_publish_web(run, {"path": str(path), "title": title})
+        run.tool_extra.setdefault(run.current_call, {}).update(extra)
+        return report + "\n\n" + pub + "\nSag dem Nutzer kurz, was das Spiel kann und wie man es steuert."
+    except games.GameError as e:
+        raise ValueError(str(e))
+
+
 def page_link(pid: str, entry: str) -> str:
     """Fester Link über GitHub Pages (go.html holt die aktuelle Tunnel-Adresse aus dem Gist)."""
     entry = urllib.parse.quote(entry)
@@ -1796,7 +1852,7 @@ def tool_laptop_control(run: Run, args: dict) -> str:
 
 
 OFFERED: set[str] = set()  # Dateien außerhalb des Arbeitsordners, die der Nutzer ans Handy freigegeben hat
-SERVER_TOOLS = {"laptop_control": tool_laptop_control, "publish_web": tool_publish_web, "create_image": tool_create_image, "minecraft_shader": tool_minecraft_shader,
+SERVER_TOOLS = {"laptop_control": tool_laptop_control, "publish_web": tool_publish_web, "make_game": tool_make_game, "create_image": tool_create_image, "minecraft_shader": tool_minecraft_shader,
                 "make_video": tool_make_video, "record_screen": tool_record_screen, "edit_video": tool_edit_video, "phone_action": tool_phone_action, "routine": lambda run, args: ROUTINES.tool(run, args),
                 "set_reminder": tool_set_reminder, "reminders": tool_list_reminders,
                 "send_to_phone": tool_send_to_phone, "laptop_screenshot": tool_laptop_screenshot}
