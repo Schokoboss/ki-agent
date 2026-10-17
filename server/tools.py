@@ -30,7 +30,7 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")
 CREATE_NO_WINDOW = 0x08000000
 CREATE_BREAKAWAY_FROM_JOB = 0x01000000
-MAX_RESULT = 7000
+MAX_RESULT = 4500
 WEEKDAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
 
 
@@ -340,7 +340,7 @@ def open_webpage(args, ctx):
     title, text, final_url, how = _page_text(url)
     head = f"Seite: {title}\n" if title else ""
     note = " (per Browser geladen)" if how == "browser" else ""
-    return head + f"Adresse: {final_url}{note}\n\n" + _clip(text, 9000)
+    return head + f"Adresse: {final_url}{note}\n\n" + _clip(text, 5000)
 
 
 _STOP = set("der die das und oder ein eine einer eines ist sind war wer was wie wo wann warum the a an of to in on for is are was who what how when why with von zu im in am an auf für mit bei aus".split())
@@ -472,7 +472,7 @@ def research(args, ctx):
             out.append(f"[{i}] {title}\n{url}\n" + "\n…\n".join(passages))
     out.append("\nAntworte nur mit dem, was in diesen Quellen steht, und nenne die Quellen als [1], [2] … "
                "Widersprechen sich Quellen, sag das.")
-    return _clip("\n\n".join(out), 9000)
+    return _clip("\n\n".join(out), 5500)
 
 
 def wikipedia(args, ctx):
@@ -1033,11 +1033,18 @@ TOOL_SPECS = [
     _spec("send_to_phone", "Send a file from the laptop to the user's phone (shows a download button in the chat).",
           {"path": _s("File path, relative = workspace")}, ["path"]),
     _spec("laptop_screenshot", "Take a screenshot of the laptop screen; you will see it and the user gets it on the phone."),
-    _spec("phone_action", "Do something on the user's PHONE (also: add a calendar entry/appointment): shows a button the "
-          "user taps once – tell them to tap it. type = call (number) | "
-          "sms (number, text) | whatsapp (text, optional number with country code) | email (to, subject, text) | "
-          "maps (destination or query, mode drive/walk/transit/bike) | calendar (title, start 'YYYY-MM-DD HH:MM', "
-          "optional end, place) | youtube (query) | spotify (query) | search (query) | web (url) | share (text) | copy (text).",
+    _spec("laptop_control", "Operate the laptop yourself: click, type or press keys. Take a laptop_screenshot first. "
+          "x/y are 0–1000 relative to the screen (0,0 = top left). After each action you get a new screenshot.",
+          {"action": _s("click, double_click, right_click, move, scroll, type or key"),
+           "x": {"type": "number", "description": "0–1000 from left"}, "y": {"type": "number", "description": "0–1000 from top"},
+           "text": _s("Text to type"), "key": _s("Key or combo, e.g. enter, ctrl+s, alt+tab"),
+           "amount": {"type": "integer", "description": "Scroll steps, negative = down"}}, ["action"]),
+    _spec("more_tools", "Load extra tool groups when you need them: video, minecraft, code, laptop, organize, web.",
+          {"group": _s("One of: video, minecraft, code, laptop, organize, web")}, ["group"]),
+    _spec("phone_action", "Do something on the user's PHONE via a one-tap button (tell them to tap it). type: call(number) "
+          "sms(number,text) whatsapp(text,number?) email(to,subject,text) maps(destination|query,mode) "
+          "calendar(title,start 'YYYY-MM-DD HH:MM',end?,place?) youtube(query) spotify(query) search(query) web(url) "
+          "share(text) copy(text). Calendar entries/appointments = type calendar.",
           {"type": _s("Action type"), "number": _s("Phone number"), "text": _s("Message or text"), "to": _s("E-mail address"),
            "subject": _s("E-mail subject"), "query": _s("Search words"), "destination": _s("Place or address"),
            "mode": _s("drive, walk, transit or bike"), "title": _s("Event title"), "start": _s("YYYY-MM-DD HH:MM"),
@@ -1089,7 +1096,7 @@ def run_tool(name: str, args: dict, ctx: ToolContext) -> tuple[bool, str]:
     if not fn:
         return False, f"Unbekanntes Werkzeug: {name}"
     try:
-        return True, _clip(fn(args, ctx), 12000)
+        return True, _clip(fn(args, ctx), 8000)
     except ToolError as e:
         return False, f"Fehler: {e}"
     except Exception as e:  # Werkzeugfehler dürfen den Agenten nie abstürzen lassen
