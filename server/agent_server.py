@@ -1549,7 +1549,8 @@ def import_phone_chat(conv: dict) -> tuple[int, dict]:
 
 
 def local_info() -> dict:
-    frag = {"t": CFG["token"], "g": CFG.get("gist_id", "")}
+    owner = (urllib.parse.urlparse(CFG["app_url"]).hostname or "").split(".")[0]
+    frag = {"t": CFG["token"], "g": CFG.get("gist_id", ""), "o": owner}
     if TUNNEL.url:
         frag["u"] = TUNNEL.url
     local_frag = {"t": CFG["token"], "u": f"http://localhost:{CFG['port']}"}
