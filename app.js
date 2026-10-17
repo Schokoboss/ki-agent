@@ -213,7 +213,7 @@ async function moveChatToLaptop(id) {
   toast('Chat läuft jetzt auf dem Laptop weiter');
 }
 
-async function sendLocal(text) {
+async function sendLocal(text, replaceLast) {
   if (state.pendingImages.length) toast('Fotos gehen nur mit dem Laptop – ich schicke nur den Text.');
   if (!text) return;
   if (state.conv && !isLocalConv(state.conv)) { newChat(); toast('Neuer Chat mit der Handy-KI'); }
@@ -226,6 +226,10 @@ async function sendLocal(text) {
   }
   const minutes = state.work.minutes;
   const work = minutes ? { started: Date.now(), deadline: Date.now() + minutes * 60000 } : null;
+  if (replaceLast) {
+    const idx = conv.messages.map(m => m.role === 'user' && !m._system).lastIndexOf(true);
+    if (idx >= 0) conv.messages = conv.messages.slice(0, idx);
+  }
   conv.messages.push({ role: 'user', content: text, _display: text, ...(minutes ? { _work: minutes } : {}) });
   if (work) { conv._taskIndex = conv.messages.length - 1; state.work.minutes = 0; updateWorkChip(); }
   const save = () => { conv.updated = Date.now() / 1000; const a = localConvs(); a[conv.id] = conv; saveLocalConvs(a); };
@@ -500,6 +504,20 @@ function addUser(text, images = [], work = 0) {
   scrollDown(true);
 }
 
+function lastUserText() {
+  const bubbles = els.messages.querySelectorAll('.user .bubble');
+  return bubbles.length ? bubbles[bubbles.length - 1].textContent : '';
+}
+
+// Letzte Frage + Antwort aus der Ansicht entfernen (für „Neu erzeugen“ / „Bearbeiten“)
+function dropLastTurn() {
+  const users = els.messages.querySelectorAll('.user');
+  const last = users[users.length - 1];
+  if (!last) return;
+  while (last.nextSibling) last.nextSibling.remove();
+  last.remove();
+}
+
 class TurnView {
   constructor(live) {
     els.empty.hidden = true;
@@ -732,6 +750,19 @@ class TurnView {
     });
     if (!this.allText && !stats) return;
     const foot = h('div', 'turn-foot');
+    document.querySelectorAll('.turn-foot .re').forEach(b => b.remove());
+    const lastQ = lastUserText();
+    if (lastQ) {
+      const again = h('button', 're', icon('retry'));
+      again.type = 'button';
+      again.setAttribute('aria-label', 'Neu erzeugen');
+      again.onclick = () => { if (!state.running) send(lastQ, { replaceLast: true }); };
+      const edit = h('button', 're', icon('edit'));
+      edit.type = 'button';
+      edit.setAttribute('aria-label', 'Frage bearbeiten');
+      edit.onclick = () => { els.input.value = lastQ; autoGrow(); state.replaceNext = true; els.input.focus(); toast('Ändere die Frage und tippe auf Senden.'); };
+      foot.append(again, edit);
+    }
     if (this.allText) {
       const copy = h('button', '', icon('copy'));
       copy.type = 'button';
@@ -795,6 +826,10 @@ function renderHistory(messages, live) {
       const t = view.tools[m.tool_call_id];
       if (m._file) view.fileCard({ ...m._file, local: true });
       if (m._action) view.actionCard(m._action);
+      if (m._image) {
+        view.image(m._image);
+        if (m._imgfile) view.fileCard({ path: m._imgfile, name: m._imgfile.split(/[\/]/).pop() });
+      }
       const fpath = t?.name === 'send_to_phone' && m._ok !== false && (m.content.match(/^Pfad: (.+)$/m) || [])[1];
       if (fpath) view.fileCard({ path: fpath.trim(), name: fpath.trim().split(/[\\/]/).pop() });
       view.hideTyping();
@@ -905,8 +940,11 @@ async function resume(ctx) {
   if (conv) openConv(conv);
 }
 
-async function send(textOverride) {
+async function send(textOverride, opts = {}) {
   if (state.running) return stop();
+  const replaceLast = !!(opts.replaceLast || state.replaceNext);
+  state.replaceNext = false;
+  if (replaceLast) dropLastTurn();
   let text = (textOverride ?? els.input.value).trim();
   const images = state.pendingImages.slice();
   if (!text && !images.length && !state.pendingFiles.length) return;
@@ -914,7 +952,7 @@ async function send(textOverride) {
   if (state.settings.mode === 'laptop' && !state.online) { toast('Laptop ist nicht erreichbar. Läuft das schwarze Fenster?'); return; }
   if (useLocal()) {
     if (state.pendingFiles.length) { toast('Dateien gehen nur mit dem Laptop.'); state.pendingFiles = []; renderAttachments(); }
-    return sendLocal(text);
+    return sendLocal(text, replaceLast);
   }
   if (isLocalConv(state.conv)) {
     try { await moveChatToLaptop(state.conv); } catch (e) { toast('Chat konnte nicht zum Laptop: ' + e.message); return; }
@@ -941,7 +979,7 @@ async function send(textOverride) {
   try {
     const res = await api('/api/chat', {
       method: 'POST',
-      body: JSON.stringify({ conversation_id: state.conv, text, images, settings }),
+      body: JSON.stringify({ conversation_id: state.conv, text, images, settings, replace_last: replaceLast }),
     });
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
@@ -1509,6 +1547,12 @@ $('#btnDrawerClose').onclick = closeDrawer;
 els.scrim.onclick = closeDrawer;
 $('#btnNew').onclick = newChat;
 $('#btnNew2').onclick = newChat;
+$('#convSearch').addEventListener('input', e => {
+  const q = e.target.value.trim().toLowerCase();
+  els.convList.querySelectorAll('.conv').forEach(row => {
+    row.hidden = !!q && !row.querySelector('.t').textContent.toLowerCase().includes(q);
+  });
+});
 $('#btnSettings').onclick = openSettings;
 $('#btnTitle').onclick = openSettings;
 $('#btnReconnect').onclick = async () => { state.online = false; if (await connect()) toast('Verbunden ✓'); else toast('Laptop nicht erreichbar'); };
