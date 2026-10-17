@@ -69,6 +69,7 @@
     <button class="new-chat" id="btnNew2"><svg><use href="#i-plus"/></svg>Neuer Chat</button>
     <input type="search" id="convSearch" class="conv-search" placeholder="Chats durchsuchen …" autocomplete="off">
     <div id="convList" class="conv-list"></div>
+    <button class="drawer-foot" id="btnRemote"><svg><use href="#i-laptop"/></svg>Laptop fernsteuern</button>
     <button class="drawer-foot" id="btnSettings"><svg><use href="#i-sliders"/></svg>Einstellungen</button>
   </aside>
 
@@ -163,6 +164,27 @@
       <p class="muted small">Tipp: Laptop ans Ladekabel und Deckel offen lassen – er schläft währenddessen nicht ein. Du kannst die App schließen, der Agent arbeitet am Laptop weiter.</p>
     </form>
   </dialog>
+
+  <section id="remote" class="remote" hidden>
+    <div class="r-top">
+      <button class="icon-btn" id="rClose" aria-label="Fernsteuerung schließen"><svg><use href="#i-x"/></svg></button>
+      <b>Laptop</b><span id="rInfo" class="r-info">verbinde …</span>
+      <button class="r-chip" id="rRight" aria-label="Rechtsklick-Modus">Rechtsklick</button>
+      <button class="r-chip" id="rZoom" aria-label="Zoom">1×</button>
+    </div>
+    <div class="r-wrap" id="rWrap"><img id="rImg" alt="Laptop-Bildschirm" draggable="false"></div>
+    <div class="r-keys">
+      <button data-key="esc">Esc</button><button data-key="tab">Tab</button><button data-key="win">Win</button>
+      <button data-key="alt+tab">Alt+Tab</button><button data-key="backspace">⌫</button><button data-key="enter">Enter</button>
+      <button data-scroll="3">▲</button><button data-scroll="-3">▼</button>
+      <button data-key="ctrl+c">Strg+C</button><button data-key="ctrl+v">Strg+V</button><button data-key="ctrl+z">Strg+Z</button>
+      <button data-key="alt+f4">Alt+F4</button>
+    </div>
+    <form class="r-type" id="rType">
+      <input id="rText" placeholder="Text an den Laptop tippen …" autocomplete="off" enterkeyhint="send">
+      <button type="submit" class="send" aria-label="Tippen"><svg><use href="#i-up"/></svg></button>
+    </form>
+  </section>
 
   <section id="pair" class="pair" hidden>
     <div class="pair-card">

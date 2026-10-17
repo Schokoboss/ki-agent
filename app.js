@@ -449,6 +449,9 @@ const TOOL_META = {
   edit_video: ['Video bearbeiten', 'play', a => a.action],
   create_image: ['Bild malen', 'image', a => a.prompt],
   research: ['Recherche', 'search', a => a.query],
+  laptop_control: ['Laptop bedienen', 'laptop', a => `${a.action || ''} ${a.text || a.key || ''}`.trim()],
+  publish_web: ['App veröffentlichen', 'globe', a => a.title || a.path],
+  make_document: ['Dokument', 'file', a => a.title],
   phone_action: ['Handy-Aktion', 'phone', a => a.label || a.type],
   routine: ['Routine', 'repeat', a => a.action === 'list' ? 'ansehen' : a.action === 'delete' ? 'löschen' : `${a.days || 'täglich'} ${a.time || ''} · ${a.name || a.prompt || ''}`],
   notes: ['Notizen', 'edit', a => (a.text || '').split('\n').find(l => l.trim()) || ''],
@@ -1181,6 +1184,117 @@ async function runAction(b) {
     if (e.name !== 'AbortError') toast('Ging nicht: ' + e.message);
   }
 }
+
+/* ------------------------------------------------------------ Fernsteuerung */
+
+const rc = { on: false, url: null, right: false, zoom: false, last: { x: 0.5, y: 0.5 }, frames: 0, t0: 0 };
+
+async function remoteInput(body) {
+  try {
+    const r = await api('/api/remote/input', { method: 'POST', body: JSON.stringify(body) });
+    if (!r.ok) toast((await r.json().catch(() => ({}))).error || 'Eingabe ging nicht');
+  } catch (e) { toast(e.message); }
+}
+
+async function remoteLoop() {
+  const img = $('#rImg');
+  rc.frames = 0;
+  rc.t0 = performance.now();
+  while (rc.on) {
+    const started = performance.now();
+    try {
+      const w = Math.min(1600, Math.round(innerWidth * devicePixelRatio * (rc.zoom ? 2.2 : 1)));
+      const r = await api(`/api/remote/frame?w=${w}&q=${rc.zoom ? 60 : 50}`);
+      if (!r.ok) throw new Error(`Fehler ${r.status}`);
+      const url = URL.createObjectURL(await r.blob());
+      await new Promise(ok => { img.onload = ok; img.onerror = ok; img.src = url; });
+      if (rc.url) URL.revokeObjectURL(rc.url);
+      rc.url = url;
+      rc.frames++;
+      const secs = (performance.now() - rc.t0) / 1000;
+      if (secs > 2) {
+        $('#rInfo').textContent = `${(rc.frames / secs).toFixed(1)} Bilder/s · ${r.headers.get('X-Screen') || ''}`;
+        rc.frames = 0;
+        rc.t0 = performance.now();
+      }
+    } catch (e) {
+      $('#rInfo').textContent = 'Verbindung weg – versuche neu …';
+      await sleep(1500);
+    }
+    await sleep(Math.max(0, 120 - (performance.now() - started)));
+  }
+}
+
+function openRemote() {
+  if (!state.online) { toast('Dafür muss der Laptop laufen.'); return; }
+  closeDrawer();
+  $('#remote').hidden = false;
+  rc.on = true;
+  navigator.wakeLock?.request('screen').then(l => { rc.lock = l; }).catch(() => {});
+  remoteLoop();
+}
+
+function closeRemote() {
+  rc.on = false;
+  $('#remote').hidden = true;
+  rc.lock?.release().catch(() => {});
+  if (rc.url) { URL.revokeObjectURL(rc.url); rc.url = null; }
+}
+
+(() => {
+  const img = $('#rImg');
+  let down = null, pressTimer = null, longDone = false;
+  const pos = e => {
+    const r = img.getBoundingClientRect();
+    return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) };
+  };
+  img.addEventListener('pointerdown', e => {
+    down = { x: e.clientX, y: e.clientY, t: Date.now(), p: pos(e) };
+    longDone = false;
+    clearTimeout(pressTimer);
+    pressTimer = setTimeout(() => {  // lange drücken = Rechtsklick
+      if (!down) return;
+      longDone = true;
+      navigator.vibrate?.(30);
+      rc.last = down.p;
+      remoteInput({ type: 'right', ...down.p });
+    }, 550);
+  });
+  img.addEventListener('pointermove', e => {
+    if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 12) { clearTimeout(pressTimer); down = null; }  // war Wischen/Zoomen
+  });
+  img.addEventListener('pointerup', () => {
+    clearTimeout(pressTimer);
+    if (!down || longDone) { down = null; return; }
+    rc.last = down.p;
+    remoteInput({ type: rc.right ? 'right' : 'click', ...down.p });
+    if (rc.right) { rc.right = false; $('#rRight').classList.remove('on'); }
+    down = null;
+  });
+  img.addEventListener('pointercancel', () => { clearTimeout(pressTimer); down = null; });
+  img.addEventListener('contextmenu', e => e.preventDefault());
+  $('#rClose').onclick = closeRemote;
+  $('#rRight').onclick = () => { rc.right = !rc.right; $('#rRight').classList.toggle('on', rc.right); };
+  $('#rZoom').onclick = () => {
+    rc.zoom = !rc.zoom;
+    $('#rWrap').classList.toggle('zoomed', rc.zoom);
+    $('#rZoom').textContent = rc.zoom ? '2×' : '1×';
+  };
+  document.querySelector('.r-keys').addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.key) remoteInput({ type: 'key', key: b.dataset.key });
+    if (b.dataset.scroll) remoteInput({ type: 'scroll', amount: +b.dataset.scroll, ...rc.last });
+  });
+  $('#rType').addEventListener('submit', e => {
+    e.preventDefault();
+    const t = $('#rText').value;
+    if (!t) { remoteInput({ type: 'key', key: 'enter' }); return; }
+    remoteInput({ type: 'text', text: t });
+    $('#rText').value = '';
+  });
+  $('#btnRemote').onclick = openRemote;
+})();
 
 /* ------------------------------------------------------------ Gesprächsmodus (freihändig) */
 
