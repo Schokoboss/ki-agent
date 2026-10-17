@@ -443,6 +443,12 @@ const TOOL_META = {
   lock_laptop: ['Sperren', 'laptop', () => 'Laptop'],
   download_file: ['Download', 'download', a => (a.url || '').replace(/^https?:\/\//, '')],
   save_file: ['Datei speichern', 'file', a => a.name],
+  minecraft_shader: ['Minecraft-Shader', 'spark', a => a.action === 'options' ? 'Optionen ansehen' : a.action === 'list' ? 'installierte Packs' : `${a.name || ''} ${a.style || ''}`.trim()],
+  make_video: ['Video erstellen', 'play', a => `${a.title || ''} · ${(a.scenes || []).length} Szenen`],
+  record_screen: ['Bildschirm aufnehmen', 'laptop', a => `${a.seconds || 20} s`],
+  edit_video: ['Video bearbeiten', 'play', a => a.action],
+  create_image: ['Bild malen', 'image', a => a.prompt],
+  research: ['Recherche', 'search', a => a.query],
   phone_action: ['Handy-Aktion', 'phone', a => a.label || a.type],
   routine: ['Routine', 'repeat', a => a.action === 'list' ? 'ansehen' : a.action === 'delete' ? 'löschen' : `${a.days || 'täglich'} ${a.time || ''} · ${a.name || a.prompt || ''}`],
   notes: ['Notizen', 'edit', a => (a.text || '').split('\n').find(l => l.trim()) || ''],
@@ -599,6 +605,24 @@ class TurnView {
       };
     } else {
       $('button', card).onclick = () => downloadFile(ev.path, ev.name, $('button', card));
+      if (/\.(mp4|webm|gif)$/i.test(ev.name || '')) {
+        const play = h('button', 'btn', 'Abspielen');
+        play.type = 'button';
+        play.onclick = async () => {
+          play.textContent = 'Lädt …';
+          try {
+            const r = await api('/api/download?path=' + encodeURIComponent(ev.path));
+            if (!r.ok) throw new Error(`Fehler ${r.status}`);
+            const url = URL.createObjectURL(await r.blob());
+            const media = /\.gif$/i.test(ev.name) ? h('img', 'shot') : h('video', 'shot');
+            media.src = url;
+            if (media.tagName === 'VIDEO') { media.controls = true; media.playsInline = true; media.autoplay = true; }
+            card.after(media);
+            play.remove();
+          } catch (e) { toast(e.message); play.textContent = 'Abspielen'; }
+        };
+        $('button', card).before(play);
+      }
     }
     this.append(card);
   }
@@ -826,6 +850,7 @@ function renderHistory(messages, live) {
       const t = view.tools[m.tool_call_id];
       if (m._file) view.fileCard({ ...m._file, local: true });
       if (m._action) view.actionCard(m._action);
+      if (m._offer) view.fileCard(m._offer);
       if (m._image) {
         view.image(m._image);
         if (m._imgfile) view.fileCard({ path: m._imgfile, name: m._imgfile.split(/[\/]/).pop() });

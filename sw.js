@@ -1,6 +1,6 @@
 // Service Worker: Offline-Hülle, Benachrichtigungen (Web Push) und „Teilen mit Nova“.
 // Wichtig: Nur eigene Caches (nova-*) aufräumen – WebLLM legt dort das Handy-Modell ab.
-const CACHE = 'nova-v6';
+const CACHE = 'nova-v7';
 const LIB_CACHE = 'nova-lib-v1';
 const SHARE_CACHE = 'nova-share';
 const ASSETS = ['./', 'index.html', 'style.css', 'app.js', 'local.js', 'llm-worker.js', 'manifest.webmanifest',
