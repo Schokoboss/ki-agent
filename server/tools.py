@@ -358,6 +358,85 @@ def _best_passages(text: str, query: str, n: int = 3, size: int = 700) -> list[s
     return [p[:size] for _, _, p in sorted(best, key=lambda s: s[1])]
 
 
+def _md_inline(t: str) -> str:
+    t = html.escape(t)
+    t = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", t)
+    t = re.sub(r"(?<!\*)\*(?!\s)(.+?)\*", r"<i>\1</i>", t)
+    t = re.sub(r"`([^`]+)`", r"<code>\1</code>", t)
+    return re.sub(r"\[([^\]]+)\]\((https?://[^)\s]+)\)", r'<a href="\2">\1</a>', t)
+
+
+def markdown_to_html(md: str, title: str) -> str:
+    out, in_list, para = [], None, []
+
+    def flush():
+        nonlocal para
+        if para:
+            out.append("<p>" + "<br>".join(_md_inline(x) for x in para) + "</p>")
+            para = []
+
+    for line in md.splitlines():
+        s = line.rstrip()
+        m_h = re.match(r"^(#{1,4})\s+(.*)", s)
+        m_l = re.match(r"^\s*([-*•]|\d+[.)])\s+(.*)", s)
+        if m_h or m_l or not s.strip():
+            flush()
+        if in_list and not m_l:
+            out.append(f"</{in_list}>")
+            in_list = None
+        if m_h:
+            n = len(m_h.group(1))
+            out.append(f"<h{n}>{_md_inline(m_h.group(2))}</h{n}>")
+        elif m_l:
+            kind = "ol" if m_l.group(1)[0].isdigit() else "ul"
+            if in_list != kind:
+                if in_list:
+                    out.append(f"</{in_list}>")
+                out.append(f"<{kind}>")
+                in_list = kind
+            out.append(f"<li>{_md_inline(m_l.group(2))}</li>")
+        elif s.strip():
+            para.append(s.strip())
+    flush()
+    if in_list:
+        out.append(f"</{in_list}>")
+    css = ("body{font-family:'Segoe UI',Arial,sans-serif;max-width:720px;margin:40px auto;padding:0 24px;color:#1b1d23;"
+           "line-height:1.55;font-size:12pt}h1{font-size:22pt;margin:0 0 6px}h2{font-size:15pt;margin:22px 0 6px;"
+           "color:#3b3f9e}h3{font-size:12.5pt}p{margin:0 0 10px}li{margin:3px 0}code{background:#f0f1f6;padding:1px 4px;"
+           "border-radius:4px}.meta{color:#666;font-size:9.5pt;margin-bottom:22px}")
+    return (f"<!doctype html><html lang='de'><head><meta charset='utf-8'><title>{html.escape(title)}</title>"
+            f"<style>{css}</style></head><body><h1>{html.escape(title)}</h1>"
+            f"<div class='meta'>{time.strftime('%d.%m.%Y')}</div>{''.join(out)}</body></html>")
+
+
+def make_document(args, ctx):
+    title = str(args.get("title") or "Dokument").strip()
+    content = str(args.get("content") or "")
+    fmt = str(args.get("format") or "pdf").lower()
+    folder = ctx.workspace / "Dokumente"
+    folder.mkdir(parents=True, exist_ok=True)
+    safe = re.sub(r'[\\/:*?"<>|]+', "_", title)[:60] or "Dokument"
+    html_path = folder / f"{safe}.html"
+    html_path.write_text(markdown_to_html(content, title), encoding="utf-8")
+    if fmt != "pdf":
+        return f"Dokument gespeichert: {html_path}"
+    exe = next((b for b in BROWSERS if b and os.path.isfile(b)), None)
+    if not exe:
+        return f"Kein Chrome/Edge für PDF gefunden – als HTML gespeichert: {html_path}"
+    pdf = folder / f"{safe}.pdf"
+    import tempfile
+    profile = tempfile.mkdtemp(prefix="nova-pdf-")
+    try:
+        subprocess.run([exe, "--headless=new", "--disable-gpu", "--no-first-run", f"--user-data-dir={profile}",
+                        "--no-pdf-header-footer", f"--print-to-pdf={pdf}", html_path.resolve().as_uri()],
+                       capture_output=True, timeout=90, creationflags=CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
+    finally:
+        shutil.rmtree(profile, ignore_errors=True)
+    if not pdf.is_file():
+        raise ToolError("PDF konnte nicht erstellt werden.")
+    return f"PDF erstellt: {pdf.name} ({_human(pdf.stat().st_size)}).\nPfad: {pdf}"
+
+
 def research(args, ctx):
     """Sucht, liest mehrere Quellen parallel und liefert die passendsten Absätze mit Quellennummern."""
     query = (args.get("query") or "").strip()
@@ -775,6 +854,38 @@ TOOL_SPECS = [
           "digital art, vibrant colors, sunset light'.",
           {"prompt": _s("Detailed English image description"), "format": _s("square, portrait or landscape")},
           ["prompt"]),
+    _spec("make_document", "Create a nicely formatted document (PDF by default) from Markdown text: letters, applications, "
+          "reports, summaries, lists, plans. The user gets a download button.",
+          {"title": _s("Document title"), "content": _s("Full text in Markdown (## headings, - lists, **bold**)"),
+           "format": _s("pdf or html")}, ["title", "content"]),
+    _spec("publish_web", "Make an HTML page/app/game from the workspace playable on the user's phone (gives a link "
+          "button). First write the complete single-file HTML with write_file, then call this with its path.",
+          {"path": _s("HTML file or folder in the workspace"), "title": _s("Short name")}, ["path"]),
+    _spec("minecraft_shader","Build a custom Minecraft shaderpack (Iris, Java 26.3) from the user's tested packs and install "
+          "it. action=options lists all settings of a base; action=create builds one; action=list shows installed packs. "
+          "base: aurora (beautiful) or bedrush (PvP/Bedwars). style: warm|kalt|bunt|duester|hell|realistisch|traumhaft. "
+          "profile: e.g. LAPTOP, MEDIUM, HIGH (aurora) or FPS, STANDARD, SCHOEN (bedrush). options: {OPTION: value or true/false}. "
+          "Common aurora options: SHADOWS, BLOOM, GODRAYS, VIGNETTE, WAVING_LEAVES, WAVING_PLANTS, WATER_WAVES (true/false); "
+          "WATER_WAVE_HEIGHT, WATER_REFLECTION, WIND_STRENGTH, SATURATION, EXPOSURE, FOG_DENSITY, TORCH_INTENSITY, "
+          "NIGHT_BRIGHTNESS (numbers around 0.5–2.0). Usually call create directly.",
+          {"action": _s("options, create or list"), "base": _s("aurora or bedrush"), "name": _s("Pack name"),
+           "style": _s("Style preset"), "profile": _s("Profile name"),
+           "options": {"type": "object", "description": "Option overrides, e.g. {\"SATURATION\": 1.25, \"BLOOM\": true}"},
+           "activate": {"type": "boolean", "description": "Make it the active shaderpack (default true)"}}),
+    _spec("make_video", "Create a video with narration: each scene gets a painted image, a spoken German text and "
+          "subtitles. Use 3–6 scenes with 1–2 short sentences each. format: short (vertical, TikTok/Shorts) or wide (YouTube).",
+          {"title": _s("Video title"), "format": _s("short or wide"),
+           "scenes": {"type": "array", "description": "Scenes", "items": {"type": "object", "properties": {
+               "text": _s("Spoken German text of the scene"),
+               "image_prompt": _s("English image description for this scene")}}},
+           "voice": {"type": "boolean", "description": "Speak the text (default true)"}}, ["scenes"]),
+    _spec("record_screen", "Record the laptop screen as a video (e.g. Minecraft gameplay).",
+          {"seconds": {"type": "integer", "description": "Length, 3–300 s"}, "name": _s("File name")}),
+    _spec("edit_video", "Edit videos in the workspace: action cut (start,end like '00:00:05'), merge (inputs), gif, "
+          "compress (smaller for sending) or music (add music file).",
+          {"action": _s("cut, merge, gif, compress or music"), "input": _s("Video file"),
+           "inputs": {"type": "array", "items": {"type": "string"}, "description": "Videos for merge"},
+           "start": _s("Start time"), "end": _s("End time"), "music": _s("Music file"), "name": _s("Output name")}),
     _spec("research", "Research a factual question on the web: searches, reads several sources at once and returns "
           "the relevant passages with source numbers. Best for facts, results, news, prices.",
           {"query": _s("The question or search words")}, ["query"]),
@@ -836,7 +947,7 @@ TOOL_SPECS = [
 ]
 
 TOOLS = {
-    "web_search": web_search, "open_webpage": open_webpage, "research": research, "wikipedia": wikipedia, "weather": weather,
+    "web_search": web_search, "open_webpage": open_webpage, "research": research, "make_document": make_document, "wikipedia": wikipedia, "weather": weather,
     "calculate": calculate, "run_python": run_python, "run_powershell": run_powershell,
     "list_files": list_files, "read_file": read_file, "write_file": write_file,
     "open_on_laptop": open_on_laptop, "laptop_status": laptop_status, "remember": remember, "forget": forget,

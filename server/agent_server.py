@@ -25,7 +25,9 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import minecraft
 import tools
+import video
 import webpush
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -934,6 +936,10 @@ So arbeitest du:
   • Wetter → weather
   • Fakten, News, Preise, Ergebnisse, Termine, alles Aktuelle oder nach 2025 → research (liest mehrere Quellen; nenne sie als [1], [2])
   • Bild malen / zeichnen / generieren → create_image (Prompt auf Englisch, ausführlich)
+  • Brief, Bewerbung, Referat, Zusammenfassung als Datei → make_document (PDF)
+  • App, Spiel, Rechner, Webseite bauen → komplette EINE HTML-Datei (HTML+CSS+JS) mit write_file schreiben, dann publish_web – dann kann der Nutzer sie am Handy öffnen
+  • Minecraft-Shader bauen/anpassen → minecraft_shader (direkt action=create mit style und options)
+  • Video erstellen (Erklärvideo, Short, Story) → make_video mit 3–6 Szenen; Bildschirm aufnehmen → record_screen; schneiden/GIF/zusammenfügen → edit_video
   • Rechnungen → calculate (Prozent: "17.5% * 240"), bei viel Daten run_python
   • Inhalte von Dateien oder Ordnern → list_files / read_file
   • Erinnern / Timer / Wecker → set_reminder (kommt als Benachrichtigung aufs Handy)
@@ -1274,6 +1280,10 @@ def execute_call(run: Run, call: dict) -> tuple[bool, str]:
         return False, msg
     t0 = time.time()
     ok, result = tools.run_tool(name, args, CTX)
+    made = re.search(r"^Pfad: (.+)$", result, re.M) if ok else None
+    if made and Path(made.group(1).strip()).is_file() and tools._inside_workspace(Path(made.group(1).strip()), CTX):
+        run.current_call = cid
+        _offer_file(run, Path(made.group(1).strip()))
     log(f"Werkzeug {name} -> {'ok' if ok else 'Fehler'} ({time.time() - t0:.1f} s)", console=False)
     run.emit(t="result", id=cid, ok=ok, preview=result[:2000])
     return ok, result
@@ -1370,29 +1380,40 @@ def tool_phone_action(run: Run, args: dict) -> str:
 IMAGE_SIZES = {"square": (512, 512), "portrait": (448, 640), "landscape": (640, 448)}
 
 
+def sd_paint(prompt: str, w: int, h: int, out: Path, seed: int = -1) -> float:
+    """Malt ein Bild mit stable-diffusion.cpp (SD-Turbo, 4 Schritte) – gibt die Dauer in Sekunden zurück."""
+    exe = next((p for name in ("sd-cli.exe", "sd.exe") for p in (ENGINE / "sd").rglob(name)), None)
+    model = MODELS / "sd_turbo-f16-q8_0.gguf"
+    if not exe or not model.is_file():
+        raise ValueError("Bildgenerator ist nicht installiert.")
+    negative = "blurry, low quality, deformed, watermark, text, ugly, bad anatomy"
+    cmd = [str(exe), "-m", str(model), "-p", prompt[:900], "-n", negative, "--steps", "4", "--cfg-scale", "1.0",
+           "-W", str(w), "-H", str(h), "--sampling-method", "euler_a", "-s", str(int(seed)), "-o", str(out)]
+    t0 = time.time()
+    with SD_LOCK, open(LOGS / "sd.log", "ab") as logf:
+        p = subprocess.run(cmd, stdout=logf, stderr=subprocess.STDOUT, cwd=exe.parent, timeout=600,
+                           creationflags=CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
+    if p.returncode != 0 or not out.is_file():
+        raise ValueError(f"Bildgenerator ist fehlgeschlagen (Code {p.returncode}) – siehe data/logs/sd.log.")
+    return time.time() - t0
+
+
+SD_LOCK = threading.Lock()
+VIDEO: "video.Video | None" = None
+IMAGE_SIZES = {"square": (512, 512), "portrait": (448, 640), "landscape": (640, 448)}
+
+
 def tool_create_image(run: Run, args: dict) -> str:
     """Malt ein Bild lokal mit stable-diffusion.cpp (SD-Turbo) auf der iGPU."""
     prompt = str(args.get("prompt") or "").strip()
     if not prompt:
         raise ValueError("Bildbeschreibung fehlt.")
-    exe = next((p for name in ("sd-cli.exe", "sd.exe") for p in (ENGINE / "sd").rglob(name)), None)
-    model = MODELS / "sd_turbo-f16-q8_0.gguf"
-    if not exe or not model.is_file():
-        raise ValueError("Bildgenerator ist nicht installiert.")
     w, h = IMAGE_SIZES.get(str(args.get("format") or "square").lower(), (512, 512))
     folder = WORKSPACE / "Bilder"
     folder.mkdir(parents=True, exist_ok=True)
     out = folder / f"bild_{time.strftime('%Y%m%d_%H%M%S')}.png"
-    negative = "blurry, low quality, deformed, watermark, text, ugly, bad anatomy"
-    cmd = [str(exe), "-m", str(model), "-p", prompt[:900], "-n", negative, "--steps", "4", "--cfg-scale", "1.0",
-           "-W", str(w), "-H", str(h), "--sampling-method", "euler_a", "-s", str(int(args.get("seed") or -1)), "-o", str(out)]
-    t0 = time.time()
-    run.emit(t="status", d="Male das Bild …")
-    with open(LOGS / "sd.log", "ab") as logf:
-        p = subprocess.run(cmd, stdout=logf, stderr=subprocess.STDOUT, cwd=exe.parent, timeout=600,
-                           creationflags=CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
-    if p.returncode != 0 or not out.is_file():
-        raise ValueError(f"Bildgenerator ist fehlgeschlagen (Code {p.returncode}) – siehe data/logs/sd.log.")
+    run.emit(t="status", d="Male das Bild … (ca. 1 Minute)")
+    secs = sd_paint(prompt, w, h, out, int(args.get("seed") or -1))
     from PIL import Image
     img = Image.open(out).convert("RGB")
     img_id = f"{uuid.uuid4().hex}.jpg"
@@ -1401,12 +1422,118 @@ def tool_create_image(run: Run, args: dict) -> str:
     run.emit(t="image", id=img_id)
     run.emit(t="file", path=str(out), name=out.name, size=out.stat().st_size)
     run.tool_extra[run.current_call] = {"_image": img_id, "_imgfile": str(out)}
-    log(f"Bild gemalt in {time.time() - t0:.0f} s: {out.name}")
-    return f"Bild fertig ({w}×{h}, {time.time() - t0:.0f} s) und im Chat zu sehen. Gespeichert unter {out}."
+    log(f"Bild gemalt in {secs:.0f} s: {out.name}")
+    return f"Bild fertig ({w}×{h}, {secs:.0f} s) und im Chat zu sehen. Gespeichert unter {out}."
+
+
+def _offer_file(run: Run, path: Path) -> None:
+    run.emit(t="file", path=str(path), name=path.name, size=path.stat().st_size)
+    run.tool_extra[run.current_call] = {"_offer": {"path": str(path), "name": path.name, "size": path.stat().st_size}}
+
+
+def tool_minecraft_shader(run: Run, args: dict) -> str:
+    action = str(args.get("action") or "create").lower()
+    try:
+        if action == "options":
+            return minecraft.describe_options(str(args.get("base") or "aurora"))
+        if action == "list":
+            return minecraft.list_packs()
+        changes = args.get("options") or {}
+        if not isinstance(changes, dict):
+            raise ValueError('options muss ein Objekt sein, z. B. {"SATURATION": 1.25, "BLOOM": true}.')
+        return minecraft.create(str(args.get("base") or "aurora"), str(args.get("name") or "Mein-Shader"),
+                                args.get("profile"), args.get("style"), changes, WORKSPACE,
+                                activate=args.get("activate", True) is not False)
+    except minecraft.ShaderError as e:
+        raise ValueError(str(e))
+
+
+def tool_make_video(run: Run, args: dict) -> str:
+    scenes = args.get("scenes") or []
+    if isinstance(scenes, str):
+        scenes = [{"text": t.strip()} for t in scenes.split("\n") if t.strip()]
+    scenes = [s if isinstance(s, dict) else {"text": str(s)} for s in scenes]
+    if not scenes:
+        raise ValueError('Szenen fehlen: scenes = [{"text": ..., "image_prompt": ...}, ...]')
+    sizes = {"portrait": (448, 640), "landscape": (640, 448)}
+
+    def paint(prompt, orient, out):
+        sd_paint(prompt, *sizes[orient], out)
+
+    t0 = time.time()
+    try:
+        out = VIDEO.make_video(str(args.get("title") or "Mein Video"), scenes, str(args.get("format") or "short"),
+                               paint, lambda msg: run.emit(t="status", d=msg), voice=args.get("voice", True) is not False)
+    except video.VideoError as e:
+        raise ValueError(str(e))
+    _offer_file(run, out)
+    secs = VIDEO.duration(out)
+    log(f"Video gebaut in {time.time() - t0:.0f} s: {out.name}")
+    return (f"Video fertig: {out.name} ({secs:.0f} s lang, {len(scenes[:10])} Szenen). "
+            f"Liegt im Chat zum Abspielen/Herunterladen.\nPfad: {out}")
+
+
+def tool_record_screen(run: Run, args: dict) -> str:
+    secs = int(args.get("seconds") or 20)
+    run.emit(t="status", d=f"Nehme den Bildschirm {secs} s lang auf …")
+    try:
+        out = VIDEO.record_screen(secs, str(args.get("name") or ""))
+    except video.VideoError as e:
+        raise ValueError(str(e))
+    _offer_file(run, out)
+    return f"Aufnahme fertig: {out.name} ({VIDEO.duration(out):.0f} s).\nPfad: {out}"
+
+
+def tool_edit_video(run: Run, args: dict) -> str:
+    names = args.get("inputs") or ([args["input"]] if args.get("input") else [])
+    paths = []
+    for n in names:
+        p = tools._resolve(str(n), CTX)
+        if not p.is_file():
+            alt = tools._resolve(f"Videos/{n}", CTX)
+            p = alt if alt.is_file() else p
+        if not p.is_file():
+            raise ValueError(f"Video nicht gefunden: {n}")
+        paths.append(p)
+    music = tools._resolve(str(args["music"]), CTX) if args.get("music") else None
+    run.emit(t="status", d="Bearbeite das Video …")
+    try:
+        out = VIDEO.edit(str(args.get("action") or ""), paths, args.get("start"), args.get("end"), music,
+                         str(args.get("name") or ""))
+    except video.VideoError as e:
+        raise ValueError(str(e))
+    _offer_file(run, out)
+    return f"Fertig: {out.name}.\nPfad: {out}"
+
+
+def tool_publish_web(run: Run, args: dict) -> str:
+    """Macht eine HTML-Seite/App/Spiel aus dem Arbeitsordner am Handy spielbar (Link mit Zufalls-ID)."""
+    src = tools._resolve(str(args.get("path") or ""), CTX)
+    if not src.exists():
+        raise ValueError(f"Nicht gefunden: {src}")
+    if not tools._inside_workspace(src, CTX):
+        raise ValueError("Nur Dateien aus dem Arbeitsordner können veröffentlicht werden.")
+    pid = secrets.token_urlsafe(9).replace("-", "x").replace("_", "y")
+    dest = DATA / "published" / pid
+    if src.is_dir():
+        shutil.copytree(src, dest)
+        entry = "index.html" if (dest / "index.html").is_file() else next((f.name for f in dest.glob("*.htm*")), "")
+    else:
+        dest.mkdir(parents=True)
+        entry = "index.html" if src.suffix.lower() in (".html", ".htm") else src.name
+        shutil.copy(src, dest / entry)
+    base = TUNNEL.url or f"http://localhost:{CFG['port']}"
+    url = f"{base}/p/{pid}/{entry}"
+    action = {"type": "web", "url": url, "label": f"{str(args.get('title') or 'App')[:40]} öffnen"}
+    run.tool_extra[run.current_call] = {"_action": action}
+    run.emit(t="action", action=action)
+    return (f"Veröffentlicht: {url} – am Handy gibt es jetzt einen Knopf zum Öffnen. "
+            "Der Link gilt bis zum nächsten Neustart des Agenten (dann ändert sich die Tunnel-Adresse).")
 
 
 OFFERED: set[str] = set()  # Dateien außerhalb des Arbeitsordners, die der Nutzer ans Handy freigegeben hat
-SERVER_TOOLS = {"create_image": tool_create_image, "phone_action": tool_phone_action, "routine": lambda run, args: ROUTINES.tool(run, args),
+SERVER_TOOLS = {"publish_web": tool_publish_web, "create_image": tool_create_image, "minecraft_shader": tool_minecraft_shader,
+                "make_video": tool_make_video, "record_screen": tool_record_screen, "edit_video": tool_edit_video, "phone_action": tool_phone_action, "routine": lambda run, args: ROUTINES.tool(run, args),
                 "set_reminder": tool_set_reminder, "reminders": tool_list_reminders,
                 "send_to_phone": tool_send_to_phone, "laptop_screenshot": tool_laptop_screenshot}
 
@@ -1600,6 +1727,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not self._is_local():
                     return self._json(403, {"error": "nur am Laptop"})
                 return self._json(200, local_info())
+            m = re.match(r"^/p/([A-Za-z0-9]{8,20})/(.*)$", path)
+            if m:
+                root = (DATA / "published" / m.group(1)).resolve()
+                f = (root / (urllib.parse.unquote(m.group(2)) or "index.html")).resolve()
+                if root in f.parents and f.is_file():
+                    return self._file(f)
+                return self._json(404, {"error": "nicht gefunden"})
             if path == "/api/ping":
                 return self._json(200, {"ok": True})  # für den Tunnel-Wächter, ohne Schlüssel
             if not path.startswith("/api/"):
@@ -1831,6 +1965,8 @@ def main() -> None:
     CFG = load_config()
     CTX = tools.ToolContext(WORKSPACE, DATA / "memory.json", sys.executable)
     PUSH.setup()
+    global VIDEO
+    VIDEO = video.Video(ENGINE, WORKSPACE, LOGS)
     threading.Thread(target=REMINDERS.loop, daemon=True, name="reminders").start()
     threading.Thread(target=ROUTINES.loop, daemon=True, name="routines").start()
     port = CFG["port"]

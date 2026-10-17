@@ -50,6 +50,15 @@ Nova kann auch **direkt auf dem Handy** laufen – ganz ohne Laptop, sogar ohne 
 
 ## Was Nova noch kann
 
+- **Minecraft-Shader bauen:** „Bau mir einen warmen Shader mit hohen Wellen“ – Nova stellt deine geprüften
+  Packs AuroraCraft/BedRush ein (Stile: warm, kalt, bunt, düster, hell, realistisch, traumhaft; Profile;
+  einzelne Optionen), packt sie und installiert sie als `Nova-….zip` in `.minecraft\shaderpacks`.
+- **Videos:** „Mach ein Short über Füchse“ – Szenen mit gemalten Bildern, Stimme (Hedda), Untertiteln
+  und Zoom; außerdem Bildschirm aufnehmen, schneiden, zusammenfügen, GIF, verkleinern, Musik drunter.
+  Videos landen in `workspace\Videos` und lassen sich in der App abspielen.
+- **Apps & Spiele:** „Bau mir ein Snake-Spiel“ – Nova programmiert es und gibt dir einen Link zum Spielen
+  am Handy (gilt bis zum nächsten Neustart des Agenten).
+- **Dokumente:** „Schreib mir eine Bewerbung als PDF“ – fertige PDF in `workspace\Dokumente`.
 - **Bilder malen:** „Mal mir einen Drachen über einer Burg“ – lokal mit SD-Turbo auf der iGPU,
   das Bild landet im Chat und unter `workspace\Bilder`.
 - **Recherche mit Quellen:** Fakten-Fragen beantwortet Nova aus mehreren Webseiten und nennt sie als [1], [2] …
