@@ -1156,8 +1156,26 @@ def build_messages(conv: dict, pin: int | None = None) -> list[dict]:
                 clean["content"] = m["content"] + "\n[Bild ausgelassen, um Platz zu sparen]"
         if m["role"] == "assistant":
             clean["content"] = m.get("content") or ""
+            if m.get("tool_calls"):
+                clean["tool_calls"] = [_safe_call(tc) for tc in m["tool_calls"]]
         out.append(clean)
     return out
+
+
+def _valid_args(raw: str) -> bool:
+    try:
+        return isinstance(json.loads(raw or "{}"), dict)
+    except ValueError:
+        return False
+
+
+def _safe_call(tc: dict) -> dict:
+    """Abgeschnittene/kaputte Argumente (z. B. Längenlimit mitten im Code) ersetzen – llama-server parst den Verlauf
+    als JSON und würde sonst JEDE weitere Anfrage in diesem Chat mit Fehler 500 ablehnen („vergifteter“ Chat)."""
+    fn = tc.get("function") or {}
+    if _valid_args(fn.get("arguments")):
+        return tc
+    return {**tc, "function": {**fn, "arguments": json.dumps({"_abgeschnitten": "Argumente waren kein gültiges JSON"})}}
 
 
 def llm_request(body: dict, timeout: int = 1200):
@@ -1379,8 +1397,8 @@ def agent_loop(run: Run) -> None:
                 if reasoning:
                     msg["_thinking"] = reasoning
                 if calls:
-                    msg["tool_calls"] = [{"id": c["id"], "type": "function",
-                                          "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}}
+                    msg["tool_calls"] = [_safe_call({"id": c["id"], "type": "function",
+                                                     "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}})
                                          for c in calls]
                 run.commit(msg)
                 if final and calls:
@@ -1451,7 +1469,13 @@ def execute_call(run: Run, call: dict) -> tuple[bool, str]:
             raise ValueError
     except ValueError:
         run.emit(t="tool", id=cid, name=name, args={"_roh": call["arguments"][:500]})
-        msg = "Fehler: Die Argumente waren kein gültiges JSON-Objekt. Versuche es nochmal."
+        if len(call["arguments"] or "") > 3000:
+            msg = ("Fehler: Dein Aufruf war zu lang und wurde mitten drin abgeschnitten (Längenlimit) – nichts wurde "
+                   "ausgeführt. Schreib große Dateien in TEILEN: zuerst ein Grundgerüst mit write_file (höchstens ~150 "
+                   "Zeilen), dann mit edit_file Stück für Stück erweitern. Für Spiele make_game nutzen: action=code mit "
+                   "more=true für den ersten Teil, weitere Teile mit action=add.")
+        else:
+            msg = "Fehler: Die Argumente waren kein gültiges JSON-Objekt. Versuche es nochmal."
         run.emit(t="result", id=cid, ok=False, preview=msg)
         return False, msg
     run.emit(t="tool", id=cid, name=name, args=args)
@@ -1778,9 +1802,14 @@ def tool_make_game(run: Run, args: dict) -> str:
         if action == "show":
             return "Aktueller Spiel-Code:\n" + games.get_code(path)
         if action == "code":
-            games.set_code(path, args.get("code") or "")
+            games.set_code(path, args.get("code") or "", partial=bool(args.get("more")))
+        elif action == "add":
+            games.add_code(path, args.get("code") or "")
         elif action != "test":
-            raise games.GameError("action muss create, code, test oder show sein.")
+            raise games.GameError("action muss create, code, add, test oder show sein.")
+        if action in ("code", "add") and args.get("more"):
+            return ("Teil gespeichert (noch nicht getestet). Schick den nächsten Teil mit make_game(action=add, "
+                    f"name=\"{args.get('name')}\", code=…); beim letzten Teil more weglassen – dann wird getestet.")
         run.emit(t="status", d="Spiele das Spiel im unsichtbaren Browser durch …")
         shot = path.parent / "vorschau.png"
         rep = games.test(path, shot)
@@ -2161,6 +2190,10 @@ class Handler(BaseHTTPRequestHandler):
                 existing = RUNS.get(conv["id"])
                 if existing and not existing.done:
                     return self._json(409, {"error": "In diesem Chat läuft noch eine Aufgabe."})
+                last = conv["messages"][-1] if conv["messages"] else None
+                if (last and last["role"] == "user" and not last.get("_system") and not images
+                        and (last.get("_display") or last.get("content")) == text):
+                    conv["messages"].pop()  # gleiche Nachricht nochmal (z. B. nach Verbindungsabbruch) → nicht doppeln
                 if body.get("replace_last"):  # „Neu erzeugen“ / „Bearbeiten“: letzte Frage samt Antwort ersetzen
                     idx = next((i for i in range(len(conv["messages"]) - 1, -1, -1)
                                 if conv["messages"][i]["role"] == "user" and not conv["messages"][i].get("_system")), None)

@@ -992,15 +992,17 @@ TOOL_SPECS = [
           "keyboard, sound, highscore, levels, menus, effects are already built in). Step 1: action=create (name, "
           "title, how_to, controls). Step 2: action=code with ONLY the JavaScript `const game = {init(), update(dt), "
           "draw(ctx)}` – it is played automatically in a hidden browser and published to the phone if the test is OK. "
-          "Fix every problem the test reports and send the whole code again. action=test re-tests (also any other HTML "
-          "game via path), action=show returns the current game code.",
-          {"action": {"type": "string", "enum": ["create", "code", "test", "show"]},
+          "Fix every problem the test reports and send the whole code again. Long code (over ~150 lines): send it in parts "
+          "– action=code with more=true first, then action=add for each further part (more=true until the last). "
+          "action=test re-tests (also any other HTML game via path), action=show returns the current game code.",
+          {"action": {"type": "string", "enum": ["create", "code", "add", "test", "show"]},
            "name": _s("Project name, e.g. Weltraum-Abwehr"), "title": _s("Game title shown in the menu"),
            "how_to": _s("One sentence: goal + how to play (German)"),
            "controls": {"type": "string", "enum": ["stick", "tap"],
                         "description": "stick = joystick + fire button (move/shoot games), tap = tap/drag on the field"},
            "lives": {"type": "integer", "description": "Lives (default 3)"},
            "code": _s("action=code: the complete JavaScript `const game = {...};` (plus own helper classes/functions)"),
+           "more": {"type": "boolean", "description": "true = more parts follow, do not test yet"},
            "path": _s("action=test: any HTML game file in the workspace")}, ["action"]),
     _spec("minecraft_shader","Build a custom Minecraft shaderpack (Iris, Java 26.3) from the user's tested packs and install "
           "it. action=options lists all settings of a base; action=create builds one; action=list shows installed packs. "

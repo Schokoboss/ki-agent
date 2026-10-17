@@ -82,24 +82,41 @@ def get_code(path: Path) -> str:
     return html[html.index("\n", a) + 1:b].rstrip()
 
 
-def set_code(path: Path, code: str) -> None:
+def _clean(code: str) -> str:
     code = str(code or "").strip()
     code = re.sub(r"^```[a-zA-Z]*\s*\n|\n```\s*$", "", code).strip()
     if re.search(r"<\s*(html|script|body|canvas)\b", code, re.I):
         raise GameError("Bitte NUR den JavaScript-Teil schicken (const game = {init, update, draw}), kein HTML.")
-    if not re.search(r"\b(const|let|var)\s+game\s*=", code):
-        raise GameError("Der Code muss `const game = { init() {…}, update(dt) {…}, draw(ctx) {…} };` enthalten.")
-    for fn in ("init", "update", "draw"):
-        if not re.search(rf"\b{fn}\s*(\(|:\s*function|=)", code):
-            raise GameError(f"In `game` fehlt die Funktion {fn}().")
     if re.search(r"requestAnimationFrame|getContext\(|addEventListener\(\s*['\"]key", code):
         raise GameError("Keine eigene Spielschleife/Canvas/Tastatur – das macht die Vorlage. Nutze input.* und draw(ctx).")
+    return code
+
+
+def set_code(path: Path, code: str, partial: bool = False) -> None:
+    """Ersetzt das Spiel. partial=True: erster von mehreren Teilen (game-Objekt darf noch fehlen)."""
+    code = _clean(code)
+    if not partial:
+        if not re.search(r"\b(const|let|var)\s+game\s*=", code):
+            raise GameError("Der Code muss `const game = { init() {…}, update(dt) {…}, draw(ctx) {…} };` enthalten.")
+        for fn in ("init", "update", "draw"):
+            if not re.search(rf"\b{fn}\s*(\(|:\s*function|=)", code):
+                raise GameError(f"In `game` fehlt die Funktion {fn}().")
     html = path.read_text(encoding="utf-8")
     a, b = html.find(START), html.find(END)
     if a < 0 or b < 0:
         raise GameError("Das ist kein Vorlagen-Spiel (Markierungen fehlen).")
     head = html[:html.index("\n", a) + 1]
     path.write_text(head + code + "\n" + html[b:], encoding="utf-8")
+
+
+def add_code(path: Path, code: str) -> None:
+    """Hängt einen weiteren Teil (Klassen, Hilfsfunktionen, Level-Daten …) an das Spiel an."""
+    code = _clean(code)
+    html = path.read_text(encoding="utf-8")
+    b = html.find(END)
+    if b < 0:
+        raise GameError("Das ist kein Vorlagen-Spiel (Markierungen fehlen).")
+    path.write_text(html[:b].rstrip() + "\n\n" + code + "\n" + html[b:], encoding="utf-8")
 
 
 # ------------------------------------------------------------------ Test im unsichtbaren Chrome
