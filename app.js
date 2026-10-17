@@ -59,15 +59,22 @@ function toast(msg, ms = 2600) {
 
 /* ------------------------------------------------------------ Markdown */
 
+// Alte Links auf Nova-Seiten zeigen auf eine Tunnel-Adresse, die bei jedem Laptop-Neustart wechselt → auf die aktuelle umbiegen
+function fixLink(u) {
+  const m = /^https:\/\/[a-z0-9-]+\.trycloudflare\.com(\/p\/.*)$/.exec(u);
+  return m && state.conn?.u ? state.conn.u.replace(/\/$/, '') + m[1] : u;
+}
+
 function inline(s) {
   const codes = [];
   s = s.replace(/`([^`\n]+)`/g, (_, c) => { codes.push(c); return `\u0000${codes.length - 1}\u0000`; });
   s = esc(s);
-  s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, t, u) => `<a href="${u}" target="_blank" rel="noopener">${t}</a>`);
+  s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, t, u) => `<a href="${fixLink(u)}" target="_blank" rel="noopener">${t}</a>`);
   s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+[^\s<).,;:!?'"])/g, (_, p, u) => {
     let label = u.replace(/^https?:\/\/(www\.)?/, '');
+    if (/\/go\.html#/.test(u)) label = 'Nova-Seite öffnen';
     if (label.length > 42) label = label.slice(0, 40) + '…';
-    return `${p}<a href="${u}" target="_blank" rel="noopener">${label}</a>`;
+    return `${p}<a href="${fixLink(u)}" target="_blank" rel="noopener">${label}</a>`;
   });
   s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>').replace(/__([^_\n]+)__/g, '<strong>$1</strong>');
   s = s.replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, '$1<em>$2</em>');
@@ -1163,7 +1170,9 @@ function buildAction(a) {
     case 'youtube': return { icon: 'play', label: 'Auf YouTube', detail: a.query, href: `https://www.youtube.com/results?search_query=${enc(a.query || '')}` };
     case 'spotify': return { icon: 'play', label: 'Auf Spotify', detail: a.query, href: `https://open.spotify.com/search/${enc(a.query || '')}` };
     case 'search': return { icon: 'search', label: 'Google-Suche', detail: a.query, href: `https://www.google.com/search?q=${enc(a.query || '')}` };
-    case 'web': return /^https?:\/\//.test(a.url || '') ? { icon: 'globe', label: 'Webseite öffnen', detail: a.url, href: a.url } : null;
+    case 'web': return /^https?:\/\//.test(a.url || '')
+      ? { icon: 'globe', label: a.label || 'Webseite öffnen', detail: /\/go\.html#/.test(a.url) ? 'Fester Link – teilbar' : a.url, href: fixLink(a.url) }
+      : null;
     case 'share': return { icon: 'share', label: 'Teilen', detail: a.text, share: a.text || '' };
     case 'copy': return { icon: 'copy', label: 'Kopieren', detail: a.text, copy: a.text || '' };
     default: return null;
