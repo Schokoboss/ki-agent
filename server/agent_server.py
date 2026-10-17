@@ -205,12 +205,26 @@ class Llama:
                 self.state = "fehlt"
                 log(f"FEHLER: llama-server.exe oder Modell fehlt ({exe}, {model}).")
                 return
+            level = int((CFG.get("gpu_level") or {}).get(info["id"], 0))
+            ctx = min(CFG["ctx_size"], info.get("ctx", CFG["ctx_size"]))
             args = [str(exe), "-m", str(model), "--host", "127.0.0.1", "--port", str(CFG["llama_port"]),
-                    "-c", str(CFG["ctx_size"]), "-np", "1", "--jinja", "-t", str(CFG["threads"]),
-                    "-ngl", str(CFG["gpu_layers"]), "--cache-ram", str(CFG["cache_ram_mb"]), "--no-webui"]
+                    "-np", "1", "--jinja", "-t", str(CFG["threads"]), "--cache-ram", str(CFG["cache_ram_mb"]), "--no-webui"]
+            # Sparstufen gegen „ErrorOutOfDeviceMemory“ (die iGPU teilt sich den RAM mit Windows):
+            #   0 = normal (große Modelle: automatisch passend verteilen), 1 = mehr Abstand + kleiner Kontext,
+            #   2 = nur CPU
+            if level >= 2:
+                args += ["-ngl", "0", "-c", str(min(ctx, 16384)), "--no-mmproj-offload"]
+            elif level == 1 or info.get("fit"):
+                margin = 3072 if level == 1 else 1536
+                args += ["--fit", "on", "--fit-target", str(margin), "-c", str(min(ctx, 16384) if level else ctx),
+                         "-ub", "256", "--no-mmproj-offload"]
+            else:
+                args += ["-ngl", str(CFG["gpu_layers"]), "-c", str(ctx)]
             if mmproj.is_file():
                 args += ["--mmproj", str(mmproj)]
             args += info.get("extra_args") or []
+            if level:
+                log(f"Sparmodus Stufe {level} für {info['label']} (Grafikspeicher war voll).")
             self.state = "lädt"
             self.switching = False
             log(f"KI-Modell {info['label']} wird geladen …")
@@ -261,6 +275,19 @@ class Llama:
         if self.proc and self.proc.poll() is None:
             self.proc.terminate()
 
+    def degrade(self) -> int:
+        """Grafikspeicher voll: aktuelles Modell eine Sparstufe tiefer neu laden (wird gemerkt)."""
+        mid = current_model()["id"]
+        levels = CFG.setdefault("gpu_level", {})
+        levels[mid] = min(int(levels.get(mid, 0)) + 1, 2)
+        save_config(CFG)
+        self.switching = True
+        self.restarts = 0
+        self.state = "lädt"
+        if self.proc and self.proc.poll() is None:
+            self.proc.terminate()
+        return levels[mid]
+
     def stop(self) -> None:
         self._stopping = True
         if self.proc and self.proc.poll() is None:
@@ -272,7 +299,7 @@ MODEL_CATALOG = {
     "qwen35-9b": {"label": "Qwen3.5 9B", "desc": "Am klügsten (Programmieren, Fakten), versteht Bilder – langsamer, "
                                                   "braucht ~8 GB freien RAM (Spiele zu)",
                   "file": "Qwen3.5-9B-Q4_K_M.gguf", "mmproj": "mmproj-Qwen3.5-9B-F16.gguf", "family": "qwen",
-                  "min_bytes": 5_600_000_000},
+                  "min_bytes": 5_600_000_000, "fit": True, "ctx": 24576},
     "qwen35-4b-turbo": {"label": "Qwen3.5 4B Turbo", "desc": "Experimentell: schneller nur mit viel freiem RAM (Spiele zu) – ohne Bilderkennung",
                         "file": "Qwen3.5-4B-MTP-Q4_K_M.gguf", "mmproj": None, "family": "qwen",
                         "extra_args": ["--spec-type", "draft-mtp", "--spec-draft-n-max", "3"],
@@ -285,7 +312,7 @@ MODEL_CATALOG = {
                   "min_bytes": 1_300_000_000},
     "gemma4-e4b": {"label": "Gemma 4 E4B", "desc": "Google – gut in Sprache, versteht Bilder, etwas langsamer",
                    "file": "gemma-4-E4B_q4_0-it.gguf", "mmproj": "gemma-4-E4B-it-mmproj.gguf", "family": "gemma",
-                   "min_bytes": 5_100_000_000},
+                   "min_bytes": 5_100_000_000, "fit": True},
 }
 SAMPLING = {"qwen": {"temperature": 0.7, "top_p": 0.8, "top_k": 20},
             "gemma": {"temperature": 1.0, "top_p": 0.95, "top_k": 64}}
@@ -1147,6 +1174,23 @@ def llm_stream(messages: list[dict], run: Run):
     return content, reasoning, ordered, timings, finish
 
 
+def llm_stream_safe(messages: list[dict], run: Run):
+    """Wie llm_stream – aber läuft der Grafikspeicher über, lädt Nova das Modell sparsamer neu und versucht es nochmal."""
+    for attempt in range(3):
+        try:
+            return llm_stream(messages, run)
+        except LlamaError as e:
+            text = str(e)
+            if attempt == 2 or not ("OutOfDeviceMemory" in text or "allocateMemory" in text or "out of memory" in text.lower()):
+                raise
+            level = LLAMA.degrade()
+            what = "nur mit der CPU" if level >= 2 else "sparsamer"
+            run.emit(t="status", d=f"Grafikspeicher war voll – lade das Modell {what} neu und versuche es nochmal …")
+            log(f"Grafikspeicher voll – Sparstufe {level}, neuer Versuch.")
+            time.sleep(3)
+            LLAMA.wait_ready(run, timeout=300)
+
+
 def warm_up() -> None:
     """Rechnet System-Prompt und Werkzeuge einmal vor, damit die erste echte Nachricht schnell geht."""
     if not RUN_LOCK.acquire(blocking=False):
@@ -1212,7 +1256,7 @@ def agent_loop(run: Run) -> None:
                 run.step += 1
                 if long:
                     run.emit(t="work", **run.info())
-                content, reasoning, calls, timings, finish = llm_stream(build_messages(conv, run.base), run)
+                content, reasoning, calls, timings, finish = llm_stream_safe(build_messages(conv, run.base), run)
                 stats["predicted_n"] += timings.get("predicted_n", 0)
                 stats["predicted_ms"] += timings.get("predicted_ms", 0.0)
                 msg = {"role": "assistant", "content": content}
