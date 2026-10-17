@@ -1,6 +1,6 @@
 // Service Worker: Offline-Hülle, Benachrichtigungen (Web Push) und „Teilen mit Nova“.
 // Wichtig: Nur eigene Caches (nova-*) aufräumen – WebLLM legt dort das Handy-Modell ab.
-const CACHE = 'nova-v3';
+const CACHE = 'nova-v4';
 const LIB_CACHE = 'nova-lib-v1';
 const SHARE_CACHE = 'nova-share';
 const ASSETS = ['./', 'index.html', 'style.css', 'app.js', 'local.js', 'llm-worker.js', 'manifest.webmanifest',
@@ -59,8 +59,9 @@ self.addEventListener('fetch', e => {
     return;
   }
   if (url.origin !== location.origin || url.pathname.includes('/api/')) return;
+  // Immer beim Server nachfragen (GitHub Pages lässt sonst 10 min alte Dateien im Browser-Cache)
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request.url, { cache: 'no-cache', credentials: 'same-origin' })
       .then(res => {
         if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); }
         return res;
