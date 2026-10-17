@@ -26,6 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import tools
+import webpush
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
@@ -37,7 +38,9 @@ WORKSPACE = ROOT / "workspace"
 ENGINE = ROOT / "engine"
 MODELS = ROOT / "models"
 CONFIG_PATH = DATA / "config.json"
-VERSION = "1.0"
+PUSH_PATH = DATA / "push.json"
+REMINDER_PATH = DATA / "reminders.json"
+VERSION = "1.2"
 MAX_STEPS = 15
 CREATE_NO_WINDOW = 0x08000000
 
@@ -58,6 +61,7 @@ DEFAULT_CONFIG = {
     "open_connect_page": True,
     "gist_id": "",
     "token": "",
+    "vapid_private": "",
 }
 
 _log_lock = threading.Lock()
@@ -400,7 +404,7 @@ TUNNEL = Tunnel()
 
 # ---------------------------------------------------------------- Chats speichern
 
-ID_RE = re.compile(r"^[a-z0-9]{6,40}$")
+ID_RE = re.compile(r"^[a-z0-9_]{6,40}$")
 
 
 class Store:
@@ -460,6 +464,205 @@ class Store:
                 pass
 
 
+# ---------------------------------------------------------------- Benachrichtigungen (Web Push)
+
+class Push:
+    """Meldet sich am Handy, auch wenn die App zu ist. Abos liegen in data/push.json, der VAPID-Schlüssel
+    in data/config.json. Verschickt wird an den Push-Dienst des Handys (Chrome: Google), Ende-zu-Ende
+    verschlüsselt – Google sieht den Inhalt nicht."""
+
+    def __init__(self):
+        self.vapid: webpush.Vapid | None = None
+        self.lock = threading.RLock()
+
+    def setup(self) -> None:
+        if not CFG.get("vapid_private"):
+            CFG["vapid_private"] = webpush.new_private_key()
+            save_config(CFG)
+        self.vapid = webpush.Vapid(CFG["vapid_private"], CFG["app_url"])
+
+    def subs(self) -> list[dict]:
+        with self.lock:
+            try:
+                subs = json.loads(PUSH_PATH.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return []
+        return [s for s in subs if isinstance(s, dict) and s.get("key") == self.vapid.public]
+
+    def _save(self, subs: list[dict]) -> None:
+        tmp = PUSH_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(subs, ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(tmp, PUSH_PATH)
+
+    def add(self, raw: dict, device: str) -> int:
+        sub = webpush.check_subscription(raw)
+        with self.lock:
+            subs = [s for s in self.subs() if s["endpoint"] != sub["endpoint"]]
+            subs.append({**sub, "key": self.vapid.public, "device": str(device or "")[:60], "added": time.time()})
+            self._save(subs[-10:])
+            return len(subs[-10:])
+
+    def remove(self, endpoint: str) -> None:
+        with self.lock:
+            self._save([s for s in self.subs() if s["endpoint"] != endpoint])
+
+    def send(self, payload: dict, ttl: int, urgency: str = "normal", topic: str | None = None,
+             only: str | None = None) -> dict:
+        subs = [s for s in self.subs() if not only or s["endpoint"] == only]
+        sent, failed = 0, []
+        for s in subs:
+            try:
+                status, err = webpush.send(s, payload, self.vapid, ttl=ttl, urgency=urgency, topic=topic)
+            except ValueError as e:
+                status, err = 400, str(e)
+            if 200 <= status < 300:
+                sent += 1
+                continue
+            failed.append(f"{status or 'Netz'}: {err}".strip()[:200])
+            if status in (404, 410):
+                self.remove(s["endpoint"])  # App deinstalliert oder Benachrichtigungen abgeschaltet
+        if subs:
+            log(f"Benachrichtigung „{payload.get('title')}“ an {sent}/{len(subs)} Gerät(e)"
+                + (f" – Fehler: {'; '.join(failed)}" if failed else ""), console=bool(failed))
+        return {"devices": len(subs), "sent": sent, "failed": failed}
+
+    def push(self, payload: dict, ttl: int, urgency: str = "normal", topic: str | None = None) -> None:
+        if self.vapid and self.subs():
+            threading.Thread(target=self.send, args=(payload, ttl, urgency, topic), daemon=True, name="push").start()
+
+    def notify(self, kind: str, title: str, body: str, run: "Run", ttl: int, urgency: str = "normal") -> None:
+        self.push({"kind": kind, "title": title, "body": body, "conv": run.conv_id,
+                   "tag": f"nova-{run.conv_id}", "ts": time.time()}, ttl, urgency, f"c{run.conv_id}")
+
+    def test(self, endpoint: str | None) -> dict:
+        payload = {"kind": "test", "title": "🔔 Benachrichtigungen sind an",
+                   "body": "So meldet sich Nova, wenn ein Auftrag fertig ist, eine Freigabe braucht oder eine Erinnerung fällig ist.",
+                   "tag": "nova-test", "ts": time.time()}
+        return self.send(payload, ttl=300, urgency="high", only=endpoint or None)
+
+
+PUSH = Push()
+
+
+def _plain(text: str, limit: int) -> str:
+    """Markdown grob entfernen und kürzen – für die Vorschau in der Benachrichtigung."""
+    t = re.sub(r"```.*?```", " (Code) ", text or "", flags=re.S)
+    t = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", t)
+    t = re.sub(r"\s+", " ", re.sub(r"[*_#>`|~]+", "", t)).strip()
+    return t if len(t) <= limit else t[:limit - 1].rstrip() + "…"
+
+
+def notify_done(run: "Run", stats: dict, why: str) -> None:
+    if stats["cancelled"] or (not stats["long"] and stats["seconds"] < 25):
+        return  # selbst abgebrochen oder so schnell, dass die App sicher noch offen ist
+    last = next((m["content"] for m in reversed(run.conv["messages"])
+                 if m["role"] == "assistant" and (m.get("content") or "").strip()), "")
+    answer = _plain(re.sub(r"^\W*FERTIG\W*", "", last.strip(), flags=re.I), 220)
+    title = {"time": "⏰ Arbeitszeit vorbei", "steps": "⏸️ Angehalten"}.get(
+        why, "✅ Auftrag fertig" if stats["long"] else "💬 Antwort fertig")
+    head = run.conv.get("title") or "Chat"
+    if stats["long"]:
+        head += f" · {fmt_dur(stats['seconds'])}"
+    PUSH.notify("done", title, f"{head}\n{answer}" if answer else head, run, ttl=12 * 3600)
+
+
+def notify_error(run: "Run", msg: str) -> None:
+    if not run.cancel.is_set():
+        PUSH.notify("error", "⚠️ Auftrag gestoppt" if run.deadline else "⚠️ Fehler",
+                    f"{run.conv.get('title') or 'Chat'}\n{msg[:200]}", run, ttl=12 * 3600)
+
+
+def notify_approval(run: "Run", args: dict, reason: str, deadline: float) -> None:
+    detail = str(args.get("code") or args.get("command") or args.get("target") or "")
+    first = next((ln.strip() for ln in detail.splitlines() if ln.strip() and not ln.strip().startswith("#")), "")
+    lines = [run.conv.get("title") or "Chat", reason + (f": {first[:90]}" if first else ""),
+             f"Wartet bis {time.strftime('%H:%M', time.localtime(deadline))} Uhr auf dich."]
+    PUSH.notify("approve", "🔐 Freigabe nötig", "\n".join(lines), run, ttl=600, urgency="high")
+
+
+# ---------------------------------------------------------------- Erinnerungen
+
+class Reminders:
+    """Erinnerungen, die der Agent setzt. Kommen als Benachrichtigung aufs Handy – auch wenn die App zu ist."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+
+    def _load(self) -> list[dict]:
+        try:
+            return json.loads(REMINDER_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+
+    def _save(self, items: list[dict]) -> None:
+        tmp = REMINDER_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(items, ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(tmp, REMINDER_PATH)
+
+    @staticmethod
+    def parse_when(minutes, at) -> float:
+        now = time.time()
+        if minutes not in (None, ""):
+            return now + float(str(minutes).replace(",", ".")) * 60
+        s = str(at or "").strip().lower()
+        day = 0
+        if s.startswith("morgen"):
+            day, s = 1, s[6:].strip()
+        if s.startswith("übermorgen"):
+            day, s = 2, s[10:].strip()
+        s = s.removeprefix("um").strip().removesuffix("uhr").strip()
+        s = re.sub(r"^(\d{1,2}\.\d{1,2}\.)\s", lambda m: f"{m.group(1)}{time.localtime().tm_year} ", s)
+        for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%d.%m.%Y %H:%M"):
+            try:
+                return time.mktime(time.strptime(s[:16], fmt))
+            except ValueError:
+                pass
+        m = re.fullmatch(r"(\d{1,2})(?:[:.](\d{2}))?", s)
+        if not m:
+            raise ValueError("Zeit nicht verstanden – nutze minutes oder at wie '18:30' / 'morgen 08:00'.")
+        lt = time.localtime(now)
+        target = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday + day, int(m.group(1)), int(m.group(2) or 0), 0, 0, 0, -1))
+        if target <= now and day == 0:
+            target += 86400  # Uhrzeit heute schon vorbei -> morgen
+        return target
+
+    def add(self, text: str, when: float, conv_id: str) -> dict:
+        item = {"id": uuid.uuid4().hex[:8], "text": text[:300], "when": when, "conv": conv_id, "created": time.time()}
+        with self.lock:
+            items = self._load()
+            items.append(item)
+            self._save(items)
+        return item
+
+    def pending(self) -> list[dict]:
+        with self.lock:
+            return sorted(self._load(), key=lambda r: r["when"])
+
+    def cancel(self, rid: str) -> bool:
+        with self.lock:
+            items = self._load()
+            keep = [r for r in items if r["id"] != rid]
+            self._save(keep)
+            return len(keep) != len(items)
+
+    def loop(self) -> None:
+        while True:
+            time.sleep(15)
+            now = time.time()
+            with self.lock:
+                items = self._load()
+                due = [r for r in items if r["when"] <= now]
+                if due:
+                    self._save([r for r in items if r["when"] > now])
+            for r in due:
+                PUSH.push({"kind": "reminder", "title": "⏰ Erinnerung", "body": r["text"], "conv": r.get("conv"),
+                           "tag": f"nova-rem-{r['id']}", "ts": now}, ttl=6 * 3600, urgency="high")
+                log(f"Erinnerung verschickt: {r['text'][:60]}")
+
+
+REMINDERS = Reminders()
+
+
 # ---------------------------------------------------------------- Agent
 
 CTX: tools.ToolContext | None = None
@@ -511,6 +714,7 @@ class Run:
         self.free_hand = bool(settings.get("free_hand"))
         self.thinking = bool(settings.get("thinking"))
         self.step = 0
+        self.after_tools: list[dict] = []  # z. B. Bildschirmfoto, das nach den Werkzeug-Ergebnissen folgt
 
     def emit(self, **ev) -> None:
         with self.cond:
@@ -569,6 +773,11 @@ So arbeitest du:
   • News, Preise, Ergebnisse, Termine, alles Aktuelle oder nach 2025 → web_search, danach die beste Quelle mit open_webpage lesen und erst dann antworten
   • Rechnungen → calculate (Prozent: "17.5% * 240"), bei viel Daten run_python
   • Inhalte von Dateien oder Ordnern → list_files / read_file
+  • Erinnern / Timer / Wecker → set_reminder (kommt als Benachrichtigung aufs Handy)
+  • Was ist auf dem Laptop-Bildschirm → laptop_screenshot
+  • Musik, Lautstärke → media_control; Laptop sperren → lock_laptop
+  • Datei aufs Handy schicken → send_to_phone; Datei aus dem Netz laden → download_file
+- Dateien, die der Nutzer vom Handy schickt, liegen im Arbeitsordner unter „Vom Handy“.
   Bei mehreren Fragen in einer Nachricht rufst du für jede das passende Werkzeug auf.
 - Wenn du ein Werkzeug brauchst, rufe es SOFORT auf und schreibe vorher KEINE Antwort. Antworte erst, wenn alle Werkzeug-Ergebnisse da sind.
 - Erfinde nie Fakten, Links, Zahlen oder Werkzeug-Ergebnisse. Klappt ein Werkzeug nicht, versuche einen anderen Weg oder sag ehrlich, was nicht ging.
@@ -747,6 +956,7 @@ def request_approval(run: Run, cid: str, name: str, args: dict, reason: str) -> 
     run.approvals[cid] = slot
     run.emit(t="approve", id=cid, name=name, args=args, reason=reason)
     deadline = time.time() + 600
+    notify_approval(run, args, reason, deadline)
     while not slot["event"].wait(0.5):
         if run.cancel.is_set() or time.time() > deadline:
             break
@@ -831,20 +1041,27 @@ def agent_loop(run: Run) -> None:
                     stats["tools"] += 1
                     run.commit({"role": "tool", "tool_call_id": c["id"], "name": c["name"], "content": result,
                                 "_ok": ok})
+                for extra in run.after_tools:
+                    run.commit(extra)
+                run.after_tools.clear()
             if run.step >= max_steps:
                 run.emit(t="status", d=f"Nach {max_steps} Schritten angehalten.")
         finally:
             keep_awake(False)
             RUN_LOCK.release()
         tps = stats["predicted_n"] / (stats["predicted_ms"] / 1000) if stats["predicted_ms"] else 0
-        run.emit(t="done", stats={"tokens": stats["predicted_n"], "tps": round(tps, 1), "tools": stats["tools"],
-                                  "seconds": round(time.time() - run.started, 1), "steps": run.step,
-                                  "cancelled": run.cancel.is_set(), "long": long})
+        summary = {"tokens": stats["predicted_n"], "tps": round(tps, 1), "tools": stats["tools"],
+                   "seconds": round(time.time() - run.started, 1), "steps": run.step,
+                   "cancelled": run.cancel.is_set(), "long": long}
+        run.emit(t="done", stats=summary)
+        notify_done(run, summary, "time" if final else "steps" if run.step >= max_steps else "done")
     except LlamaError as e:
         run.emit(t="error", d=str(e))
+        notify_error(run, str(e))
     except Exception as e:
         log("Agent-Fehler:\n" + traceback.format_exc(), console=False)
         run.emit(t="error", d=f"Interner Fehler: {e}")
+        notify_error(run, f"Interner Fehler: {e}")
     finally:
         run.finish()
         if long:
@@ -870,6 +1087,18 @@ def execute_call(run: Run, call: dict) -> tuple[bool, str]:
         run.conv["_notes"] = str(args.get("notes") or "")[:4000]
         run.emit(t="result", id=cid, ok=True, preview="Notizen gespeichert.")
         return True, "Notizen gespeichert."
+    if name in SERVER_TOOLS:
+        if name == "send_to_phone":
+            reason = tools.approval_reason("read_file", args, CTX)
+            if reason and not run.free_hand and not request_approval(run, cid, name, args, reason):
+                run.emit(t="result", id=cid, ok=False, denied=True, preview="Abgelehnt.")
+                return False, "Der Nutzer hat das NICHT erlaubt."
+        try:
+            ok, result = True, SERVER_TOOLS[name](run, args)
+        except (tools.ToolError, ValueError, OSError) as e:
+            ok, result = False, f"Fehler: {e}"
+        run.emit(t="result", id=cid, ok=ok, preview=result[:2000])
+        return ok, result
     reason = tools.approval_reason(name, args, CTX) if name in tools.TOOLS else None
     if reason and not run.free_hand and not request_approval(run, cid, name, args, reason):
         msg = "Der Nutzer hat diese Aktion NICHT erlaubt. Führe sie nicht aus; frag nach oder löse es anders."
@@ -880,6 +1109,68 @@ def execute_call(run: Run, call: dict) -> tuple[bool, str]:
     log(f"Werkzeug {name} -> {'ok' if ok else 'Fehler'} ({time.time() - t0:.1f} s)", console=False)
     run.emit(t="result", id=cid, ok=ok, preview=result[:2000])
     return ok, result
+
+
+def tool_set_reminder(run: Run, args: dict) -> str:
+    text = str(args.get("text") or "").strip()
+    if not text:
+        raise ValueError("Text der Erinnerung fehlt.")
+    when = Reminders.parse_when(args.get("minutes"), args.get("at"))
+    if when < time.time() - 60 or when > time.time() + 366 * 86400:
+        raise ValueError("Zeitpunkt liegt in der Vergangenheit oder zu weit in der Zukunft.")
+    item = REMINDERS.add(text, when, run.conv_id)
+    lt = time.localtime(when)
+    out = f"Erinnerung gesetzt für {WEEKDAYS[lt.tm_wday]}, {time.strftime('%d.%m.%Y um %H:%M Uhr', lt)}: {text} (ID {item['id']})"
+    if not PUSH.subs():
+        out += ("\nHinweis für deine Antwort: Benachrichtigungen sind am Handy noch aus. Bitte den Nutzer direkt (mit „du“), "
+                "sie in der App unter Einstellungen → Benachrichtigungen einzuschalten, sonst kommt die Erinnerung nicht an.")
+    return out
+
+
+def tool_list_reminders(run: Run, args: dict) -> str:
+    if args.get("cancel_id"):
+        return "Erinnerung gelöscht." if REMINDERS.cancel(str(args["cancel_id"])) else "Keine Erinnerung mit dieser ID."
+    items = REMINDERS.pending()
+    if not items:
+        return "Keine offenen Erinnerungen."
+    return "\n".join(f"- {r['id']}: {time.strftime('%d.%m. %H:%M', time.localtime(r['when']))} – {r['text']}" for r in items)
+
+
+def tool_send_to_phone(run: Run, args: dict) -> str:
+    p = tools._resolve(str(args.get("path") or ""), CTX)
+    if not p.is_file():
+        raise ValueError(f"Datei nicht gefunden: {p}")
+    size = p.stat().st_size
+    if size > 200_000_000:
+        raise ValueError("Datei ist größer als 200 MB.")
+    OFFERED.add(str(p.resolve()))
+    run.emit(t="file", path=str(p), name=p.name, size=size)
+    return f"Datei {p.name} ({tools._human(size)}) steht im Chat zum Herunterladen bereit.\nPfad: {p}"
+
+
+def tool_laptop_screenshot(run: Run, args: dict) -> str:
+    try:
+        from PIL import ImageGrab
+    except ImportError:
+        raise ValueError("Pillow fehlt – Bildschirmfoto nicht möglich.")
+    img = ImageGrab.grab(all_screens=False).convert("RGB")
+    shots = WORKSPACE / "Bildschirmfotos"
+    shots.mkdir(parents=True, exist_ok=True)
+    full = shots / f"bildschirm_{time.strftime('%Y%m%d_%H%M%S')}.png"
+    img.save(full)
+    img.thumbnail((1280, 1280))
+    UPLOADS.mkdir(parents=True, exist_ok=True)
+    img_id = f"{uuid.uuid4().hex}.jpg"
+    img.save(UPLOADS / img_id, quality=82)
+    run.emit(t="image", id=img_id)
+    run.after_tools.append({"role": "user", "content": "[System: Hier ist das Bildschirmfoto vom Laptop. Beschreibe, was du siehst, falls das gefragt war.]",
+                            "_images": [img_id], "_system": "Bildschirmfoto"})
+    return f"Bildschirmfoto gemacht ({img.width}×{img.height}) und gespeichert unter {full}. Das Bild folgt als nächste Nachricht."
+
+
+OFFERED: set[str] = set()  # Dateien außerhalb des Arbeitsordners, die der Nutzer ans Handy freigegeben hat
+SERVER_TOOLS = {"set_reminder": tool_set_reminder, "reminders": tool_list_reminders,
+                "send_to_phone": tool_send_to_phone, "laptop_screenshot": tool_laptop_screenshot}
 
 
 def save_image(data_url: str) -> str | None:
@@ -1007,6 +1298,18 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _download(self, p: Path) -> None:
+        data = p.read_bytes()
+        self.send_response(200)
+        self._cors()
+        self.send_header("Content-Type", MIME.get(p.suffix.lower(), "application/octet-stream"))
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + urllib.parse.quote(p.name))
+        self.send_header("Access-Control-Expose-Headers", "Content-Disposition")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
     def _stream(self, run: Run, start: int = 0) -> None:
         self.send_response(200)
         self._cors()
@@ -1073,7 +1376,7 @@ class Handler(BaseHTTPRequestHandler):
                                         "now": time.time()})
             if path == "/api/conversations":
                 return self._json(200, {"conversations": Store.list()})
-            m = re.match(r"^/api/conversations/([a-z0-9]+)$", path)
+            m = re.match(r"^/api/conversations/([a-z0-9_]+)$", path)
             if m:
                 conv = Store.load(m.group(1))
                 if not conv:
@@ -1086,7 +1389,7 @@ class Handler(BaseHTTPRequestHandler):
                                         "work": run.info() if active and run.deadline else None,
                                         "notes": (run.conv if active else conv).get("_notes"),
                                         "now": time.time()})
-            m = re.match(r"^/api/stream/([a-z0-9]+)$", path)
+            m = re.match(r"^/api/stream/([a-z0-9_]+)$", path)
             if m:
                 run = RUNS.get(m.group(1))
                 if not run:
@@ -1102,6 +1405,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, {"memory": tools.load_memory(CTX)})
             if path == "/api/models":
                 return self._json(200, {"models": models_list(), "llama": LLAMA.state})
+            if path == "/api/push/key":
+                return self._json(200, {"key": PUSH.vapid.public, "devices": len(PUSH.subs())})
+            if path == "/api/reminders":
+                return self._json(200, {"reminders": REMINDERS.pending()})
+            if path == "/api/download":
+                p = Path(urllib.parse.parse_qs(url.query).get("path", [""])[0]).resolve()
+                if not (tools._inside_workspace(p, CTX) or str(p) in OFFERED) or not p.is_file():
+                    return self._json(403, {"error": "Diese Datei wurde nicht freigegeben."})
+                return self._download(p)
             return self._json(404, {"error": "unbekannt"})
         except Exception as e:
             log("HTTP-Fehler:\n" + traceback.format_exc(), console=False)
@@ -1148,6 +1460,29 @@ class Handler(BaseHTTPRequestHandler):
                 if run:
                     run.cancel.set()
                 return self._json(200, {"ok": True})
+            if path == "/api/conversations/import":
+                return self._json(*import_phone_chat(body.get("conv") or {}))
+            if path == "/api/push/subscribe":
+                n = PUSH.add(body.get("subscription") or {}, body.get("device") or "")
+                return self._json(200, {"ok": True, "devices": n})
+            if path == "/api/push/unsubscribe":
+                PUSH.remove(str(body.get("endpoint") or ""))
+                return self._json(200, {"ok": True})
+            if path == "/api/push/test":
+                return self._json(200, PUSH.test(body.get("endpoint")))
+            if path == "/api/upload":
+                name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", str(body.get("name") or "datei"))[:120].strip(" .") or "datei"
+                raw = base64.b64decode(str(body.get("data") or "").split(",")[-1])
+                if len(raw) > 30_000_000:
+                    return self._json(413, {"error": "Datei ist größer als 30 MB."})
+                folder = WORKSPACE / "Vom Handy"
+                folder.mkdir(parents=True, exist_ok=True)
+                target, k = folder / name, 1
+                while target.exists():
+                    target, k = folder / f"{Path(name).stem} ({k}){Path(name).suffix}", k + 1
+                target.write_bytes(raw)
+                log(f"Datei vom Handy empfangen: {target.name} ({tools._human(len(raw))})")
+                return self._json(200, {"ok": True, "path": str(target), "rel": f"Vom Handy/{target.name}"})
             if path == "/api/model":
                 mid = body.get("id") or ""
                 entry = next((m for m in models_list() if m["id"] == mid), None)
@@ -1169,7 +1504,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if not self._authed():
                 return
-            m = re.match(r"^/api/conversations/([a-z0-9]+)$", path)
+            m = re.match(r"^/api/conversations/([a-z0-9_]+)$", path)
             if m:
                 run = RUNS.get(m.group(1))
                 if run:
@@ -1177,6 +1512,10 @@ class Handler(BaseHTTPRequestHandler):
                 Store.delete(m.group(1))
                 RUNS.pop(m.group(1), None)
                 return self._json(200, {"ok": True})
+            m = re.match(r"^/api/reminders/([a-f0-9]{8})$", path)
+            if m:
+                REMINDERS.cancel(m.group(1))
+                return self._json(200, {"reminders": REMINDERS.pending()})
             m = re.match(r"^/api/memory/(m\d+)$", path)
             if m:
                 tools.forget({"id": m.group(1)}, CTX)
@@ -1184,6 +1523,29 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(404, {"error": "unbekannt"})
         except Exception as e:
             return self._json(500, {"error": str(e)})
+
+
+PHONE_KEYS = {"role", "content", "tool_calls", "tool_call_id", "name", "_ok", "_display", "_system", "_work", "_file"}
+
+
+def import_phone_chat(conv: dict) -> tuple[int, dict]:
+    """Speichert einen Chat der Handy-KI auf dem Laptop (Backup) – dort kann er auch weitergehen."""
+    cid = str(conv.get("id") or "")
+    if not cid.startswith("h_") or not ID_RE.match(cid) or not isinstance(conv.get("messages"), list):
+        return 400, {"error": "Ungültiger Handy-Chat."}
+    run = RUNS.get(cid)
+    if run and not run.done:
+        return 409, {"error": "Dieser Chat läuft gerade auf dem Laptop."}
+    msgs = []
+    for m in conv["messages"][-400:]:
+        if not isinstance(m, dict) or m.get("role") not in ("user", "assistant", "tool") or m.get("_partial"):
+            continue
+        clean = {k: v for k, v in m.items() if k in PHONE_KEYS}
+        clean["content"] = str(clean.get("content") or "")[:20000]
+        msgs.append(clean)
+    Store.save({"id": cid, "title": str(conv.get("title") or "Handy-Chat")[:60], "created": time.time(),
+                "messages": msgs, "_phone": True})
+    return 200, {"ok": True, "messages": len(msgs)}
 
 
 def local_info() -> dict:
@@ -1212,6 +1574,8 @@ def main() -> None:
         d.mkdir(parents=True, exist_ok=True)
     CFG = load_config()
     CTX = tools.ToolContext(WORKSPACE, DATA / "memory.json", sys.executable)
+    PUSH.setup()
+    threading.Thread(target=REMINDERS.loop, daemon=True, name="reminders").start()
     port = CFG["port"]
     try:
         httpd = Server(("127.0.0.1", port), Handler)

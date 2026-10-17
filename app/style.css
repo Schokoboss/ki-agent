@@ -237,6 +237,15 @@ textarea::placeholder { color: var(--muted); }
 .model-row.off { opacity: .55; }
 .conv .phone { font-size: 11px; font-weight: 700; color: var(--accent-2); background: color-mix(in srgb, var(--accent-2) 14%, transparent); padding: 2px 7px; border-radius: 99px; margin-left: 6px; }
 .status[data-s="phone"] i { background: var(--accent-2); }
+.file-card { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.file-card .fi { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); flex: none; }
+.file-card .fn { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.file-card .fn b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14.5px; }
+.file-card .fn small { color: var(--muted); font-size: 12px; }
+.file-card .btn { padding: 8px 12px; font-size: 13px; }
+.shot { max-width: 100%; border-radius: 14px; border: 1px solid var(--border); display: block; }
+.att.doc { display: flex; align-items: center; gap: 6px; padding: 8px 30px 8px 10px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); font-size: 13px; max-width: 180px; }
+.att.doc span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .conv .live { font-size: 11px; font-weight: 700; color: var(--accent); background: var(--accent-soft); padding: 2px 7px; border-radius: 99px; margin-left: 6px; }
 .att { position: relative; flex: none; }
 .att img { width: 64px; height: 64px; object-fit: cover; border-radius: 12px; border: 1px solid var(--border); display: block; }

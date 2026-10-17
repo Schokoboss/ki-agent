@@ -577,6 +577,42 @@ def laptop_status(args, ctx):
     ])
 
 
+MEDIA_KEYS = {"play_pause": 0xB3, "next": 0xB0, "previous": 0xB1, "volume_up": 0xAF, "volume_down": 0xAE,
+              "mute": 0xAD, "stop": 0xB2}
+
+
+def media_control(args, ctx):
+    action = str(args.get("action") or "").strip().lower()
+    if action not in MEDIA_KEYS:
+        raise ToolError("Unbekannte Aktion. Erlaubt: " + ", ".join(MEDIA_KEYS))
+    times = max(1, min(int(args.get("times") or (5 if action.startswith("volume") else 1)), 50))
+    user32 = ctypes.windll.user32
+    for _ in range(times):
+        user32.keybd_event(MEDIA_KEYS[action], 0, 0, 0)
+        user32.keybd_event(MEDIA_KEYS[action], 0, 2, 0)  # KEYEVENTF_KEYUP
+        time.sleep(0.03)
+    note = f" ({times}× – jeder Schritt ≈ 2 %)" if action.startswith("volume") else ""
+    return f"Medientaste '{action}' gedrückt{note}."
+
+
+def lock_laptop(args, ctx):
+    if not ctypes.windll.user32.LockWorkStation():
+        raise ToolError("Sperren hat nicht geklappt.")
+    return "Laptop ist gesperrt."
+
+
+def download_file(args, ctx):
+    url = (args.get("url") or "").strip()
+    raw, ctype, _, final = _fetch(url, timeout=60, max_bytes=200_000_000)
+    name = (args.get("filename") or "").strip() or urllib.parse.unquote(urllib.parse.urlparse(final).path.rsplit("/", 1)[-1]) or "download"
+    name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", name)[:120]
+    folder = ctx.workspace / "Downloads"
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / name
+    target.write_bytes(raw)
+    return f"Heruntergeladen: {target} ({_human(len(raw))}, {ctype or 'unbekannter Typ'})"
+
+
 # ---------------------------------------------------------------- Werkzeuge: Gedächtnis
 
 def load_memory(ctx) -> list[dict]:
@@ -655,6 +691,19 @@ TOOL_SPECS = [
     _spec("forget", "Delete a saved fact by its id (e.g. 'm3').", {"id": _s("Memory id")}, ["id"]),
     _spec("update_notes", "Overwrite your working notes for the current task: plan, progress, next steps, file names. "
           "Use regularly during long tasks.", {"notes": _s("Complete notes")}, ["notes"]),
+    _spec("set_reminder", "Remind the user later with a phone notification. Give either minutes from now or a time.",
+          {"text": _s("What to remind about"), "minutes": {"type": "number", "description": "Minutes from now"},
+           "at": _s("Time like '18:30', 'morgen 08:00' or '2026-10-20 14:00'")}, ["text"]),
+    _spec("reminders", "List open reminders, or cancel one by id.", {"cancel_id": _s("Optional id to cancel")}),
+    _spec("send_to_phone", "Send a file from the laptop to the user's phone (shows a download button in the chat).",
+          {"path": _s("File path, relative = workspace")}, ["path"]),
+    _spec("laptop_screenshot", "Take a screenshot of the laptop screen; you will see it and the user gets it on the phone."),
+    _spec("media_control", "Laptop media keys: play_pause, next, previous, stop, volume_up, volume_down, mute.",
+          {"action": _s("One of the actions"), "times": {"type": "integer", "description": "Repeat count (volume: 1 step = 2%)"}},
+          ["action"]),
+    _spec("lock_laptop", "Lock the laptop screen (Windows lock)."),
+    _spec("download_file", "Download a file from the internet into the workspace folder 'Downloads'.",
+          {"url": _s("File URL"), "filename": _s("Optional file name")}, ["url"]),
 ]
 
 TOOLS = {
@@ -662,6 +711,7 @@ TOOLS = {
     "calculate": calculate, "run_python": run_python, "run_powershell": run_powershell,
     "list_files": list_files, "read_file": read_file, "write_file": write_file,
     "open_on_laptop": open_on_laptop, "laptop_status": laptop_status, "remember": remember, "forget": forget,
+    "media_control": media_control, "lock_laptop": lock_laptop, "download_file": download_file,
 }
 
 

@@ -49,11 +49,13 @@
       </div>
       <div class="bar">
         <button class="icon-btn" id="btnAttach" aria-label="Foto anhängen"><svg><use href="#i-image"/></svg></button>
+        <button class="icon-btn" id="btnFile" aria-label="Datei an den Laptop schicken"><svg><use href="#i-clip"/></svg></button>
         <textarea id="input" rows="1" placeholder="Frag mich irgendwas …" enterkeyhint="send" autocomplete="off"></textarea>
         <button class="icon-btn" id="btnMic" aria-label="Spracheingabe" hidden><svg><use href="#i-mic"/></svg></button>
         <button class="send" id="btnSend" aria-label="Senden"><svg><use href="#i-up"/></svg></button>
       </div>
       <input type="file" id="file" accept="image/*" multiple hidden>
+      <input type="file" id="anyfile" multiple hidden>
     </footer>
   </div>
 
@@ -83,6 +85,16 @@
         <label class="switch danger"><span><b>Freie Hand</b><small>Code, Befehle und Dateien ohne Nachfrage. Nur einschalten, wenn du weißt, was du tust.</small></span>
           <input type="checkbox" id="setFree"><i></i></label>
       </div>
+
+      <h3>Benachrichtigungen</h3>
+      <div class="group">
+        <label class="switch"><span><b>Benachrichtigungen</b><small id="pushHint">Meldet sich, wenn ein Auftrag fertig ist, eine Freigabe braucht oder eine Erinnerung fällig ist – auch wenn die App zu ist.</small></span>
+          <input type="checkbox" id="setPush"><i></i></label>
+        <div class="btn-row"><button type="button" class="btn" id="btnPushTest">Test-Benachrichtigung</button></div>
+      </div>
+
+      <h3>Erinnerungen</h3>
+      <div class="group" id="reminderList"><p class="muted">Lädt …</p></div>
 
       <h3>KI-Modus</h3>
       <div class="seg" id="modeSeg">
@@ -194,6 +206,8 @@
     <symbol id="i-laptop" viewBox="0 0 24 24"><rect x="4.5" y="5" width="15" height="10.5" rx="1.5"/><path d="M2.5 19h19"/></symbol>
     <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/></symbol>
     <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.5A6 6 0 0 0 12 3z"/></symbol>
+    <symbol id="i-clip" viewBox="0 0 24 24"><path d="M20 11.5 12.2 19.3a5 5 0 0 1-7.1-7.1l8.1-8.1a3.3 3.3 0 0 1 4.7 4.7l-8.1 8.1a1.7 1.7 0 0 1-2.4-2.4l7.4-7.4"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></symbol>
     <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
     <symbol id="i-retry" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4"/></symbol>
   </svg>

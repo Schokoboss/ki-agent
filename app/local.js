@@ -1,24 +1,30 @@
 'use strict';
 /* Handy-Modus: Nova läuft direkt im Browser auf dem Handy (WebLLM + WebGPU), ohne Laptop.
-   Liefert dieselben Events wie der Laptop-Server, damit app.js alles gleich anzeigen kann. */
+   Liefert dieselben Events wie der Laptop-Server, damit app.js alles gleich anzeigen kann.
+   Speicher ist am Handy knapp: kleiner Kontext, Worker wird beim Neuladen beendet, und ein
+   Absturz-Merker erkennt, wenn Chrome die App wegen Speichermangel beendet hat. */
 
 const WEBLLM_URL = 'https://esm.run/@mlc-ai/web-llm@0.2.86';
 
 const NovaLocal = (() => {
   const MODELS = [
-    { id: 'Qwen3.5-2B', label: 'Qwen3.5 2B', desc: 'Standard – guter Mix aus schlau und schnell', size: 'ca. 1,3 GB' },
-    { id: 'Qwen3.5-0.8B', label: 'Qwen3.5 0.8B', desc: 'Mini – sehr schnell, für Einfaches', size: 'ca. 0,6 GB' },
-    { id: 'Qwen3.5-4B', label: 'Qwen3.5 4B', desc: 'Groß – klüger, kann am Handy zu viel sein', size: 'ca. 2,5 GB' },
+    { id: 'Qwen3.5-0.8B', label: 'Qwen3.5 0.8B', desc: 'Stabil und schnell – empfohlen fürs Handy', size: 'ca. 0,6 GB' },
+    { id: 'Qwen3.5-2B', label: 'Qwen3.5 2B', desc: 'Schlauer, braucht viel Speicher – kann abstürzen', size: 'ca. 1,3 GB' },
+    { id: 'Qwen3.5-4B', label: 'Qwen3.5 4B', desc: 'Sehr groß – meist zu viel fürs Handy', size: 'ca. 2,5 GB' },
   ];
+  const CONTEXT = 2048;          // halber Kontext = deutlich weniger Grafikspeicher
+  const HISTORY_CHARS = 3800;    // so viel Verlauf passt neben System-Prompt und Antwort
+  const BUSY_KEY = 'nova.localBusy';
   let webllm = null;
   let engine = null;
+  let worker = null;
   let loadedId = null;
   let f16 = null;
 
   async function gpuInfo() {
     if (!('gpu' in navigator)) return { ok: false, why: 'Dieser Browser kann kein WebGPU. Nimm Chrome (aktuell).' };
     const adapter = await navigator.gpu.requestAdapter().catch(() => null);
-    if (!adapter) return { ok: false, why: 'Die Grafikeinheit ist für WebGPU nicht freigegeben.' };
+    if (!adapter) return { ok: false, why: 'Die Grafikeinheit ist gerade nicht verfügbar. App schließen und neu öffnen.' };
     f16 = adapter.features.has('shader-f16');
     return { ok: true };
   }
@@ -33,12 +39,41 @@ const NovaLocal = (() => {
     return `${id}-${f16 ? 'q4f16_1' : 'q4f32_1'}-MLC`;
   }
 
+  // Ohne die 7-MB-Bibliothek zu laden: direkt im Cache nachsehen
   async function isCached(id) {
-    try { return await (await lib()).hasModelInCache(await mlcId(id)); } catch { return false; }
+    try {
+      const mid = await mlcId(id);
+      const keys = await (await caches.open('webllm/model')).keys();
+      return keys.some(k => k.url.includes(`/${mid}/`) && k.url.includes('params_shard_0'));
+    } catch { return false; }
+  }
+
+  function busy(phase, id) {
+    try {
+      if (phase) localStorage.setItem(BUSY_KEY, JSON.stringify({ phase, model: id, t: Date.now() }));
+      else localStorage.removeItem(BUSY_KEY);
+    } catch { /* egal */ }
+  }
+
+  // Lief beim letzten Mal noch das Handy-Modell, als die App weg war? Dann ist sie abgestürzt.
+  function crashInfo() {
+    try {
+      const v = JSON.parse(localStorage.getItem(BUSY_KEY) || 'null');
+      localStorage.removeItem(BUSY_KEY);
+      return v;
+    } catch { return null; }
+  }
+
+  async function reset() {
+    try { await engine?.unload(); } catch { /* Gerät evtl. schon weg */ }
+    worker?.terminate();
+    engine = null;
+    worker = null;
+    loadedId = null;
   }
 
   async function remove(id) {
-    if (loadedId === id && engine) { await engine.unload().catch(() => {}); engine = null; loadedId = null; }
+    if (loadedId === id) await reset();
     await (await lib()).deleteModelAllInfoInCache(await mlcId(id));
   }
 
@@ -47,11 +82,20 @@ const NovaLocal = (() => {
     const gi = await gpuInfo();
     if (!gi.ok) throw new Error(gi.why);
     const w = await lib();
-    if (engine) { await engine.unload().catch(() => {}); engine = null; loadedId = null; }
-    const worker = new Worker(new URL('llm-worker.js', location.href), { type: 'module' });
-    engine = await w.CreateWebWorkerMLCEngine(worker, await mlcId(id), {
-      initProgressCallback: p => onProgress?.(p.progress || 0, p.text || ''),
-    });
+    await reset();
+    navigator.storage?.persist?.().catch(() => {});  // Modell nicht vom Browser wegräumen lassen
+    busy('load', id);
+    worker = new Worker(new URL('llm-worker.js', location.href), { type: 'module' });
+    try {
+      engine = await w.CreateWebWorkerMLCEngine(worker, await mlcId(id),
+        { initProgressCallback: p => onProgress?.(p.progress || 0, p.text || '') },
+        { context_window_size: CONTEXT });
+    } catch (e) {
+      busy(null);
+      await reset();
+      throw e;
+    }
+    busy(null);
     loadedId = id;
     return engine;
   }
@@ -90,7 +134,7 @@ const NovaLocal = (() => {
       if (!hit) return `Nichts zu "${query}" gefunden.`;
       const e = await getJSON(base + 'action=query&prop=extracts&exintro=1&explaintext=1&redirects=1&titles=' + encodeURIComponent(hit.title));
       const page = Object.values(e.query?.pages || {})[0] || {};
-      return `${hit.title} (Wikipedia):\n${(page.extract || '').slice(0, 1500)}`;
+      return `${hit.title} (Wikipedia):\n${(page.extract || '').slice(0, 1200)}`;
     },
     async calculate({ expression }) {
       let x = String(expression || '').replace(/\^/g, '**').replace(/×/g, '*').replace(/÷/g, '/');
@@ -109,47 +153,75 @@ const NovaLocal = (() => {
       localStorage.setItem('nova.localMemory', JSON.stringify(mem.slice(-30)));
       return `Gemerkt: ${fact}`;
     },
+    async save_file({ name, content }, ctx) {
+      const fname = String(name || 'nova.txt').replace(/[\\/:*?"<>|]/g, '_').slice(0, 80) || 'nova.txt';
+      const text = String(content || '');
+      ctx.file = { name: fname, data: 'data:text/plain;charset=utf-8,' + encodeURIComponent(text), size: text.length };
+      return `Datei "${fname}" (${text.length} Zeichen) liegt im Chat zum Speichern bereit.`;
+    },
+    async notes({ text }, ctx) {
+      ctx.conv._notes = String(text || '').slice(0, 1500);
+      return 'Notizen gespeichert.';
+    },
   };
 
   function memory() {
     try { return JSON.parse(localStorage.getItem('nova.localMemory') || '[]'); } catch { return []; }
   }
 
-  function systemPrompt(user) {
+  function systemPrompt(user, work) {
     const now = new Date();
     const date = now.toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' });
     const time = now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
     const mem = memory();
-    return `Du bist Nova, ein KI-Assistent, der direkt auf dem Handy von ${user || 'deinem Nutzer'} läuft (Handy-Modus, ohne Laptop). Antworte auf Deutsch, kurz und freundlich. Heute ist ${date}, ${time} Uhr.
+    const until = work ? new Date(work.deadline).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '';
+    return `Du bist Nova, ein KI-Assistent direkt auf dem Handy von ${user || 'deinem Nutzer'} (Handy-Modus, ohne Laptop). Antworte auf Deutsch, kurz und freundlich. Heute ist ${date}, ${time} Uhr.
 
-Du hast Werkzeuge. Um eins zu benutzen, schreibe NUR diese Zeile und sonst nichts:
+Werkzeuge – schreibe zum Benutzen NUR diese Zeile:
 <tool_call>{"name": "WERKZEUG", "arguments": {...}}</tool_call>
-Werkzeuge:
-- weather {"location": "Ort"}: Wetter jetzt und 3 Tage
+- weather {"location": "Ort"}: Wetter
 - wikipedia {"query": "Thema"}: Wissen nachschlagen
-- calculate {"expression": "17.5% * 240"}: genau rechnen
-- remember {"fact": "..."}: etwas dauerhaft merken
-Danach bekommst du das Ergebnis in <tool_response> und antwortest normal.
-Für Wetter und Rechnungen IMMER das Werkzeug nutzen. Erfinde keine Werte.
-${mem.length ? 'Das hast du dir gemerkt:\n- ' + mem.join('\n- ') : ''}`;
+- calculate {"expression": "17.5% * 240"}: rechnen
+- remember {"fact": "..."}: dauerhaft merken
+- save_file {"name": "plan.txt", "content": "..."}: Text als Datei speichern
+- notes {"text": "..."}: Plan und Fortschritt notieren
+Das Ergebnis kommt in <tool_response>. Für Wetter und Rechnungen IMMER das Werkzeug nutzen. Erfinde nichts.${work ? `
+
+AUFTRAG: Arbeite selbstständig bis ${until} Uhr ohne Rückfragen. Plane kurz, notiere Fortschritt mit notes, speichere Ergebnisse mit save_file. Wenn alles fertig ist, beginne deine Antwort mit FERTIG.` : ''}${mem.length ? '\nGemerkt:\n- ' + mem.join('\n- ') : ''}`;
   }
 
   /* ---------- Agenten-Schleife */
 
-  function toModel(messages) {
+  function toModel(conv) {
     // Verlauf ins Qwen-Format: Werkzeug-Ergebnisse als <tool_response> im User-Zug
     const out = [];
-    for (const m of messages) {
-      if (m.role === 'user' && !m._system) out.push({ role: 'user', content: m.content });
+    conv.messages.forEach((m, i) => {
+      let msg = null;
+      if (m.role === 'user') msg = { role: 'user', content: m.content };
       else if (m.role === 'assistant') {
         const calls = (m.tool_calls || []).map(c => `<tool_call>{"name": "${c.function.name}", "arguments": ${c.function.arguments}}</tool_call>`);
-        out.push({ role: 'assistant', content: [m.content, ...calls].filter(Boolean).join('\n') || '…' });
-      } else if (m.role === 'tool') out.push({ role: 'user', content: `<tool_response>\n${m.content}\n</tool_response>` });
-    }
-    let chars = 0, start = out.length;   // Kontext ist am Handy klein (4096 Tokens)
-    while (start > 0 && chars + out[start - 1].content.length < 6500) chars += out[--start].content.length;
+        const content = [m.content, ...calls].filter(Boolean).join('\n');
+        if (content) msg = { role: 'assistant', content };
+      } else if (m.role === 'tool') msg = { role: 'user', content: `<tool_response>\n${m.content.slice(0, 1500)}\n</tool_response>` };
+      if (msg) out.push({ ...msg, i });
+    });
+    let chars = 0, start = out.length;   // Kontext ist am Handy klein
+    while (start > 0 && chars + out[start - 1].content.length < HISTORY_CHARS) chars += out[--start].content.length;
     while (start < out.length - 1 && out[start].role !== 'user') start++;
-    return out.slice(start);
+    const kept = out.slice(start);
+    const pin = conv._taskIndex;
+    if (pin != null && kept.length && kept[0].i > pin) {   // Auftrag nie vergessen
+      const task = conv.messages[pin];
+      kept.unshift({ role: 'user', content: `${task.content.slice(0, 800)}\n[Ältere Schritte ausgeblendet.${conv._notes ? ' Deine Notizen: ' + conv._notes : ''}]` });
+    }
+    // Zwei Nachrichten derselben Rolle hintereinander zusammenfassen (Vorlage erwartet Wechsel)
+    const merged = [];
+    for (const m of kept) {
+      const last = merged[merged.length - 1];
+      if (last && last.role === m.role) last.content += '\n\n' + m.content;
+      else merged.push({ role: m.role, content: m.content });
+    }
+    return merged;
   }
 
   function parseCall(raw) {
@@ -174,65 +246,115 @@ ${mem.length ? 'Das hast du dir gemerkt:\n- ' + mem.join('\n- ') : ''}`;
     return s.replace(/^\s+/, '');
   }
 
-  const GPU_LOST = /disposed|Instance reference|device (was )?lost|mapAsync|DXGI|GPU.*(lost|destroyed)/i;
+  const GPU_LOST = /disposed|Instance reference|device (was )?lost|mapAsync|DXGI|GPU.*(lost|destroyed)|Worker/i;
+  const waitVisible = () => new Promise(r => {
+    if (!document.hidden) return r();
+    const on = () => { if (!document.hidden) { document.removeEventListener('visibilitychange', on); r(); } };
+    document.addEventListener('visibilitychange', on);
+  });
+
+  function fmtLeft(ms) {
+    const m = Math.max(0, Math.round(ms / 60000));
+    return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+  }
 
   async function run(opts) {
-    try {
-      return await runOnce(opts);
-    } catch (e) {
-      if (!GPU_LOST.test(String(e?.message || e))) throw e;
-      // Grafikeinheit wurde zurückgesetzt (z. B. App im Hintergrund) – Modell neu laden, einmal wiederholen
-      engine = null;
-      loadedId = null;
-      opts.emit({ t: 'status', d: 'Grafik wurde zurückgesetzt – lade das Handy-Modell neu …' });
-      return runOnce(opts);
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await runOnce(opts);
+      } catch (e) {
+        busy(null);
+        const msgs = opts.conv.messages;
+        while (msgs.length && msgs[msgs.length - 1]._partial) msgs.pop();  // halbe Antwort verwerfen
+        opts.onSave();
+        if (!GPU_LOST.test(String(e?.message || e)) || attempt >= 2) throw e;
+        // Grafikeinheit weg (App war im Hintergrund / Handy aus): warten, neu laden, weitermachen
+        await reset();
+        if (document.hidden) {
+          opts.emit({ t: 'status', d: 'Pausiert – geht weiter, sobald du Nova wieder öffnest.' });
+          await waitVisible();
+        }
+        opts.emit({ t: 'status', d: 'Lade das Handy-Modell neu und mache weiter …' });
+      }
     }
   }
 
-  async function runOnce({ modelId, messages, user, emit, onSave }) {
+  async function runOnce({ modelId, conv, user, work, emit, onSave }) {
     const t0 = performance.now();
-    let tokens = 0, genMs = 0, toolsUsed = 0;
+    let tokens = 0, genMs = 0, toolsUsed = 0, nudges = 0, final = false;
+    const messages = conv.messages;
     const eng = await load(modelId, (p, text) => emit({ t: 'load', p, text }));
-    for (let step = 0; step < 5; step++) {
+    const maxSteps = work ? 80 : 6;
+    for (let step = 0; step < maxSteps; step++) {
+      if (document.hidden) {
+        emit({ t: 'status', d: 'Pausiert – das Handy ist aus. Geht weiter, sobald du Nova wieder öffnest.' });
+        await waitVisible();
+      }
+      if (work && !final && Date.now() > work.deadline) {
+        final = true;
+        messages.push({ role: 'user', content: '[System: Die Arbeitszeit ist um. Fasse kurz zusammen, was du geschafft hast.]', _system: 'Arbeitszeit vorbei' });
+        emit({ t: 'status', d: 'Arbeitszeit vorbei – fasse zusammen …' });
+      }
       if (step) emit({ t: 'step' });
+      if (work) emit({ t: 'work', started: work.started / 1000, deadline: work.deadline / 1000, step: step + 1 });
       const g0 = performance.now();
+      busy('generate', modelId);
+      const msg = { role: 'assistant', content: '', _partial: true };
+      messages.push(msg);
       const stream = await eng.chat.completions.create({
-        messages: [{ role: 'system', content: systemPrompt(user) }, ...toModel(messages)],
-        stream: true, temperature: 0.7, top_p: 0.8, max_tokens: 1024,
+        messages: [{ role: 'system', content: systemPrompt(user, work) }, ...toModel({ ...conv, messages: messages.slice(0, -1) })],
+        stream: true, temperature: 0.7, top_p: 0.8, max_tokens: 700,
         extra_body: { enable_thinking: false }, stream_options: { include_usage: true },
       });
-      let raw = '', shown = '';
+      let raw = '', shown = '', lastSave = Date.now();
       for await (const chunk of stream) {
         raw += chunk.choices?.[0]?.delta?.content || '';
         if (chunk.usage) tokens += chunk.usage.completion_tokens || 0;
         const v = visible(raw);
         if (v.length > shown.length) { emit({ t: 'text', d: v.slice(shown.length) }); shown = v; }
+        if (Date.now() - lastSave > 1500) { msg.content = shown; onSave(); lastSave = Date.now(); }  // Zwischenstand sichern
       }
+      busy(null);
       genMs += performance.now() - g0;
-      const call = parseCall(raw);
-      const msg = { role: 'assistant', content: shown.trim() };
+      const call = final ? null : parseCall(raw);
+      msg.content = shown.trim();
+      delete msg._partial;
       if (call) msg.tool_calls = [{ id: 'h' + Date.now(), type: 'function', function: { name: call.name, arguments: JSON.stringify(call.args) } }];
-      messages.push(msg);
+      if (!msg.content && !call) messages.pop();
       onSave();
-      if (!call) break;
+      if (!call) {
+        const done = /^\W*FERTIG/i.test(shown);
+        if (work && !final && !done && nudges < 2 && work.deadline - Date.now() > 60000) {
+          nudges++;
+          messages.push({ role: 'user', content: `[System: Noch ${fmtLeft(work.deadline - Date.now())} Zeit. Ist der Auftrag wirklich fertig? Wenn ja, antworte mit FERTIG und Zusammenfassung, sonst arbeite weiter.]`, _system: 'Prüft, ob alles fertig ist …' });
+          emit({ t: 'status', d: 'Prüft, ob der Auftrag wirklich fertig ist …' });
+          onSave();
+          continue;
+        }
+        break;
+      }
       const id = msg.tool_calls[0].id;
       emit({ t: 'tool', id, name: call.name, args: call.args });
+      const ctx = { conv };
       let ok = true, result;
       try {
-        if (!TOOLS[call.name]) throw new Error(`Unbekanntes Werkzeug ${call.name}. Verfügbar: weather, wikipedia, calculate, remember.`);
-        result = await TOOLS[call.name](call.args || {});
+        if (!TOOLS[call.name]) throw new Error(`Unbekanntes Werkzeug ${call.name}. Verfügbar: ${Object.keys(TOOLS).join(', ')}.`);
+        result = await TOOLS[call.name](call.args || {}, ctx);
       } catch (e) { ok = false; result = 'Fehler: ' + e.message; }
       toolsUsed++;
       emit({ t: 'result', id, ok, preview: result });
-      messages.push({ role: 'tool', tool_call_id: id, name: call.name, content: result, _ok: ok });
+      if (ctx.file) emit({ t: 'file', ...ctx.file, local: true });
+      if (work) result += `\n[Noch ${fmtLeft(work.deadline - Date.now())} Arbeitszeit]`;
+      messages.push({ role: 'tool', tool_call_id: id, name: call.name, content: result, _ok: ok, ...(ctx.file ? { _file: ctx.file } : {}) });
       onSave();
     }
     const secs = (performance.now() - t0) / 1000;
-    emit({ t: 'done', stats: { tps: tokens && genMs ? +(tokens / (genMs / 1000)).toFixed(1) : 0, tools: toolsUsed, seconds: +secs.toFixed(1) } });
+    emit({ t: 'done', stats: { tps: tokens && genMs ? +(tokens / (genMs / 1000)).toFixed(1) : 0, tools: toolsUsed,
+      seconds: +secs.toFixed(1), long: !!work, steps: toolsUsed + 1 } });
   }
 
   return {
-    MODELS, gpuInfo, isCached, remove, load, run, stop,
+    MODELS, gpuInfo, isCached, remove, load, run, stop, crashInfo, reset,
     get loadedId() { return loadedId; },
     _setEngine(e, id) { engine = e; loadedId = id; },  // nur für Tests
   };

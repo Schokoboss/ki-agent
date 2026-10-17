@@ -13,7 +13,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 const state = {
   conn: LS.get('nova.conn', null),          // { t: Token, g: Gist-ID, u: Laptop-URL }
-  settings: Object.assign({ thinking: false, free_hand: false, speak: false, mode: 'auto', phoneModel: 'Qwen3.5-2B' },
+  settings: Object.assign({ thinking: false, free_hand: false, speak: false, mode: 'auto', phoneModel: 'Qwen3.5-0.8B' },
     LS.get('nova.settings', {})),
   localRunning: false,
   online: false,
@@ -22,6 +22,7 @@ const state = {
   running: false,
   evIndex: 0,
   pendingImages: [],
+  pendingFiles: [],                    // andere Dateien, die an den Laptop gehen
   resumeView: null,
   wakeLock: null,
   installPrompt: null,
@@ -170,17 +171,45 @@ function saveLocalConvs(all) {
   const keep = Object.values(all).sort((a, b) => b.updated - a.updated).slice(0, 30);
   LS.set(LOCAL_KEY, Object.fromEntries(keep.map(c => [c.id, c])));
 }
-const isLocalConv = id => !!id && id.startsWith('h_');
+// Ein Chat ist ein Handy-Chat, solange er im Handy-Speicher liegt (wandert er zum Laptop, wird er dort weitergeführt)
+const isLocalConv = id => !!id && !!localConvs()[id];
 const phoneLabel = () => (NovaLocal.MODELS.find(m => m.id === state.settings.phoneModel) || NovaLocal.MODELS[0]).label;
 
+// Wer rechnet? Laptop-Modus = immer Laptop, Handy-Modus = immer Handy, Automatisch = Laptop wenn erreichbar
 function useLocal() {
-  if (isLocalConv(state.conv) || state.settings.mode === 'phone') return true;
+  if (state.settings.mode === 'phone') return true;
   if (state.settings.mode === 'laptop') return false;
   return !state.online;
 }
 
 function showPhoneStatus(extra) {
   setStatus('phone', `Handy-KI · ${phoneLabel()}${extra || ''}`);
+}
+
+/* Handy-Chats auf dem Laptop sichern – und damit auch dort weiterführbar */
+const SYNC_KEY = 'nova.syncedAt';
+async function backupLocalChats(onlyId) {
+  if (!state.online) return;
+  const synced = LS.get(SYNC_KEY, {});
+  for (const c of Object.values(localConvs())) {
+    if ((onlyId && c.id !== onlyId) || synced[c.id] >= c.updated) continue;
+    try {
+      await apiJSON('/api/conversations/import', { method: 'POST', body: JSON.stringify({ conv: c }) });
+      synced[c.id] = c.updated;
+    } catch { /* nächstes Mal */ }
+  }
+  LS.set(SYNC_KEY, synced);
+}
+
+// Handy-Chat soll mit dem Laptop weitergehen: hochladen und lokale Kopie entfernen
+async function moveChatToLaptop(id) {
+  const c = localConvs()[id];
+  if (!c) return;
+  await apiJSON('/api/conversations/import', { method: 'POST', body: JSON.stringify({ conv: c }) });
+  const all = localConvs();
+  delete all[id];
+  LS.set(LOCAL_KEY, all);
+  toast('Chat läuft jetzt auf dem Laptop weiter');
 }
 
 async function sendLocal(text) {
@@ -194,25 +223,44 @@ async function sendLocal(text) {
     state.conv = conv.id;
     LS.set('nova.lastConv', conv.id);
   }
-  conv.messages.push({ role: 'user', content: text, _display: text });
+  const minutes = state.work.minutes;
+  const work = minutes ? { started: Date.now(), deadline: Date.now() + minutes * 60000 } : null;
+  conv.messages.push({ role: 'user', content: text, _display: text, ...(minutes ? { _work: minutes } : {}) });
+  if (work) { conv._taskIndex = conv.messages.length - 1; state.work.minutes = 0; updateWorkChip(); }
   const save = () => { conv.updated = Date.now() / 1000; const a = localConvs(); a[conv.id] = conv; saveLocalConvs(a); };
   save();
   els.input.value = '';
   autoGrow();
   state.pendingImages = [];
   renderAttachments();
-  addUser(text);
+  addUser(text, [], minutes);
   const ctx = { view: new TurnView(true) };
+  if (work) toast('Auftrag läuft auf dem Handy – lass Nova offen. Ist das Handy aus, pausiert er und macht danach weiter.', 6000);
   state.localRunning = true;
   setRunning(true);
   try {
-    await NovaLocal.run({ modelId: state.settings.phoneModel, messages: conv.messages, user: state.status?.user,
+    await NovaLocal.run({ modelId: state.settings.phoneModel, conv, work, user: state.status?.user,
       emit: ev => handleEvent(ev, ctx), onSave: save });
   } catch (e) {
     ctx.view.error('Handy-KI: ' + (e.message || e));
   }
   state.localRunning = false;
   setRunning(false);
+  backupLocalChats(conv.id);
+}
+
+// Nach einem Absturz mit dem Handy-Modell: auf das sparsamere Modell umstellen
+function checkLocalCrash() {
+  const crash = NovaLocal.crashInfo();
+  if (!crash || Date.now() - crash.t > 6 * 3600 * 1000) return;
+  const small = 'Qwen3.5-0.8B';
+  if (crash.model !== small) {
+    state.settings.phoneModel = small;
+    LS.set('nova.settings', state.settings);
+    toast(`Die App ist mit dem Handy-Modell abgestürzt (zu wenig Speicher). Ich habe auf das sparsamere ${phoneLabel()} umgestellt.`, 8000);
+  } else {
+    toast('Die Handy-KI ist abgestürzt – schließ andere Apps (z. B. Spiele), dann klappt es besser.', 7000);
+  }
 }
 
 function setStatus(s, text) {
@@ -301,6 +349,8 @@ function applyStatus() {
   $('#hello').textContent = `Hey${st.user ? ' ' + st.user : ''}! Was soll ich für dich tun?`;
   $('#infoModel').textContent = st.model || '–';
   $('#infoUrl').textContent = state.conn?.u ? state.conn.u.replace(/^https?:\/\//, '') : '–';
+  syncPush();
+  backupLocalChats();
   if (state.settings.mode === 'phone') {
     showPhoneStatus();
   } else if (st.llama && st.llama !== 'bereit') {
@@ -366,6 +416,15 @@ const TOOL_META = {
   remember: ['Merken', 'star', a => a.fact],
   forget: ['Vergessen', 'star', a => a.id],
   update_notes: ['Notizen', 'edit', a => (a.notes || '').split('\n').find(l => l.trim()) || ''],
+  set_reminder: ['Erinnerung', 'clock', a => `${a.at || (a.minutes != null ? `in ${a.minutes} min` : '')} · ${a.text || ''}`],
+  reminders: ['Erinnerungen', 'clock', a => a.cancel_id ? 'löschen' : 'ansehen'],
+  send_to_phone: ['Ans Handy', 'download', a => (a.path || '').split(/[\\/]/).pop()],
+  laptop_screenshot: ['Bildschirmfoto', 'laptop', () => 'Laptop'],
+  media_control: ['Medien', 'speaker', a => a.action],
+  lock_laptop: ['Sperren', 'laptop', () => 'Laptop'],
+  download_file: ['Download', 'download', a => (a.url || '').replace(/^https?:\/\//, '')],
+  save_file: ['Datei speichern', 'file', a => a.name],
+  notes: ['Notizen', 'edit', a => (a.text || '').split('\n').find(l => l.trim()) || ''],
 };
 
 function argsDetail(name, args) {
@@ -486,6 +545,34 @@ class TurnView {
   }
   prep() {
     this.showTyping();
+  }
+  fileCard(ev) {
+    const card = h('div', 'file-card', `<span class="fi">${icon('file')}</span><span class="fn"><b></b><small></small></span>
+      <button type="button" class="btn">${'Herunterladen'}</button>`);
+    $('b', card).textContent = ev.name;
+    $('small', card).textContent = ev.size ? `${(ev.size / 1024 / 1024).toFixed(ev.size > 1e6 ? 1 : 2)} MB · vom Laptop` : 'vom Laptop';
+    if (ev.local) {
+      $('small', card).textContent = `${ev.size || 0} Zeichen · von der Handy-KI`;
+      $('button', card).onclick = () => {
+        const a = h('a');
+        a.href = ev.data;
+        a.download = ev.name;
+        document.body.append(a);
+        a.click();
+        a.remove();
+        $('button', card).textContent = 'Gespeichert ✓';
+      };
+    } else {
+      $('button', card).onclick = () => downloadFile(ev.path, ev.name, $('button', card));
+    }
+    this.append(card);
+  }
+  image(id) {
+    const img = h('img', 'shot');
+    img.alt = 'Bildschirmfoto vom Laptop';
+    loadImage(img, id);
+    img.onclick = () => window.open(img.src, '_blank');
+    this.append(img);
   }
   progress(p) {
     if (!this.loadEl) { this.loadEl = h('div', 'status-line'); this.append(this.loadEl); this.showTyping(); }
@@ -654,7 +741,9 @@ function renderHistory(messages, live) {
   let view = null;
   for (const m of messages) {
     if (m.role === 'user' && m._system) {
-      (view ||= new TurnView(false)).status(m._system);
+      view ||= new TurnView(false);
+      if (m._images?.length) m._images.forEach(id => view.image(id));
+      else view.status(m._system);
       view.hideTyping();
       continue;
     }
@@ -668,7 +757,7 @@ function renderHistory(messages, live) {
     if (m.role === 'assistant') {
       if (view.used) view.step();
       if (m._thinking) view.think(m._thinking, true);
-      if (m.content) view.text(m.content);
+      if (m.content) view.text(m.content + (m._partial ? '\n\n*(unterbrochen – die App wurde geschlossen)*' : ''));
       for (const tc of m.tool_calls || []) {
         let args = {};
         try { args = JSON.parse(tc.function.arguments || '{}'); } catch { /* egal */ }
@@ -676,6 +765,10 @@ function renderHistory(messages, live) {
       }
     } else if (m.role === 'tool') {
       view.result({ id: m.tool_call_id, ok: m._ok !== false, preview: (m.content || '').slice(0, 2000) });
+      const t = view.tools[m.tool_call_id];
+      if (m._file) view.fileCard({ ...m._file, local: true });
+      const fpath = t?.name === 'send_to_phone' && m._ok !== false && (m.content.match(/^Pfad: (.+)$/m) || [])[1];
+      if (fpath) view.fileCard({ path: fpath.trim(), name: fpath.trim().split(/[\\/]/).pop() });
       view.hideTyping();
     }
   }
@@ -702,7 +795,7 @@ function setRunning(on) {
 }
 
 function updateSend() {
-  els.send.disabled = !state.running && !els.input.value.trim() && !state.pendingImages.length;
+  els.send.disabled = !state.running && !els.input.value.trim() && !state.pendingImages.length && !state.pendingFiles.length;
 }
 
 function handleEvent(ev, ctx) {
@@ -714,6 +807,8 @@ function handleEvent(ev, ctx) {
       break;
     case 'user': break;  // steht schon im Verlauf
     case 'load': view().progress(ev.p); break;
+    case 'file': view().fileCard(ev); break;
+    case 'image': view().image(ev.id); break;
     case 'work': view().work(ev); break;
     case 'think': view().think(ev.d); break;
     case 'text': view().text(ev.d); break;
@@ -781,17 +876,25 @@ async function resume(ctx) {
 
 async function send(textOverride) {
   if (state.running) return stop();
-  const text = (textOverride ?? els.input.value).trim();
+  let text = (textOverride ?? els.input.value).trim();
   const images = state.pendingImages.slice();
-  if (!text && !images.length) return;
-  let local = useLocal();
-  if (!local && !state.online && !(await connect())) {
-    if (state.settings.mode === 'laptop') { toast('Laptop ist nicht erreichbar.'); return; }
-    local = true;
-  }
-  if (local) {
-    if (state.work.minutes) { toast('Arbeitszeit-Aufträge gehen nur mit dem Laptop.'); state.work.minutes = 0; updateWorkChip(); }
+  if (!text && !images.length && !state.pendingFiles.length) return;
+  if (state.settings.mode !== 'phone' && !state.online && state.conn?.t) await connect();  // laufende Verbindung abwarten
+  if (state.settings.mode === 'laptop' && !state.online) { toast('Laptop ist nicht erreichbar. Läuft das schwarze Fenster?'); return; }
+  if (useLocal()) {
+    if (state.pendingFiles.length) { toast('Dateien gehen nur mit dem Laptop.'); state.pendingFiles = []; renderAttachments(); }
     return sendLocal(text);
+  }
+  if (isLocalConv(state.conv)) {
+    try { await moveChatToLaptop(state.conv); } catch (e) { toast('Chat konnte nicht zum Laptop: ' + e.message); return; }
+  }
+  NovaLocal.reset();  // Handy-Modell freigeben, solange der Laptop rechnet (spart Speicher)
+  if (state.pendingFiles.length) {
+    toast('Schicke Dateien an den Laptop …');
+    try {
+      const sent = await uploadPending();
+      text = `${text || 'Ich habe dir Dateien geschickt.'}\n\n[Dateien vom Handy im Arbeitsordner: ${sent.join(', ')}]`;
+    } catch (e) { toast('Upload fehlgeschlagen: ' + e.message); return; }
   }
   const work = state.work.minutes;
   const settings = { ...state.settings, work_minutes: work, free_hand: state.settings.free_hand || (work > 0 && state.work.free) };
@@ -845,7 +948,8 @@ async function refreshConvs() {
       : [{ conversations: [] }, {}];
     const live = new Set((status.active || []).map(a => a.id));
     const local = Object.values(localConvs()).map(c => ({ id: c.id, title: c.title, updated: c.updated, local: true }));
-    const conversations = [...server, ...local].sort((a, b) => b.updated - a.updated);
+    const localIds = new Set(local.map(c => c.id));   // Handy-Chats nicht doppelt zeigen (Backup auf dem Laptop)
+    const conversations = [...server.filter(c => !localIds.has(c.id)), ...local].sort((a, b) => b.updated - a.updated);
     els.convList.innerHTML = conversations.length ? '' : '<p class="muted small" style="padding:10px">Noch keine Chats.</p>';
     for (const c of conversations) {
       const row = h('div', 'conv' + (c.id === state.conv ? ' active' : ''));
@@ -929,8 +1033,64 @@ async function shrink(file) {
   return c.toDataURL('image/jpeg', 0.85);
 }
 
+async function downloadFile(path, name, btn) {
+  if (btn) btn.textContent = 'Lädt …';
+  try {
+    const r = await api('/api/download?path=' + encodeURIComponent(path));
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Fehler ${r.status}`);
+    const url = URL.createObjectURL(await r.blob());
+    const a = h('a');
+    a.href = url;
+    a.download = name || 'datei';
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    if (btn) btn.textContent = 'Gespeichert ✓';
+  } catch (e) {
+    toast(e.message);
+    if (btn) btn.textContent = 'Nochmal';
+  }
+}
+
+function readDataURL(file) {
+  return new Promise((ok, fail) => {
+    const fr = new FileReader();
+    fr.onload = () => ok(fr.result);
+    fr.onerror = () => fail(fr.error);
+    fr.readAsDataURL(file);
+  });
+}
+
+async function addFiles(files) {
+  for (const f of files) {
+    if (f.type.startsWith('image/') && state.pendingImages.length < 4) {
+      try { state.pendingImages.push(await shrink(f)); continue; } catch { /* als Datei schicken */ }
+    }
+    if (f.size > 30e6) { toast(`${f.name} ist größer als 30 MB`); continue; }
+    state.pendingFiles.push({ name: f.name || 'datei', data: await readDataURL(f), size: f.size });
+  }
+  renderAttachments();
+}
+
+async function uploadPending() {
+  const done = [];
+  for (const f of state.pendingFiles) {
+    const r = await apiJSON('/api/upload', { method: 'POST', body: JSON.stringify({ name: f.name, data: f.data }) });
+    done.push(r.rel);
+  }
+  state.pendingFiles = [];
+  return done;
+}
+
 function renderAttachments() {
   els.attachments.innerHTML = '';
+  state.pendingFiles.forEach((f, i) => {
+    const a = h('div', 'att doc', `${icon('file')}<span></span><button type="button" aria-label="Entfernen">${icon('x')}</button>`);
+    $('span', a).textContent = f.name;
+    $('button', a).onclick = () => { state.pendingFiles.splice(i, 1); renderAttachments(); };
+    els.attachments.append(a);
+  });
   state.pendingImages.forEach((src, i) => {
     const a = h('div', 'att', `<img alt="Anhang"><button type="button" aria-label="Entfernen">${icon('x')}</button>`);
     $('img', a).src = src;
@@ -1100,6 +1260,8 @@ function openSettings() {
   closeDrawer();
   $('#btnInstall').hidden = !state.installPrompt;
   renderModeSeg();
+  $('#setPush').checked = !!LS.get('nova.push', false) && typeof Notification !== 'undefined' && Notification.permission === 'granted';
+  loadReminders();
   loadMemory();
   loadLaptopModels();
   loadPhoneModels();
@@ -1165,6 +1327,8 @@ els.input.addEventListener('keydown', e => {
 });
 els.send.onclick = () => send();
 $('#btnAttach').onclick = () => els.file.click();
+$('#btnFile').onclick = () => $('#anyfile').click();
+$('#anyfile').addEventListener('change', async e => { await addFiles([...e.target.files]); e.target.value = ''; });
 $('#btnMenu').onclick = openDrawer;
 $('#btnDrawerClose').onclick = closeDrawer;
 els.scrim.onclick = closeDrawer;
@@ -1185,17 +1349,168 @@ bindSetting('#setThinking', 'thinking');
 bindSetting('#setSpeak', 'speak', on => { if (!on) speechSynthesis?.cancel(); });
 bindSetting('#setFree', 'free_hand', on => { if (on) toast('Freie Hand an – der Agent fragt nicht mehr nach.', 3500); });
 
+/* ------------------------------------------------------------ Benachrichtigungen (Web Push) */
+
+function keyBytes(b64u) {
+  const s = atob(b64u.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - b64u.length % 4) % 4));
+  return Uint8Array.from(s, c => c.charCodeAt(0));
+}
+
+async function pushSub() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
+  const reg = await navigator.serviceWorker.ready;
+  return reg.pushManager.getSubscription();
+}
+
+async function enablePush(quiet) {
+  if (!('PushManager' in window) || !('serviceWorker' in navigator)) {
+    if (!quiet) toast('Benachrichtigungen gehen nur in der installierten App (Chrome).', 4000);
+    return false;
+  }
+  if (Notification.permission !== 'granted') {
+    if (quiet) return false;
+    if (await Notification.requestPermission() !== 'granted') { toast('Benachrichtigungen wurden nicht erlaubt.'); return false; }
+  }
+  const { key } = await apiJSON('/api/push/key');
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if (sub && LS.get('nova.pushKey', '') !== key) { await sub.unsubscribe().catch(() => {}); sub = null; }
+  sub ||= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(key) });
+  await apiJSON('/api/push/subscribe', { method: 'POST',
+    body: JSON.stringify({ subscription: sub.toJSON(), device: navigator.userAgentData?.platform || 'Handy' }) });
+  LS.set('nova.pushKey', key);
+  LS.set('nova.push', true);
+  return true;
+}
+
+async function disablePush() {
+  const sub = await pushSub().catch(() => null);
+  if (sub) {
+    await apiJSON('/api/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint: sub.endpoint }) }).catch(() => {});
+    await sub.unsubscribe().catch(() => {});
+  }
+  LS.set('nova.push', false);
+}
+
+let pushSynced = false;
+async function syncPush() {
+  // Nach jedem (Neu-)Verbinden: Abo beim Laptop auffrischen (z. B. nach neuem Schlüssel)
+  if (pushSynced || !state.online || !LS.get('nova.push', false)) return;
+  pushSynced = true;
+  enablePush(true).catch(() => { pushSynced = false; });
+}
+
+$('#setPush').onchange = async e => {
+  const on = e.target.checked;
+  e.target.disabled = true;
+  try {
+    if (on) {
+      if (!state.online) throw new Error('Erst mit dem Laptop verbinden.');
+      if (await enablePush(false)) toast('Benachrichtigungen an ✓');
+      else e.target.checked = false;
+    } else {
+      await disablePush();
+      toast('Benachrichtigungen aus');
+    }
+  } catch (err) {
+    toast(err.message);
+    e.target.checked = !on;
+  }
+  e.target.disabled = false;
+};
+
+$('#btnPushTest').onclick = async () => {
+  try {
+    const sub = await pushSub();
+    if (!sub) return toast('Erst Benachrichtigungen einschalten.');
+    const r = await apiJSON('/api/push/test', { method: 'POST', body: JSON.stringify({ endpoint: sub.endpoint }) });
+    toast(r.sent ? 'Test geschickt – kommt gleich an.' : 'Hat nicht geklappt: ' + (r.failed?.[0] || 'kein Gerät'), 4000);
+  } catch (e) { toast(e.message); }
+};
+
+async function loadReminders() {
+  const box = $('#reminderList');
+  if (!state.online) { box.innerHTML = '<p class="muted">Laptop nicht verbunden.</p>'; return; }
+  try {
+    const { reminders } = await apiJSON('/api/reminders');
+    if (!reminders.length) { box.innerHTML = '<p class="muted">Keine. Sag z. B. „Erinnere mich in 20 Minuten an die Pizza.“</p>'; return; }
+    box.innerHTML = '';
+    for (const r of reminders) {
+      const when = new Date((r.when - state.skew) * 1000).toLocaleString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      const row = h('div', 'mem', `<span></span><button type="button" aria-label="Löschen">${icon('trash')}</button>`);
+      $('span', row).textContent = `${when} – ${r.text}`;
+      $('button', row).onclick = async () => { await apiJSON('/api/reminders/' + r.id, { method: 'DELETE' }).catch(e => toast(e.message)); loadReminders(); };
+      box.append(row);
+    }
+  } catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+}
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', e => {
+    const d = e.data || {};
+    if (d.type === 'open' && d.conv) openConv(d.conv);
+    if (d.type === 'push' && d.data?.conv && d.data.conv !== state.conv) toast(d.data.title || 'Nova ist fertig', 3500);
+  });
+}
+
+/* ------------------------------------------------------------ Start-Parameter (Schnellstart, Teilen, Benachrichtigung) */
+
+async function takeShare() {
+  try {
+    const c = await caches.open('nova-share');
+    const r = await c.match('pending-share');
+    if (!r) return;
+    await c.delete('pending-share');
+    const s = await r.json();
+    if (s.text) { els.input.value = s.text; autoGrow(); }
+    for (const f of s.files || []) {
+      if (f.type?.startsWith('image/') && state.pendingImages.length < 4) {
+        const blob = await (await fetch(f.data)).blob();
+        try { state.pendingImages.push(await shrink(blob)); continue; } catch { /* als Datei */ }
+      }
+      state.pendingFiles.push({ name: f.name, data: f.data, size: Math.round(f.data.length * 0.75) });
+    }
+    renderAttachments();
+    toast('Geteilt – schreib noch was dazu oder tippe auf Senden.', 3500);
+    els.input.focus();
+  } catch { /* nichts geteilt */ }
+}
+
+async function handleStartParams(online) {
+  const q = new URLSearchParams(location.search);
+  if ([...q.keys()].length) history.replaceState(null, '', location.pathname);
+  if (q.get('share')) { newChat(); await takeShare(); return true; }
+  if (q.get('conv')) { openConv(q.get('conv')); return true; }
+  if (q.get('new')) { newChat(); return true; }
+  if (q.get('work')) { newChat(); $('#btnWork').click(); return true; }
+  if (q.get('photo')) {
+    newChat();
+    els.input.value = 'Was siehst du auf diesem Foto?';
+    autoGrow();
+    toast('Tippe unten links aufs Bild-Symbol und wähle ein Foto.', 4000);
+    return true;
+  }
+  if (q.get('ask') === 'screen') {
+    newChat();
+    if (online) send('Mach ein Bildschirmfoto vom Laptop und sag mir kurz, was darauf zu sehen ist.');
+    else toast('Dafür muss der Laptop laufen.');
+    return true;
+  }
+  return false;
+}
+
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); state.installPrompt = e; });
 window.addEventListener('online', () => connect());
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
+  navigator.clearAppBadge?.().catch(() => {});
   if (state.resumeView) { const ctx = state.resumeView; state.resumeView = null; resume(ctx); }
   else if (!state.online) connect();
 });
 
 /* ------------------------------------------------------------ Start */
 
-if ('serviceWorker' in navigator && location.protocol === 'https:') {
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || isLocalPage())) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
@@ -1204,7 +1519,10 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
   setRunning(false);
   updateWorkChip();
   autoGrow();
+  navigator.clearAppBadge?.().catch(() => {});
+  checkLocalCrash();
   const online = await connect();
+  if (await handleStartParams(online)) return;
   const last = LS.get('nova.lastConv', null);
   if (last && (online || isLocalConv(last))) openConv(last);
 })();
