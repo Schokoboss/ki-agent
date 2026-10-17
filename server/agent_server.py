@@ -363,6 +363,32 @@ class Tunnel:
     def start(self) -> None:
         if CFG.get("tunnel"):
             threading.Thread(target=self._run, daemon=True, name="tunnel").start()
+            threading.Thread(target=self._watchdog, daemon=True, name="tunnel-watch").start()
+
+    def _restart(self, why: str) -> None:
+        if self.proc and self.proc.poll() is None:
+            log(f"Tunnel tot ({why}) – hole einen neuen …")
+            self.proc.terminate()
+
+    def _watchdog(self) -> None:
+        """Gratis-Tunnel können verfallen (Standby, Netzwechsel). cloudflared versucht dann ewig denselben toten
+        Tunnel – also selbst von außen prüfen und bei Ausfall einen neuen holen."""
+        fails = 0
+        while not self._stopping:
+            time.sleep(60)
+            url = self.url
+            if not url or self.state != "online":
+                fails = 0
+                continue
+            try:
+                with urllib.request.urlopen(url + "/api/ping", timeout=20) as r:
+                    ok = r.status == 200
+            except (urllib.error.URLError, OSError, ValueError):
+                ok = False
+            fails = 0 if ok else fails + 1
+            if fails >= 3:
+                fails = 0
+                self._restart("von außen nicht erreichbar")
 
     def _run(self) -> None:
         exe = ENGINE / "cloudflared.exe"
@@ -379,11 +405,16 @@ class Tunnel:
                 stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, creationflags=CREATE_NO_WINDOW,
                 stdin=subprocess.DEVNULL)
             started = time.time()
+            dead_hits = 0
             with open(LOGS / "tunnel.log", "a", encoding="utf-8") as tlog:
                 for raw in self.proc.stderr:
                     line = raw.decode("utf-8", "replace").rstrip()
                     tlog.write(line + "\n")
                     tlog.flush()
+                    if "Tunnel not found" in line or "Unauthorized" in line:
+                        dead_hits += 1
+                        if dead_hits >= 2:
+                            self._restart("Cloudflare kennt ihn nicht mehr")
                     if not self.url:
                         m = self.URL_RE.search(line)
                         if m:
@@ -1569,6 +1600,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not self._is_local():
                     return self._json(403, {"error": "nur am Laptop"})
                 return self._json(200, local_info())
+            if path == "/api/ping":
+                return self._json(200, {"ok": True})  # für den Tunnel-Wächter, ohne Schlüssel
             if not path.startswith("/api/"):
                 return self._static(path)
             if not self._authed():
