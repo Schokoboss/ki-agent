@@ -269,6 +269,10 @@ class Llama:
 
 # Modelle für den Laptop. Sampling nach Empfehlung der Hersteller.
 MODEL_CATALOG = {
+    "qwen35-9b": {"label": "Qwen3.5 9B", "desc": "Am klügsten (Programmieren, Fakten), versteht Bilder – langsamer, "
+                                                  "braucht ~8 GB freien RAM (Spiele zu)",
+                  "file": "Qwen3.5-9B-Q4_K_M.gguf", "mmproj": "mmproj-Qwen3.5-9B-F16.gguf", "family": "qwen",
+                  "min_bytes": 5_600_000_000},
     "qwen35-4b-turbo": {"label": "Qwen3.5 4B Turbo", "desc": "Experimentell: schneller nur mit viel freiem RAM (Spiele zu) – ohne Bilderkennung",
                         "file": "Qwen3.5-4B-MTP-Q4_K_M.gguf", "mmproj": None, "family": "qwen",
                         "extra_args": ["--spec-type", "draft-mtp", "--spec-draft-n-max", "3"],
@@ -954,6 +958,7 @@ So arbeitest du:
      Danach sagen, dass der Nutzer auf den Knopf tippen soll – erst dann ist es erledigt.)
   • Wiederkehrend („jeden Morgen“, „jeden Montag“, „täglich um …“) → routine
 - Dateien, die der Nutzer vom Handy schickt, liegen im Arbeitsordner unter „Vom Handy“.
+- Programmieren: Neue Projekte unter „Projekte/<Name>“ im Arbeitsordner anlegen. Bestehenden Code erst mit project_tree, find_in_files und read_file verstehen, dann mit edit_file gezielt ändern (nicht alles neu schreiben), danach mit run_python, run_node oder run_powershell (Parameter cwd = Projektordner) testen und Fehler beheben, bis es läuft.
   Bei mehreren Fragen in einer Nachricht rufst du für jede das passende Werkzeug auf.
 - Wenn du ein Werkzeug brauchst, rufe es SOFORT auf und schreibe vorher KEINE Antwort. Antworte erst, wenn alle Werkzeug-Ergebnisse da sind.
 - Erfinde nie Fakten, Links, Zahlen oder Werkzeug-Ergebnisse. Klappt ein Werkzeug nicht, versuche einen anderen Weg oder sag ehrlich, was nicht ging.

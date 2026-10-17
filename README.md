@@ -60,6 +60,8 @@ Nova kann auch **direkt auf dem Handy** laufen – ganz ohne Laptop, sogar ohne 
   Videos landen in `workspace\Videos` und lassen sich in der App abspielen.
 - **Apps & Spiele:** „Bau mir ein Snake-Spiel“ – Nova programmiert es und gibt dir einen Link zum Spielen
   am Handy (gilt bis zum nächsten Neustart des Agenten).
+- **Programmieren:** Projekte unter `workspace\Projekte`, Nova liest/durchsucht Code, ändert gezielt
+  (`edit_file`), führt Python, JavaScript (Node) und PowerShell im Projektordner aus und testet.
 - **Dokumente:** „Schreib mir eine Bewerbung als PDF“ – fertige PDF in `workspace\Dokumente`.
 - **Bilder malen:** „Mal mir einen Drachen über einer Burg“ – lokal mit SD-Turbo auf der iGPU,
   das Bild landet im Chat und unter `workspace\Bilder`.
@@ -78,6 +80,7 @@ Einstellungen → **Laptop-Modell** – umschalten dauert ein paar Sekunden:
 
 | Modell | Wofür |
 |---|---|
+| Qwen3.5 9B | Am klügsten (Programmieren, Fakten), versteht Bilder – langsamer, ~8 GB freier RAM nötig |
 | Qwen3.5 4B Turbo | Experimentell (MTP): nur mit viel freiem RAM schneller – ohne Bilderkennung |
 | Qwen3.5 4B | Standard – schlau, versteht Bilder |
 | Qwen3.5 2B | Schnell – für einfache Sachen |

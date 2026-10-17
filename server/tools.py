@@ -599,10 +599,13 @@ def calculate(args, ctx):
     return f"{original} = {value}"
 
 
-def _run_process(cmd, ctx, timeout):
+def _run_process(cmd, ctx, timeout, cwd=None):
     env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+    workdir = _resolve(cwd, ctx) if cwd else ctx.workspace
+    if not workdir.is_dir():
+        raise ToolError(f"Arbeitsordner nicht gefunden: {workdir}")
     try:
-        p = subprocess.run(cmd, cwd=ctx.workspace, capture_output=True, timeout=timeout,
+        p = subprocess.run(cmd, cwd=workdir, capture_output=True, timeout=timeout,
                            creationflags=CREATE_NO_WINDOW, env=env, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired as e:
         out = _decode(e.stdout or b"") + _decode(e.stderr or b"")
@@ -625,14 +628,109 @@ def run_python(args, ctx):
     runs.mkdir(parents=True, exist_ok=True)
     script = runs / f"run_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}.py"
     script.write_text(code, encoding="utf-8")
-    return _run_process([ctx.python_exe, "-X", "utf8", str(script)], ctx, timeout=120)
+    return _run_process([ctx.python_exe, "-X", "utf8", str(script)], ctx, timeout=180, cwd=args.get("cwd"))
 
 
 def run_powershell(args, ctx):
     command = args.get("command") or ""
     prefix = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; $ProgressPreference='SilentlyContinue'; "
     return _run_process(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                         "-Command", prefix + command], ctx, timeout=120)
+                         "-Command", prefix + command], ctx, timeout=180, cwd=args.get("cwd"))
+
+
+NODE = Path(os.environ.get("USERPROFILE", "")) / "nodejs-portable" / "node-v22.14.0-win-x64" / "node.exe"
+
+
+def run_node(args, ctx):
+    node = NODE if NODE.is_file() else shutil.which("node")
+    if not node:
+        raise ToolError("Node.js ist nicht installiert.")
+    code = args.get("code") or ""
+    if len(code) > 30000:
+        raise ToolError("Code zu lang für run_node – als Datei speichern und mit run_powershell 'node datei.mjs' starten.")
+    # --eval: relative Importe beziehen sich dann auf den Arbeitsordner (cwd), nicht auf einen Hilfsordner
+    return _run_process([str(node), "--input-type=module", "--eval", code], ctx, timeout=120, cwd=args.get("cwd"))
+
+
+SKIP_DIRS = {"node_modules", ".git", "__pycache__", ".venv", "venv", ".runs", "dist", "build", ".next", ".cache"}
+
+
+def project_tree(args, ctx):
+    root = _resolve(args.get("path") or ".", ctx)
+    if not root.is_dir():
+        raise ToolError(f"Ordner nicht gefunden: {root}")
+    depth = max(1, min(int(args.get("depth") or 3), 6))
+    lines, count = [str(root)], 0
+
+    def walk(d: Path, level: int, prefix: str):
+        nonlocal count
+        try:
+            items = sorted(d.iterdir(), key=lambda c: (not c.is_dir(), c.name.lower()))
+        except OSError:
+            return
+        for c in items:
+            if count >= 400:
+                return
+            if c.name in SKIP_DIRS:
+                continue
+            count += 1
+            if c.is_dir():
+                lines.append(f"{prefix}{c.name}/")
+                if level < depth:
+                    walk(c, level + 1, prefix + "  ")
+            else:
+                lines.append(f"{prefix}{c.name}  ({_human(c.stat().st_size)})")
+
+    walk(root, 1, "  ")
+    if count >= 400:
+        lines.append("  … (gekürzt)")
+    return "\n".join(lines)
+
+
+def find_in_files(args, ctx):
+    root = _resolve(args.get("path") or ".", ctx)
+    pattern = args.get("pattern") or ""
+    try:
+        rx = re.compile(pattern, re.I)
+    except re.error:
+        rx = re.compile(re.escape(pattern), re.I)
+    glob = args.get("glob") or "*"
+    hits = []
+    files = [root] if root.is_file() else root.rglob(glob)
+    for f in files:
+        if len(hits) >= 120:
+            break
+        if not f.is_file() or any(part in SKIP_DIRS for part in f.parts) or f.stat().st_size > 2_000_000:
+            continue
+        try:
+            raw = f.read_bytes()
+        except OSError:
+            continue
+        if b"\x00" in raw[:2000]:
+            continue
+        for n, line in enumerate(_decode(raw).splitlines(), 1):
+            if rx.search(line):
+                hits.append(f"{f.relative_to(root) if root.is_dir() else f.name}:{n}: {line.strip()[:200]}")
+                if len(hits) >= 120:
+                    break
+    return "\n".join(hits) if hits else f"Nichts gefunden für „{pattern}“."
+
+
+def edit_file(args, ctx):
+    p = _resolve(args.get("path") or "", ctx)
+    if not p.is_file():
+        raise ToolError(f"Datei nicht gefunden: {p}")
+    old, new = args.get("old") or "", args.get("new") or ""
+    text = _decode(p.read_bytes())
+    if not old:
+        raise ToolError("old (der zu ersetzende Text) fehlt.")
+    n = text.count(old)
+    if n == 0:
+        raise ToolError("Der Text in 'old' kommt in der Datei nicht vor – erst read_file und genau kopieren.")
+    if n > 1 and not args.get("replace_all"):
+        raise ToolError(f"'old' kommt {n}× vor – mehr Kontext angeben oder replace_all=true.")
+    p.write_text(text.replace(old, new) if args.get("replace_all") else text.replace(old, new, 1), encoding="utf-8")
+    return f"{p.name}: {n if args.get('replace_all') else 1} Stelle(n) geändert."
 
 
 # ---------------------------------------------------------------- Werkzeuge: Dateien & Laptop
@@ -899,9 +997,20 @@ TOOL_SPECS = [
           "'17.5% * 240' means 17.5 percent of 240. Examples: '(12+8)*3', 'sqrt(2)*3', '19% * 49.99'.",
           {"expression": _s("Math expression")}, ["expression"]),
     _spec("run_python", "Run a Python 3 script on the laptop (working dir = workspace). Print results. "
-          "Use for calculations, data, files, charts, automation.", {"code": _s("Complete Python code")}, ["code"]),
-    _spec("run_powershell", "Run a PowerShell command on the Windows laptop.", {"command": _s("PowerShell command")},
-          ["command"]),
+          "Use for calculations, data, files, charts, automation.", {"code": _s("Complete Python code"),
+          "cwd": _s("Optional working folder")}, ["code"]),
+    _spec("run_powershell", "Run a PowerShell command on the Windows laptop (also git, npm, pip …).",
+          {"command": _s("PowerShell command"), "cwd": _s("Optional working folder, e.g. a project folder")}, ["command"]),
+    _spec("run_node", "Run JavaScript (Node.js 22, ES modules) on the laptop. Print results with console.log.",
+          {"code": _s("Complete JavaScript code"), "cwd": _s("Optional working folder")}, ["code"]),
+    _spec("edit_file", "Change part of a text/code file: replaces the exact text 'old' with 'new'. Read the file first. "
+          "Better than rewriting whole files.", {"path": _s("File path"), "old": _s("Exact existing text"),
+          "new": _s("Replacement text"), "replace_all": {"type": "boolean", "description": "Replace every occurrence"}},
+          ["path", "old", "new"]),
+    _spec("project_tree", "Show the folder/file tree of a project (skips node_modules, .git …).",
+          {"path": _s("Folder"), "depth": {"type": "integer", "description": "Depth 1–6, default 3"}}),
+    _spec("find_in_files", "Search text or a regex in all files of a folder (like grep). Shows file:line.",
+          {"pattern": _s("Text or regex"), "path": _s("Folder or file"), "glob": _s("File filter, e.g. *.py")}, ["pattern"]),
     _spec("list_files", "List a folder on the laptop. Relative paths are inside the workspace.",
           {"path": _s("Folder path, default workspace")}),
     _spec("read_file", "Read a text file on the laptop.", {"path": _s("File path")}, ["path"]),
@@ -952,6 +1061,7 @@ TOOLS = {
     "list_files": list_files, "read_file": read_file, "write_file": write_file,
     "open_on_laptop": open_on_laptop, "laptop_status": laptop_status, "remember": remember, "forget": forget,
     "media_control": media_control, "lock_laptop": lock_laptop, "download_file": download_file,
+    "run_node": run_node, "edit_file": edit_file, "project_tree": project_tree, "find_in_files": find_in_files,
 }
 
 
@@ -961,10 +1071,13 @@ def approval_reason(name: str, args: dict, ctx: ToolContext) -> str | None:
         return "Python-Code auf dem Laptop ausführen"
     if name == "run_powershell":
         return "PowerShell-Befehl auf dem Laptop ausführen"
-    if name in ("read_file", "list_files", "write_file"):
+    if name == "run_node":
+        return "JavaScript-Code auf dem Laptop ausführen"
+    if name in ("read_file", "list_files", "write_file", "edit_file", "project_tree", "find_in_files"):
         p = _resolve(args.get("path") or ".", ctx)
         if not _inside_workspace(p, ctx):
-            verb = {"read_file": "Datei lesen", "list_files": "Ordner ansehen", "write_file": "Datei schreiben"}[name]
+            verb = {"read_file": "Datei lesen", "list_files": "Ordner ansehen", "write_file": "Datei schreiben",
+                    "edit_file": "Datei ändern", "project_tree": "Ordner ansehen", "find_in_files": "Dateien durchsuchen"}[name]
             return f"{verb} außerhalb des Arbeitsordners: {p}"
     if name == "open_on_laptop" and not re.match(r"^https?://", (args.get("target") or "").strip(), re.I):
         return "Etwas auf dem Laptop öffnen"
