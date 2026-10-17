@@ -439,6 +439,8 @@ const TOOL_META = {
   lock_laptop: ['Sperren', 'laptop', () => 'Laptop'],
   download_file: ['Download', 'download', a => (a.url || '').replace(/^https?:\/\//, '')],
   save_file: ['Datei speichern', 'file', a => a.name],
+  phone_action: ['Handy-Aktion', 'phone', a => a.label || a.type],
+  routine: ['Routine', 'repeat', a => a.action === 'list' ? 'ansehen' : a.action === 'delete' ? 'löschen' : `${a.days || 'täglich'} ${a.time || ''} · ${a.name || a.prompt || ''}`],
   notes: ['Notizen', 'edit', a => (a.text || '').split('\n').find(l => l.trim()) || ''],
 };
 
@@ -580,6 +582,16 @@ class TurnView {
     } else {
       $('button', card).onclick = () => downloadFile(ev.path, ev.name, $('button', card));
     }
+    this.append(card);
+  }
+  actionCard(a) {
+    const b = buildAction(a || {});
+    if (!b) return;
+    const card = h('button', 'action-card', `<span class="ai">${icon(b.icon)}</span><span class="at"><b></b><small></small></span><span class="go">Los</span>`);
+    card.type = 'button';
+    $('b', card).textContent = a.label || b.label;
+    $('small', card).textContent = b.detail || '';
+    card.onclick = () => runAction(b);
     this.append(card);
   }
   image(id) {
@@ -782,6 +794,7 @@ function renderHistory(messages, live) {
       view.result({ id: m.tool_call_id, ok: m._ok !== false, preview: (m.content || '').slice(0, 2000) });
       const t = view.tools[m.tool_call_id];
       if (m._file) view.fileCard({ ...m._file, local: true });
+      if (m._action) view.actionCard(m._action);
       const fpath = t?.name === 'send_to_phone' && m._ok !== false && (m.content.match(/^Pfad: (.+)$/m) || [])[1];
       if (fpath) view.fileCard({ path: fpath.trim(), name: fpath.trim().split(/[\\/]/).pop() });
       view.hideTyping();
@@ -823,6 +836,7 @@ function handleEvent(ev, ctx) {
     case 'user': break;  // steht schon im Verlauf
     case 'load': view().progress(ev.p); break;
     case 'file': view().fileCard(ev); break;
+    case 'action': view().actionCard(ev.action); break;
     case 'image': view().image(ev.id); break;
     case 'work': view().work(ev); break;
     case 'think': view().think(ev.d); break;
@@ -837,10 +851,12 @@ function handleEvent(ev, ctx) {
     case 'status': view().status(ev.d); break;
     case 'error':
       view().error(ev.d);
+      talkAfterAnswer('');
       return true;
     case 'done':
       view().finish(ev.stats);
-      if (state.settings.speak && view().allText) speak(view().allText);
+      if (talk.on) talkAfterAnswer(view().allText);
+      else if (state.settings.speak && view().allText) speak(view().allText);
       return true;
     default: break;
   }
@@ -1048,6 +1064,139 @@ async function shrink(file) {
   return c.toDataURL('image/jpeg', 0.85);
 }
 
+/* ------------------------------------------------------------ Handy-Aktionen (ein Tipp) */
+
+function buildAction(a) {
+  const enc = encodeURIComponent;
+  const num = s => String(s || '').replace(/[^\d+]/g, '');
+  const ics = s => {
+    const m = String(s || '').match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2})[:.](\d{2})/);
+    return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) : null;
+  };
+  const stamp = d => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}T`
+    + `${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}00`;
+  const modes = { drive: 'driving', walk: 'walking', transit: 'transit', bike: 'bicycling' };
+  switch (a.type) {
+    case 'call': return { icon: 'phone', label: 'Anrufen', detail: a.number, href: `tel:${num(a.number)}` };
+    case 'sms': return { icon: 'chat', label: 'SMS schreiben', detail: `${a.number}: ${a.text || ''}`, href: `sms:${num(a.number)}${a.text ? '?body=' + enc(a.text) : ''}` };
+    case 'whatsapp': return { icon: 'chat', label: 'WhatsApp', detail: a.text || a.number,
+      href: `https://wa.me/${num(a.number).replace('+', '')}${a.text ? '?text=' + enc(a.text) : ''}` };
+    case 'email': return { icon: 'mail', label: 'E-Mail schreiben', detail: `${a.to} – ${a.subject || ''}`,
+      href: `mailto:${a.to}?subject=${enc(a.subject || '')}&body=${enc(a.text || '')}` };
+    case 'maps': return a.destination
+      ? { icon: 'map', label: 'Route in Google Maps', detail: a.destination,
+          href: `https://www.google.com/maps/dir/?api=1&destination=${enc(a.destination)}${modes[a.mode] ? '&travelmode=' + modes[a.mode] : ''}` }
+      : { icon: 'map', label: 'In Google Maps zeigen', detail: a.query, href: `https://www.google.com/maps/search/?api=1&query=${enc(a.query || '')}` };
+    case 'calendar': {
+      const s = ics(a.start);
+      if (!s) return null;
+      const e = ics(a.end) || new Date(s.getTime() + 3600000);
+      return { icon: 'calendar', label: 'In den Kalender', detail: `${a.title} · ${s.toLocaleString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`,
+        href: `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${enc(a.title || '')}&dates=${stamp(s)}/${stamp(e)}&location=${enc(a.place || '')}&details=${enc(a.text || '')}` };
+    }
+    case 'youtube': return { icon: 'play', label: 'Auf YouTube', detail: a.query, href: `https://www.youtube.com/results?search_query=${enc(a.query || '')}` };
+    case 'spotify': return { icon: 'play', label: 'Auf Spotify', detail: a.query, href: `https://open.spotify.com/search/${enc(a.query || '')}` };
+    case 'search': return { icon: 'search', label: 'Google-Suche', detail: a.query, href: `https://www.google.com/search?q=${enc(a.query || '')}` };
+    case 'web': return /^https?:\/\//.test(a.url || '') ? { icon: 'globe', label: 'Webseite öffnen', detail: a.url, href: a.url } : null;
+    case 'share': return { icon: 'share', label: 'Teilen', detail: a.text, share: a.text || '' };
+    case 'copy': return { icon: 'copy', label: 'Kopieren', detail: a.text, copy: a.text || '' };
+    default: return null;
+  }
+}
+
+async function runAction(b) {
+  try {
+    if (b.copy != null) { await navigator.clipboard.writeText(b.copy); toast('Kopiert ✓'); return; }
+    if (b.share != null) {
+      if (navigator.share) await navigator.share({ text: b.share });
+      else { await navigator.clipboard.writeText(b.share); toast('Teilen geht hier nicht – kopiert ✓'); }
+      return;
+    }
+    if (/^https?:/.test(b.href)) window.open(b.href, '_blank', 'noopener');
+    else location.href = b.href;
+  } catch (e) {
+    if (e.name !== 'AbortError') toast('Ging nicht: ' + e.message);
+  }
+}
+
+/* ------------------------------------------------------------ Gesprächsmodus (freihändig) */
+
+const talk = { on: false, rec: null, idle: 0 };
+
+function talkListen() {
+  if (!talk.on || !SR) return;
+  if (state.running) { setTimeout(talkListen, 500); return; }
+  const rec = new SR();
+  talk.rec = rec;
+  rec.lang = 'de-DE';
+  rec.interimResults = true;
+  let finalText = '';
+  rec.onresult = e => {
+    let t = '';
+    for (let i = 0; i < e.results.length; i++) {
+      t += e.results[i][0].transcript;
+      if (e.results[i].isFinal) finalText = t;
+    }
+    els.input.value = t;
+    autoGrow();
+  };
+  rec.onerror = e => { if (e.error === 'not-allowed') { talkStop(); toast('Mikrofon nicht erlaubt.'); } };
+  rec.onend = () => {
+    talk.rec = null;
+    if (!talk.on) return;
+    const text = (finalText || els.input.value).trim();
+    if (text) { talk.idle = 0; send(text); return; }
+    if (++talk.idle >= 3) { talkStop(); toast('Gesprächsmodus aus (nichts gehört).'); return; }
+    setTimeout(talkListen, 400);
+  };
+  try { rec.start(); } catch { setTimeout(talkListen, 800); }
+}
+
+function talkStop() {
+  talk.on = false;
+  talk.rec?.abort();
+  speechSynthesis?.cancel();
+  $('#btnTalk').classList.remove('on');
+}
+
+function talkAfterAnswer(text) {
+  if (!talk.on) return;
+  if (text) speak(text, () => setTimeout(talkListen, 250));
+  else setTimeout(talkListen, 250);
+}
+
+/* ------------------------------------------------------------ Routinen */
+
+async function loadRoutines() {
+  const box = $('#routineList');
+  if (!state.online) { box.innerHTML = '<p class="muted">Laptop nicht verbunden.</p>'; return; }
+  try {
+    const { routines } = await apiJSON('/api/routines');
+    if (!routines.length) {
+      box.innerHTML = '<p class="muted">Keine. Sag z. B. „Schick mir jeden Morgen um 7 das Wetter für Landshut.“</p>';
+      return;
+    }
+    box.innerHTML = '';
+    for (const r of routines) {
+      const row = h('div', 'routine-row', `<span><b></b><small></small></span>
+        <button type="button" class="run" aria-label="Jetzt ausführen">${icon('play')}</button>
+        <button type="button" class="del" aria-label="Löschen">${icon('trash')}</button>`);
+      $('b', row).textContent = r.name;
+      $('small', row).textContent = `${r.days_text} um ${r.time} Uhr`;
+      $('.run', row).onclick = async () => {
+        await apiJSON(`/api/routines/${r.id}/run`, { method: 'POST', body: '{}' }).catch(e => toast(e.message));
+        toast('Läuft – Ergebnis kommt als Benachrichtigung und im Chat.');
+      };
+      $('.del', row).onclick = async () => {
+        if (!confirm(`Routine „${r.name}“ löschen?`)) return;
+        await apiJSON('/api/routines/' + r.id, { method: 'DELETE' }).catch(e => toast(e.message));
+        loadRoutines();
+      };
+      box.append(row);
+    }
+  } catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+}
+
 async function downloadFile(path, name, btn) {
   if (btn) btn.textContent = 'Lädt …';
   try {
@@ -1124,19 +1273,29 @@ els.file.addEventListener('change', async () => {
   els.input.focus();
 });
 
-function speak(text) {
-  if (!('speechSynthesis' in window)) return toast('Vorlesen geht auf diesem Gerät nicht');
+function speak(text, onEnd) {
+  if (!('speechSynthesis' in window)) { onEnd?.(); return toast('Vorlesen geht auf diesem Gerät nicht'); }
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(plainText(text).slice(0, 4000));
   u.lang = 'de-DE';
   const v = speechSynthesis.getVoices().find(x => x.lang?.startsWith('de'));
   if (v) u.voice = v;
+  if (onEnd) { u.onend = onEnd; u.onerror = onEnd; }
   speechSynthesis.speak(u);
 }
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null;
 if (SR) {
+  $('#btnTalk').hidden = false;
+  $('#btnTalk').onclick = () => {
+    if (talk.on) { talkStop(); toast('Gesprächsmodus aus'); return; }
+    talk.on = true;
+    talk.idle = 0;
+    $('#btnTalk').classList.add('on');
+    toast('Gesprächsmodus an – sprich einfach. Nochmal tippen zum Beenden.', 3500);
+    talkListen();
+  };
   els.mic.hidden = false;
   els.mic.onclick = () => {
     if (rec) { rec.stop(); return; }
@@ -1277,6 +1436,7 @@ function openSettings() {
   renderModeSeg();
   $('#setPush').checked = !!LS.get('nova.push', false) && typeof Notification !== 'undefined' && Notification.permission === 'granted';
   loadReminders();
+  loadRoutines();
   loadMemory();
   loadLaptopModels();
   loadPhoneModels();

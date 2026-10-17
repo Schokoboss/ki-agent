@@ -246,6 +246,21 @@ textarea::placeholder { color: var(--muted); }
 .shot { max-width: 100%; border-radius: 14px; border: 1px solid var(--border); display: block; }
 .att.doc { display: flex; align-items: center; gap: 6px; padding: 8px 30px 8px 10px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); font-size: 13px; max-width: 180px; }
 .att.doc span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.action-card { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border-radius: 16px; text-align: left;
+  background: linear-gradient(135deg, var(--accent-soft), transparent 80%), var(--surface); border: 1.5px solid color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.action-card .ai { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: var(--accent); color: var(--on-accent); flex: none; }
+.action-card .at { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.action-card .at b { font-size: 15px; }
+.action-card .at small { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.action-card .go { font-weight: 700; color: var(--accent); font-size: 14px; flex: none; }
+.action-card:active { transform: scale(.98); }
+#btnTalk.on { color: var(--on-accent); background: var(--danger); animation: pulse 1.4s infinite; }
+.routine-row { display: flex; align-items: center; gap: 6px; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 14.5px; }
+.routine-row:last-child { border-bottom: 0; }
+.routine-row span { flex: 1; }
+.routine-row small { display: block; color: var(--muted); font-size: 12.5px; }
+.routine-row button { color: var(--muted); width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; }
+.routine-row button svg { width: 17px; height: 17px; }
 .conv .live { font-size: 11px; font-weight: 700; color: var(--accent); background: var(--accent-soft); padding: 2px 7px; border-radius: 99px; margin-left: 6px; }
 .att { position: relative; flex: none; }
 .att img { width: 64px; height: 64px; object-fit: cover; border-radius: 12px; border: 1px solid var(--border); display: block; }
