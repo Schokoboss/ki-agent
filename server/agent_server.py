@@ -66,6 +66,9 @@ DEFAULT_CONFIG = {
     "gist_id": "",
     "token": "",
     "vapid_private": "",
+    "game_mode": True,           # Spiel läuft → große Modelle machen Platz
+    "game_model": "qwen35-4b",
+    "game_processes": {},        # eigene Ergänzungen: {"spiel.exe": "Name"}
 }
 
 _log_lock = threading.Lock()
@@ -172,6 +175,8 @@ class Llama:
         self.restarts = 0
         self._stopping = False
         self.switching = False
+        self.loaded = None  # id des Modells, das gerade im llama-server steckt
+        self._thread = None
 
     @property
     def url(self):
@@ -190,7 +195,8 @@ class Llama:
         return None
 
     def start(self) -> None:
-        threading.Thread(target=self._run, daemon=True, name="llama").start()
+        self._thread = threading.Thread(target=self._run, daemon=True, name="llama")
+        self._thread.start()
 
     def _run(self) -> None:
         if self.healthy():
@@ -227,7 +233,9 @@ class Llama:
                 log(f"Sparmodus Stufe {level} für {info['label']} (Grafikspeicher war voll).")
             self.state = "lädt"
             self.switching = False
-            log(f"KI-Modell {info['label']} wird geladen …")
+            self.loaded = info["id"]
+            log(f"KI-Modell {info['label']} wird geladen …"
+                + (f" (Spielmodus: {GAME['active']} läuft)" if info.get("game") else ""))
             logf = open(LOGS / "llama.log", "ab")
             self.proc = subprocess.Popen(args, stdout=logf, stderr=subprocess.STDOUT, cwd=exe.parent,
                                          creationflags=CREATE_NO_WINDOW, stdin=subprocess.DEVNULL)
@@ -269,6 +277,16 @@ class Llama:
         """Anderes Modell laden: llama-server beenden, die Schleife in _run startet ihn neu."""
         CFG["model_id"] = model_id
         save_config(CFG)
+        self.reload()
+
+    def reload(self) -> None:
+        """Neu laden, falls jetzt ein anderes Modell dran ist (Wahl oder Spielmodus)."""
+        if self.loaded == current_model()["id"] and self.state == "bereit":
+            return
+        if not (self._thread and self._thread.is_alive()):  # nach „gebe auf“ wieder anwerfen
+            self.restarts = 0
+            self.start()
+            return
         self.switching = True
         self.restarts = 0
         self.state = "lädt"
@@ -301,7 +319,7 @@ MODEL_CATALOG = {
                   "file": "Qwen3.5-9B-Q4_K_M.gguf", "mmproj": "mmproj-Qwen3.5-9B-F16.gguf", "family": "qwen",
                   "min_bytes": 5_600_000_000, "fit": True, "ctx": 24576},
     "qwen35-4b-turbo": {"label": "Qwen3.5 4B Turbo", "desc": "Experimentell: schneller nur mit viel freiem RAM (Spiele zu) – ohne Bilderkennung",
-                        "file": "Qwen3.5-4B-MTP-Q4_K_M.gguf", "mmproj": None, "family": "qwen",
+                        "file": "Qwen3.5-4B-MTP-Q4_K_M.gguf", "mmproj": None, "family": "qwen", "heavy": True,
                         "extra_args": ["--spec-type", "draft-mtp", "--spec-draft-n-max", "3"],
                         "min_bytes": 2_800_000_000},
     "qwen35-4b": {"label": "Qwen3.5 4B", "desc": "Standard – schlau, versteht Bilder",
@@ -318,13 +336,76 @@ SAMPLING = {"qwen": {"temperature": 0.7, "top_p": 0.8, "top_k": 20},
             "gemma": {"temperature": 1.0, "top_p": 0.95, "top_k": 64}}
 
 
-def current_model() -> dict:
+def chosen_model() -> dict:
     mid = CFG.get("model_id") or "qwen35-4b"
-    return {"id": mid, **MODEL_CATALOG.get(mid, MODEL_CATALOG["qwen35-4b"])}
+    if mid not in MODEL_CATALOG:
+        mid = "qwen35-4b"
+    return {"id": mid, **MODEL_CATALOG[mid]}
+
+
+def current_model() -> dict:
+    """Das Modell, das wirklich läuft: das gewählte – außer ein Spiel braucht den Speicher."""
+    info = chosen_model()
+    if GAME["active"] and (info.get("fit") or info.get("heavy")):
+        gid = CFG.get("game_model") or "qwen35-4b"
+        g = MODEL_CATALOG.get(gid)
+        if g and gid != info["id"] and (MODELS / g["file"]).is_file():
+            return {"id": gid, **g, "game": GAME["active"]}
+    return info
+
+
+# ---------------------------------------------------------------- Spielmodus
+# Große Modelle (9B, Gemma, Turbo) brauchen fast den ganzen RAM – zusammen mit einem Spiel ruckelt beides
+# oder der Grafikspeicher läuft über. Läuft ein Spiel, nimmt Nova solange das 4B und gibt dem Spiel Platz.
+GAMES = {"javaw.exe": "Minecraft", "minecraft.windows.exe": "Minecraft", "robloxplayerbeta.exe": "Roblox",
+         "fortniteclient-win64-shipping.exe": "Fortnite", "cs2.exe": "Counter-Strike 2", "gta5.exe": "GTA V",
+         "valorant-win64-shipping.exe": "Valorant", "rocketleague.exe": "Rocket League",
+         "fallguys_client_game.exe": "Fall Guys", "r5apex.exe": "Apex Legends", "overwatch.exe": "Overwatch"}
+GAME = {"active": ""}  # Name des Spiels, für das Nova gerade Platz macht ("" = keins)
+
+
+def running_game() -> str:
+    try:
+        out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True, timeout=15,
+                             creationflags=CREATE_NO_WINDOW).stdout.decode("utf-8", "replace")
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    names = {line.split('","')[0].strip('"').lower() for line in out.splitlines() if line.startswith('"')}
+    games = {**GAMES, **{k.lower(): v for k, v in (CFG.get("game_processes") or {}).items()}}
+    return next((label for exe, label in games.items() if exe in names), "")
+
+
+def game_watch() -> None:
+    """Alle 15 s nachsehen, ob ein Spiel läuft; nur wechseln, wenn Nova gerade nichts tut."""
+    gone_since = 0.0
+    while True:
+        time.sleep(15)
+        game = running_game() if CFG.get("game_mode", True) else ""
+        want = game
+        if not game and GAME["active"] and CFG.get("game_mode", True):
+            gone_since = gone_since or time.time()
+            if time.time() - gone_since < 60:  # Spiel neu gestartet / Launcher → nicht hin und her laden
+                want = GAME["active"]
+        if game:
+            gone_since = 0.0
+        if want == GAME["active"]:
+            continue
+        if active_runs() or not RUN_LOCK.acquire(blocking=False):
+            continue  # später nochmal – laufende Aufträge nie unterbrechen
+        try:
+            before = current_model()["id"]
+            GAME["active"] = want
+            now = current_model()
+            if now["id"] != before:
+                log(f"Spielmodus: {want} läuft – nehme solange {now['label']}, damit das Spiel flüssig bleibt."
+                    if want else f"Spielmodus aus – zurück zu {now['label']}.")
+                LLAMA.reload()
+        finally:
+            RUN_LOCK.release()
 
 
 def models_list() -> list[dict]:
-    active = current_model()["id"]
+    active = chosen_model()["id"]
     def installed(v):
         p = MODELS / v["file"]
         return p.is_file() and p.stat().st_size >= v["min_bytes"]
@@ -1709,6 +1790,11 @@ def start_run(conv: dict, text: str, images: list[str], settings: dict) -> Run:
     return run
 
 
+def game_info() -> dict:
+    return {"game_mode": bool(CFG.get("game_mode", True)), "game": current_model().get("game", ""),
+            "effective": current_model()["label"], "chosen": chosen_model()["label"]}
+
+
 def active_runs() -> list[dict]:
     return [{"id": r.conv_id, "title": r.conv.get("title"), "deadline": r.deadline}
             for r in list(RUNS.values()) if not r.done]
@@ -1873,6 +1959,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/status":
                 return self._json(200, {"ok": True, "agent": CFG["agent_name"], "user": CFG["user_name"],
                                         "model": current_model()["label"], "model_id": current_model()["id"],
+                                        "game": current_model().get("game", ""),
                                         "llama": LLAMA.state,
                                         "version": VERSION, "workspace": str(WORKSPACE),
                                         "vision": (MODELS / (current_model().get("mmproj") or "-")).is_file(),
@@ -1908,7 +1995,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/memory":
                 return self._json(200, {"memory": tools.load_memory(CTX)})
             if path == "/api/models":
-                return self._json(200, {"models": models_list(), "llama": LLAMA.state})
+                return self._json(200, {"models": models_list(), "llama": LLAMA.state, **game_info()})
             if path == "/api/remote/frame":
                 q = urllib.parse.parse_qs(url.query)
                 data, sw, sh = remote.frame(int(q.get("w", ["960"])[0]), int(q.get("q", ["55"])[0]))
@@ -2024,7 +2111,12 @@ class Handler(BaseHTTPRequestHandler):
                 if not entry["active"]:
                     log(f"Wechsle Modell zu {MODEL_CATALOG[mid]['label']} …")
                     LLAMA.switch(mid)
-                return self._json(200, {"models": models_list(), "llama": LLAMA.state})
+                return self._json(200, {"models": models_list(), "llama": LLAMA.state, **game_info()})
+            if path == "/api/game_mode":
+                CFG["game_mode"] = bool(body.get("on"))
+                save_config(CFG)
+                log(f"Spielmodus {'an' if CFG['game_mode'] else 'aus'} (wirkt in ein paar Sekunden).")
+                return self._json(200, game_info())
             return self._json(404, {"error": "unbekannt"})
         except Exception as e:
             log("HTTP-Fehler:\n" + traceback.format_exc(), console=False)
@@ -2160,6 +2252,9 @@ def main() -> None:
     print("  Fenster schließen = Agent beenden")
     print("=" * 60, flush=True)
     threading.Thread(target=httpd.serve_forever, daemon=True, name="http").start()
+    if CFG.get("game_mode", True):
+        GAME["active"] = running_game()
+    threading.Thread(target=game_watch, daemon=True, name="game").start()
     LLAMA.start()
     threading.Thread(target=ensure_gist, daemon=True).start()
     TUNNEL.start()

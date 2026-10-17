@@ -366,7 +366,7 @@ function applyStatus() {
   $('#agentName').textContent = st.agent || 'Nova';
   document.title = st.agent || 'Nova';
   $('#hello').textContent = `Hey${st.user ? ' ' + st.user : ''}! Was soll ich für dich tun?`;
-  $('#infoModel').textContent = st.model || '–';
+  $('#infoModel').textContent = (st.model || '–') + (st.game ? ` · Spielmodus (${st.game})` : '');
   $('#infoUrl').textContent = state.conn?.u ? state.conn.u.replace(/^https?:\/\//, '') : '–';
   syncPush();
   backupLocalChats();
@@ -1545,14 +1545,30 @@ async function loadLaptopModels() {
   const box = $('#laptopModels');
   if (!state.online) { box.innerHTML = '<p class="muted">Laptop nicht verbunden.</p>'; return; }
   try {
-    const { models } = await apiJSON('/api/models');
+    const { models, game, game_mode, effective } = await apiJSON('/api/models');
     box.innerHTML = '';
+    const sw = h('label', 'switch', '<span><b>Spielmodus</b><small></small></span><input type="checkbox"><i></i>');
+    $('small', sw).textContent = game
+      ? `${game} läuft – Nova nimmt solange ${effective}, damit dein Spiel flüssig bleibt. Danach geht’s automatisch zurück.`
+      : 'Startest du Minecraft, Roblox & Co., macht ein großes Modell dem Spiel Platz (solange das 4B) – danach automatisch zurück.';
+    const cb = $('input', sw);
+    cb.checked = game_mode !== false;
+    cb.onchange = async () => {
+      try {
+        await apiJSON('/api/game_mode', { method: 'POST', body: JSON.stringify({ on: cb.checked }) });
+        toast(cb.checked ? 'Spielmodus an' : 'Spielmodus aus – das gewählte Modell bleibt auch beim Spielen.', 3000);
+      } catch (e) { cb.checked = !cb.checked; toast(e.message); }
+    };
+    box.append(sw);
     for (const m of models) {
       const row = h('button', 'model-row' + (m.active ? ' sel' : '') + (m.installed ? '' : ' off'),
         `<span class="pick"></span><span class="mi"><b></b><small></small></span>`);
       row.type = 'button';
       $('b', row).textContent = m.label;
-      $('small', row).textContent = m.installed ? m.desc : m.desc + ' – wird noch geladen';
+      let note = '';
+      if (game && m.active && m.label !== effective) note = ` – pausiert, solange ${game} läuft`;
+      else if (game && !m.active && m.label === effective) note = ` – läuft gerade wegen ${game}`;
+      $('small', row).textContent = (m.installed ? m.desc : m.desc + ' – wird noch geladen') + note;
       row.onclick = async () => {
         if (m.active || !m.installed) return;
         try {

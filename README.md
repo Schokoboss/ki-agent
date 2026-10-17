@@ -88,6 +88,14 @@ Einstellungen → **Laptop-Modell** – umschalten dauert ein paar Sekunden:
 | Qwen3.5 2B | Schnell – für einfache Sachen |
 | Gemma 4 E4B | Google – gut in Sprache, versteht Bilder, etwas langsamer (braucht ~7 GB RAM) |
 
+**Spielmodus** (Schalter oben in der Liste, standardmäßig an): Läuft Minecraft, Roblox, Fortnite & Co., nimmt Nova
+statt eines großen Modells (9B, Gemma, Turbo) solange das 4B – das Spiel bekommt ~4 GB RAM zurück und der
+Grafikspeicher läuft nicht über. Ist das Spiel eine Minute zu, geht's automatisch zurück. Gewechselt wird nur, wenn
+gerade kein Auftrag läuft. Eigene Spiele: in `data/config.json` unter `game_processes`, z. B. `{"spiel.exe": "Name"}`.
+
+Läuft der Grafikspeicher trotzdem über, lädt Nova das Modell sparsamer neu (mehr auf die CPU) und wiederholt die
+Anfrage – die Stufe merkt er sich in `gpu_level`.
+
 ## Was er kann (Werkzeuge)
 
 | Werkzeug | Fragt vorher? |
