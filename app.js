@@ -155,7 +155,8 @@ function isLocalPage() {
 function readPairing() {
   if (!/[#&]t=/.test(location.hash)) return;
   const p = new URLSearchParams(location.hash.slice(1));
-  const conn = { t: p.get('t'), g: p.get('g') || state.conn?.g || '', u: p.get('u') || state.conn?.u || '' };
+  const conn = { t: p.get('t'), g: p.get('g') || state.conn?.g || '', u: p.get('u') || state.conn?.u || '',
+    o: p.get('o') || state.conn?.o || '' };
   history.replaceState(null, '', location.pathname + location.search);
   if (!conn.t) return;
   state.conn = conn;
@@ -286,10 +287,21 @@ async function ping(url) {
   }
 }
 
+// Aktuelle Laptop-Adresse aus dem geheimen Gist. Über den Raw-Link – die GitHub-API erlaubt
+// ohne Anmeldung nur 60 Abfragen pro Stunde, danach fände die App den Laptop eine Stunde lang nicht.
+let lastGist = 0;
 async function gistUrl() {
-  if (!state.conn?.g) return null;
+  const g = state.conn?.g;
+  if (!g || Date.now() - lastGist < 20000) return null;
+  lastGist = Date.now();
+  const owner = state.conn.o || (location.hostname.endsWith('.github.io') ? location.hostname.split('.')[0] : 'schokoboss');
   try {
-    const r = await fetch(`https://api.github.com/gists/${encodeURIComponent(state.conn.g)}`, { cache: 'no-store', signal: AbortSignal.timeout(9000) });
+    const r = await fetch(`https://gist.githubusercontent.com/${owner}/${encodeURIComponent(g)}/raw/agent-endpoint.json?t=${Date.now()}`,
+      { cache: 'no-store', signal: AbortSignal.timeout(9000) });
+    if (r.ok) return (await r.json()).url || null;
+  } catch { /* Fallback unten */ }
+  try {
+    const r = await fetch(`https://api.github.com/gists/${encodeURIComponent(g)}`, { cache: 'no-store', signal: AbortSignal.timeout(9000) });
     if (!r.ok) return null;
     const j = await r.json();
     return JSON.parse(j.files['agent-endpoint.json'].content).url || null;
@@ -332,9 +344,12 @@ async function doConnect() {
     state.online = false;
     if (state.settings.mode === 'laptop') setStatus('offline');
     else showPhoneStatus(state.settings.mode === 'auto' ? ' (Laptop aus)' : '');
-    retryTimer = setTimeout(connect, 12000);
+    // seltener nachfragen, je länger der Laptop weg ist (12 s … 2 min)
+    state.retryDelay = Math.min((state.retryDelay || 6000) * 2, 120000);
+    retryTimer = setTimeout(connect, state.retryDelay);
     return false;
   }
+  state.retryDelay = 0;
   state.conn.u = url;
   LS.set('nova.conn', state.conn);
   state.online = true;
