@@ -941,6 +941,7 @@ Regeln:
 - Bild malen → create_image (englischer, ausführlicher Prompt). Brief/Bewerbung/Referat als Datei → make_document. Erinnern/Timer → set_reminder. Am Handy anrufen, SMS, WhatsApp, Navi, Kalendereintrag, Musik → phone_action (Termin = type calendar, NICHT set_reminder; danach sagen, dass der Nutzer auf den Knopf tippen soll).
 - Spezialaufgaben haben eigene Werkzeuge: Video (make_video, edit_video, record_screen), Minecraft-Shader (minecraft_shader, direkt create), Programmieren/Apps/Spiele (edit_file, project_tree, find_in_files, run_node, publish_web), Laptop bedienen (laptop_screenshot, laptop_control mit x/y 0–1000, media_control, open_on_laptop, run_powershell), Routinen „jeden Morgen …“ (routine). Fehlen sie dir, lade die Gruppe mit more_tools (video, minecraft, code, laptop, organize, web).
 - Programmieren: Projekte unter „Projekte/<Name>“ anlegen; Code erst verstehen, dann mit edit_file gezielt ändern, mit run_python/run_node/run_powershell (cwd = Projektordner) testen, bis es läuft. Apps/Spiele als EINE HTML-Datei schreiben und mit publish_web aufs Handy bringen.
+- Fragen zu eigenen Projekten, Notizen oder Code von {u} → erst knowledge (search); „lern den Ordner …“ → knowledge (add).
 - Erfinde nie Fakten, Links, Zahlen oder Werkzeug-Ergebnisse. Klappt etwas nicht, versuch einen anderen Weg oder sag es ehrlich.
 - Arbeitsordner: {WORKSPACE} (neue Dateien dorthin; Dateien vom Handy liegen unter „Vom Handy“).
 - Code, PowerShell und Dateien außerhalb des Arbeitsordners muss {u} am Handy erlauben. Ablehnung akzeptieren.
@@ -1035,7 +1036,7 @@ def llm_request(body: dict, timeout: int = 1200):
 # Pro Chat bleibt die Auswahl stabil, damit der Prompt-Cache von llama.cpp weiter greift.
 CORE_TOOLS = {"research", "open_webpage", "weather", "calculate", "laptop_status", "remember", "forget",
               "set_reminder", "phone_action", "create_image", "list_files", "read_file", "write_file", "run_python",
-              "send_to_phone", "make_document", "more_tools"}
+              "send_to_phone", "make_document", "knowledge", "more_tools"}
 TOOL_GROUPS = {
     "web": {"web_search", "wikipedia", "download_file"},
     "laptop": {"run_powershell", "open_on_laptop", "laptop_screenshot", "laptop_control", "media_control",
@@ -1047,8 +1048,9 @@ TOOL_GROUPS = {
 }
 GROUP_WORDS = {
     "web": r"wikipedia|herunterlad|download|suchmaschine|google",
-    "laptop": r"laptop|bildschirm|screenshot|pc\b|computer|klick|öffne|starte|programm|musik|lautst|leiser|lauter|"
-              r"pause|sperr|powershell|fenster|maus|tastatur|aufnehm",
+    # Nur Tätigkeiten – das Wort „Laptop“ allein (z. B. „Akku am Laptop“) braucht keine Steuer-Werkzeuge
+    "laptop": r"bildschirm|screenshot|klick|öffne|starte|schließ|musik|lautst|leiser|lauter|pausier|sperr|"
+              r"powershell|fenster|maus|tastatur|aufnehm|bedien|installier",
     "code": r"programm|code|skript|script|app\b|spiel|game|webseite|website|html|javascript|python|node|projekt|"
             r"funktion|fehler im|bug|datei.*ändern|ändere",
     "video": r"video|short|tiktok|reel|clip|schneid|gif|film",

@@ -932,6 +932,34 @@ def forget(args, ctx):
     return f"Erinnerung {mid} gelöscht."
 
 
+
+# ---------------------------------------------------------------- Wissensspeicher
+
+_KB = {}
+
+
+def _kb(ctx):
+    import knowledge
+    folder = ctx.memory_path.parent / "knowledge"
+    if folder not in _KB:
+        _KB[folder] = knowledge.Knowledge(folder)
+    return _KB[folder]
+
+
+def knowledge_tool(args, ctx):
+    import knowledge
+    action = str(args.get("action") or "search").lower()
+    try:
+        if action == "add":
+            return _kb(ctx).add(_resolve(args.get("path") or "", ctx))
+        if action == "remove":
+            return _kb(ctx).remove(str(args.get("path") or ""))
+        if action == "list":
+            return _kb(ctx).list()
+        return _kb(ctx).search(str(args.get("query") or ""), int(args.get("n") or 6))
+    except knowledge.KnowledgeError as e:
+        raise ToolError(str(e))
+
 # ---------------------------------------------------------------- Register
 
 def _spec(name, desc, props=None, required=None):
@@ -1039,6 +1067,10 @@ TOOL_SPECS = [
            "x": {"type": "number", "description": "0–1000 from left"}, "y": {"type": "number", "description": "0–1000 from top"},
            "text": _s("Text to type"), "key": _s("Key or combo, e.g. enter, ctrl+s, alt+tab"),
            "amount": {"type": "integer", "description": "Scroll steps, negative = down"}}, ["action"]),
+    _spec("knowledge", "The user's own knowledge base: learn folders/files (action=add, path), then answer questions "
+          "about the user's projects, notes and code from it (action=search, query). Also list/remove.",
+          {"action": _s("search, add, list or remove"), "query": _s("Question/search words"),
+           "path": _s("Folder or file to learn/remove")}),
     _spec("more_tools", "Load extra tool groups when you need them: video, minecraft, code, laptop, organize, web.",
           {"group": _s("One of: video, minecraft, code, laptop, organize, web")}, ["group"]),
     _spec("phone_action", "Do something on the user's PHONE via a one-tap button (tell them to tap it). type: call(number) "
@@ -1069,6 +1101,7 @@ TOOLS = {
     "open_on_laptop": open_on_laptop, "laptop_status": laptop_status, "remember": remember, "forget": forget,
     "media_control": media_control, "lock_laptop": lock_laptop, "download_file": download_file,
     "run_node": run_node, "edit_file": edit_file, "project_tree": project_tree, "find_in_files": find_in_files,
+    "knowledge": knowledge_tool,
 }
 
 
@@ -1086,6 +1119,10 @@ def approval_reason(name: str, args: dict, ctx: ToolContext) -> str | None:
             verb = {"read_file": "Datei lesen", "list_files": "Ordner ansehen", "write_file": "Datei schreiben",
                     "edit_file": "Datei ändern", "project_tree": "Ordner ansehen", "find_in_files": "Dateien durchsuchen"}[name]
             return f"{verb} außerhalb des Arbeitsordners: {p}"
+    if name == "knowledge" and str(args.get("action") or "").lower() == "add":
+        p = _resolve(args.get("path") or ".", ctx)
+        if not _inside_workspace(p, ctx):
+            return f"Ordner in den Wissensspeicher aufnehmen (wird gelesen): {p}"
     if name == "open_on_laptop" and not re.match(r"^https?://", (args.get("target") or "").strip(), re.I):
         return "Etwas auf dem Laptop öffnen"
     return None
