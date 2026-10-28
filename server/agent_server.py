@@ -177,6 +177,7 @@ class Llama:
         self._stopping = False
         self.switching = False
         self.loaded = None  # id des Modells, das gerade im llama-server steckt
+        self.ctx = None     # tatsächlicher Kontext (Tokens) des geladenen Modells
         self._thread = None
 
     @property
@@ -220,13 +221,15 @@ class Llama:
             #   0 = normal (große Modelle: automatisch passend verteilen), 1 = mehr Abstand + kleiner Kontext,
             #   2 = nur CPU
             if level >= 2:
-                args += ["-ngl", "0", "-c", str(min(ctx, 16384)), "--no-mmproj-offload"]
+                ctx = min(ctx, 16384)
+                args += ["-ngl", "0", "-c", str(ctx), "--no-mmproj-offload"]
             elif level == 1 or info.get("fit"):
                 margin = 3072 if level == 1 else 1536
-                args += ["--fit", "on", "--fit-target", str(margin), "-c", str(min(ctx, 16384) if level else ctx),
-                         "-ub", "256", "--no-mmproj-offload"]
+                ctx = min(ctx, 16384) if level else ctx
+                args += ["--fit", "on", "--fit-target", str(margin), "-c", str(ctx), "-ub", "256", "--no-mmproj-offload"]
             else:
                 args += ["-ngl", str(CFG["gpu_layers"]), "-c", str(ctx)]
+            self.ctx = ctx
             if mmproj.is_file():
                 args += ["--mmproj", str(mmproj)]
             args += info.get("extra_args") or []
@@ -981,7 +984,10 @@ WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
 _PING = {"t": "ping"}
 WEEKDAYS_LONG = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
-BUDGET_CHARS = 70000  # ~22k Tokens Verlauf, Rest vom 32k-Kontext für System, Werkzeuge und Antwort
+CHARS_PER_TOKEN = 2.5   # vorsichtig: Code/JSON brauchen mehr Tokens pro Zeichen als deutscher Text
+KEEP_RECENT = 3         # die letzten Nachrichten nie kürzen
+TOOL_CAP = 6000         # ältere Werkzeug-Ergebnisse höchstens so lang
+ARGS_CAP = 2500         # ältere Werkzeug-Aufrufe (z. B. ganze Dateien in write_file) höchstens so lang
 
 
 def fmt_dur(sec: float) -> str:
@@ -1106,25 +1112,57 @@ def _image_part(img_id: str) -> dict | None:
     return {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{data}"}}
 
 
-def _msg_chars(m: dict) -> int:
-    n = len(m.get("content") or "")
+def _cap_args(raw: str) -> str:
+    """Zu lange Argumente älterer Aufrufe kürzen – aber als GÜLTIGES JSON (sonst lehnt llama-server alles ab)."""
+    if len(raw or "") <= ARGS_CAP:
+        return raw
+    return json.dumps({"_gekuerzt": raw[:400] + " …"}, ensure_ascii=False)
+
+
+def _cap_tool(text: str) -> str:
+    if len(text or "") <= TOOL_CAP:
+        return text
+    return text[:TOOL_CAP] + f"\n… [gekürzt, {len(text) - TOOL_CAP} Zeichen ausgeblendet]"
+
+
+def _msg_chars(m: dict, old: bool = False) -> int:
+    content = m.get("content") or ""
+    if isinstance(content, list):
+        content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
+    n = len(_cap_tool(content) if old and m["role"] == "tool" else content)
     for tc in m.get("tool_calls") or []:
-        n += len(tc["function"]["arguments"]) + 40
+        args = tc["function"]["arguments"]
+        n += len(_cap_args(args) if old else args) + 40
     return n + 2500 * len(m.get("_images") or [])
 
 
-def build_messages(conv: dict, pin: int | None = None) -> list[dict]:
+def history_budget(conv: dict, run=None) -> int:
+    """Platz für den Verlauf in Zeichen – aus dem ECHTEN Kontext des geladenen Modells (9B: 24.576 Tokens,
+    Sparmodus 16.384), abzüglich System-Prompt, Werkzeuge und Antwort. Früher fest 70.000 Zeichen → beim 9B lief der
+    Verlauf irgendwann über („exceeds the available context size“)."""
+    ctx = LLAMA.ctx or min(CFG["ctx_size"], current_model().get("ctx", CFG["ctx_size"]))
+    thinking = bool(run and run.thinking)
+    fixed = len(system_prompt()) + len(json.dumps(tools_for(conv, bool(run and run.deadline)), ensure_ascii=False))
+    answer = 6144 if thinking else 3072
+    tokens = ctx - answer - fixed / CHARS_PER_TOKEN - 1000  # Puffer für Chat-Vorlage, Notizen-Hinweis, Anker-Auftrag
+    return int(max(3000, tokens * CHARS_PER_TOKEN * conv.get("_squeeze", 1.0)))
+
+
+def build_messages(conv: dict, pin: int | None = None, run=None) -> list[dict]:
     """Baut den Prompt. Wird der Verlauf zu lang, rutscht das Fenster in einem großen Sprung weiter
     (statt bei jeder Nachricht ein bisschen) – so bleibt der Prompt-Cache von llama.cpp lange gültig."""
     history = conv["messages"]
+    budget = history_budget(conv, run)
+    recent = len(history) - KEEP_RECENT
+    size = lambda i: _msg_chars(history[i], old=i < recent)
     start = conv.get("_window", 0)
     if start >= len(history):
         start = 0
-    if sum(_msg_chars(m) for m in history[start:]) > BUDGET_CHARS:
+    if sum(size(i) for i in range(start, len(history))) > budget:
         acc, new_start = 0, len(history) - 1
         for i in range(len(history) - 1, start - 1, -1):
-            acc += _msg_chars(history[i])
-            if acc > BUDGET_CHARS * 0.45:
+            acc += size(i)
+            if acc > budget * 0.45:
                 break
             new_start = i
         start = new_start
@@ -1157,7 +1195,13 @@ def build_messages(conv: dict, pin: int | None = None) -> list[dict]:
         if m["role"] == "assistant":
             clean["content"] = m.get("content") or ""
             if m.get("tool_calls"):
-                clean["tool_calls"] = [_safe_call(tc) for tc in m["tool_calls"]]
+                calls = [_safe_call(tc) for tc in m["tool_calls"]]
+                if i < recent:
+                    calls = [{**tc, "function": {**tc["function"], "arguments": _cap_args(tc["function"]["arguments"])}}
+                             for tc in calls]
+                clean["tool_calls"] = calls
+        if m["role"] == "tool" and i < recent and isinstance(clean.get("content"), str):
+            clean["content"] = _cap_tool(clean["content"])
         out.append(clean)
     return out
 
@@ -1308,14 +1352,25 @@ def llm_stream(messages: list[dict], run: Run):
     return content, reasoning, ordered, timings, finish
 
 
-def llm_stream_safe(messages: list[dict], run: Run):
-    """Wie llm_stream – aber läuft der Grafikspeicher über, lädt Nova das Modell sparsamer neu und versucht es nochmal."""
-    for attempt in range(3):
+def llm_stream_safe(build, run: Run):
+    """Wie llm_stream – aber mit zwei Rettungen statt Fehlermeldung:
+    - Verlauf zu lang für den Kontext → ältere Schritte ausblenden und nochmal (Zahlen aus der Fehlermeldung),
+    - Grafikspeicher voll → Modell sparsamer neu laden und nochmal."""
+    for attempt in range(4):
         try:
-            return llm_stream(messages, run)
+            return llm_stream(build(), run)
         except LlamaError as e:
             text = str(e)
-            if attempt == 2 or not ("OutOfDeviceMemory" in text or "allocateMemory" in text or "out of memory" in text.lower()):
+            if attempt < 3 and ("exceed_context_size" in text or "exceeds the available context size" in text):
+                m_p, m_c = re.search(r"n_prompt_tokens\D+(\d+)", text), re.search(r"n_ctx\D+(\d+)", text)
+                factor = 0.6
+                if m_p and m_c and int(m_p.group(1)):
+                    factor = min(0.85, int(m_c.group(1)) / int(m_p.group(1)) * 0.8)
+                run.conv["_squeeze"] = max(0.15, run.conv.get("_squeeze", 1.0) * factor)
+                run.emit(t="status", d="Der Verlauf war zu lang – blende ältere Schritte aus und versuche es nochmal …")
+                log(f"Kontext übergelaufen – Verlauf gestaucht auf Faktor {run.conv['_squeeze']:.2f}, neuer Versuch.")
+                continue
+            if attempt >= 2 or not ("OutOfDeviceMemory" in text or "allocateMemory" in text or "out of memory" in text.lower()):
                 raise
             level = LLAMA.degrade()
             what = "nur mit der CPU" if level >= 2 else "sparsamer"
@@ -1390,7 +1445,7 @@ def agent_loop(run: Run) -> None:
                 run.step += 1
                 if long:
                     run.emit(t="work", **run.info())
-                content, reasoning, calls, timings, finish = llm_stream_safe(build_messages(conv, run.base), run)
+                content, reasoning, calls, timings, finish = llm_stream_safe(lambda: build_messages(conv, run.base, run), run)
                 stats["predicted_n"] += timings.get("predicted_n", 0)
                 stats["predicted_ms"] += timings.get("predicted_ms", 0.0)
                 msg = {"role": "assistant", "content": content}
