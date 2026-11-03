@@ -28,6 +28,8 @@ from pathlib import Path
 import games
 import minecraft
 import remote
+import mcp_client
+import permissions
 import tools
 import video
 import webpush
@@ -451,6 +453,9 @@ def models_list() -> list[dict]:
 
 
 LLAMA = Llama()
+RECHTE = None   # permissions.Rechte – in main()
+AUDIT = None    # permissions.Protokoll – in main()
+MCP = None      # mcp_client.McpManager – in main()
 
 
 # ---------------------------------------------------------------- Tunnel (Cloudflare) + Gist
@@ -1032,6 +1037,40 @@ class Run:
         self.tool_extra: dict[str, dict] = {}  # Zusatzfelder für die Werkzeug-Nachricht (z. B. Handy-Aktion)
         self.current_call = ""
         self.routine = settings.get("routine")  # Name, wenn dieser Lauf eine Routine ist
+        self.paused_at = None       # Zeit-Modus: seit wann pausiert (None = läuft)
+        self.paused_total = 0.0
+        self.finish_requested = False
+        self.files: list[str] = []  # im Auftrag erstellte/geänderte Dateien (für den Abschlussbericht)
+        self.tool_counts: dict[str, int] = {}
+
+    def pause(self) -> None:
+        if self.deadline and not self.paused_at:
+            self.paused_at = time.time()
+
+    def resume(self) -> None:
+        if self.paused_at:
+            dauer = time.time() - self.paused_at
+            self.deadline += dauer      # Pause zählt nicht als Arbeitszeit
+            self.paused_total += dauer
+            self.paused_at = None
+
+    def extend(self, minutes: int) -> None:
+        if self.deadline:
+            self.deadline += minutes * 60
+            self.minutes += minutes
+
+    def finish_now(self) -> None:
+        if self.deadline:
+            self.resume()
+            self.finish_requested = True
+            self.deadline = time.time()
+
+    def note_result(self, name: str, result: str) -> None:
+        self.tool_counts[name] = self.tool_counts.get(name, 0) + 1
+        for m in re.finditer(r"^Pfad: (.+)$|gespeichert (?:in|unter) ([A-Za-z]:\\[^\n]+?\.[A-Za-z0-9]{1,6})\b", result, re.M):
+            p = (m.group(1) or m.group(2) or "").strip()
+            if p and p not in self.files:
+                self.files.append(p)
 
     def emit(self, **ev) -> None:
         with self.cond:
@@ -1067,11 +1106,23 @@ class Run:
             return list(self.conv["messages"]), self.saved_idx
 
     def remaining(self) -> float | None:
-        return None if self.deadline is None else max(0.0, self.deadline - time.time())
+        if self.deadline is None:
+            return None
+        return max(0.0, self.deadline - (self.paused_at or time.time()))  # in der Pause steht die Uhr
 
     def info(self) -> dict:
         return {"started": self.started, "deadline": self.deadline, "minutes": self.minutes,
-                "step": self.step, "free_hand": self.free_hand}
+                "step": self.step, "free_hand": self.free_hand, "paused": bool(self.paused_at),
+                "left": self.remaining(), "plan": plan_aus_notizen(self.conv.get("_notes") or ""),
+                "finishing": self.finish_requested}
+
+
+def plan_aus_notizen(notes: str) -> list[dict]:
+    """„- [ ] Schritt“ / „- [x] Schritt“ aus Novas Arbeitsnotizen → Checkliste für die App."""
+    plan = []
+    for m in re.finditer(r"^\s*[-*]\s*\[( |x|X)\]\s*(.+)$", notes, re.M):
+        plan.append({"done": m.group(1).lower() == "x", "text": m.group(2).strip()[:120]})
+    return plan[:30]
 
 
 def system_prompt() -> str:
@@ -1087,7 +1138,7 @@ Regeln:
 - Nutze Werkzeuge statt zu raten; mehrere nacheinander sind ok. Brauchst du eins, ruf es SOFORT auf, ohne vorher zu antworten. Bei mehreren Fragen: für jede das passende Werkzeug.
 - Das weißt du NIE selbst – immer Werkzeug: Laptop-Akku/RAM/Uhrzeit → laptop_status · Wetter → weather · Fakten, News, Preise, Ergebnisse, alles Aktuelle → research (Quellen als [1], [2] nennen) · Rechnen → calculate (Prozent „17.5% * 240“) · Dateiinhalte → read_file/list_files.
 - Bild malen → create_image (englischer, ausführlicher Prompt). Brief/Bewerbung/Referat als Datei → make_document. Erinnern/Timer → set_reminder. Am Handy anrufen, SMS, WhatsApp, Navi, Kalendereintrag, Musik → phone_action (Termin = type calendar, NICHT set_reminder; danach sagen, dass der Nutzer auf den Knopf tippen soll).
-- Spezialaufgaben haben eigene Werkzeuge: Video (make_video, edit_video, record_screen), Minecraft-Shader (minecraft_shader, direkt create), Spiele (make_game), Programmieren/Apps (edit_file, project_tree, find_in_files, run_node, publish_web), Laptop bedienen (laptop_screenshot, laptop_control mit x/y 0–1000, media_control, open_on_laptop, run_powershell), Routinen „jeden Morgen …“ (routine). Fehlen sie dir, lade die Gruppe mit more_tools (video, minecraft, code, laptop, organize, web).
+- Spezialaufgaben haben eigene Werkzeuge: Video (make_video, edit_video, record_screen), Minecraft-Shader (minecraft_shader, direkt create), Spiele (make_game), Programmieren/Apps (edit_file, project_tree, find_in_files, run_node, publish_web), Laptop bedienen (laptop_screenshot, laptop_control mit x/y 0–1000, media_control, open_on_laptop, run_powershell), Routinen „jeden Morgen …“ (routine). Fehlen sie dir, lade die Gruppe mit more_tools (video, minecraft, code, laptop, organize, web{', mcp' if MCP and MCP.kurzinfo() else ''}).{chr(10) + '- Angebundene Integrationen (MCP): ' + MCP.kurzinfo() + ' – Werkzeuge mit more_tools(group=mcp) laden, sie heißen mcp_<server>_<werkzeug>.' if MCP and MCP.kurzinfo() else ''}
 - Programmieren: Projekte unter „Projekte/<Name>“ anlegen; Code erst verstehen, dann mit edit_file gezielt ändern, mit run_python/run_node/run_powershell (cwd = Projektordner) testen, bis es läuft. Apps als EINE HTML-Datei schreiben und mit publish_web aufs Handy bringen.
 - Spiele: IMMER make_game – erst create, dann code (nur das game-Objekt; Steuerung, Ton, Menü, Highscore hat die Vorlage). Figuren als Emoji, Schwierigkeit über state.level, jede Aktion mit sound(). „Fertig“ erst sagen, wenn der Test „ERGEBNIS: OK“ meldet – sonst Fehler beheben und erneut code senden. Spiel nie selbst als getestet ausgeben.
 - Fragen zu eigenen Projekten, Notizen oder Code von {u} → erst knowledge (search); „lern den Ordner …“ → knowledge (add).
@@ -1250,6 +1301,7 @@ TOOL_GROUPS = {
     "video": {"make_video", "edit_video", "record_screen", "create_image"},
     "minecraft": {"minecraft_shader"},
     "organize": {"routine", "reminders"},
+    "mcp": set(),  # dynamisch: alle Werkzeuge der angebundenen MCP-Server
 }
 GROUP_WORDS = {
     "web": r"wikipedia|herunterlad|download|suchmaschine|google",
@@ -1262,6 +1314,7 @@ GROUP_WORDS = {
     "minecraft": r"minecraft|shader|iris|optifine",
     "organize": r"jeden (tag|morgen|abend|montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag)|täglich|"
                 r"werktags|routine|erinnerung|wöchentlich",
+    "mcp": r"\bmcp\b|integration",
 }
 
 
@@ -1272,6 +1325,8 @@ def pick_groups(conv: dict) -> set:
     for g, rx in GROUP_WORDS.items():
         if re.search(rx, blob):
             groups.add(g)
+    if MCP and any(s["status"] == "bereit" and s["name"].lower() in blob for s in MCP.uebersicht()):
+        groups.add("mcp")  # Servername im Text („frag den Kalender-Server …“)
     conv["_groups"] = sorted(groups)
     return groups
 
@@ -1282,10 +1337,15 @@ def tools_for(conv: dict, long: bool = False) -> list[dict]:
         wanted |= TOOL_GROUPS.get(g, set())
     if long:
         wanted.add("update_notes")
-    return [s for s in tools.TOOL_SPECS if s["function"]["name"] in wanted]
+    specs = [s for s in tools.TOOL_SPECS if s["function"]["name"] in wanted]
+    if MCP and "mcp" in (conv.get("_groups") or []):
+        specs += MCP.specs()
+    return specs
 
 
 def group_of(name: str) -> str | None:
+    if name.startswith("mcp_"):
+        return "mcp"
     return next((g for g, names in TOOL_GROUPS.items() if name in names), None)
 
 
@@ -1399,16 +1459,21 @@ def warm_up() -> None:
         RUN_LOCK.release()
 
 
-def request_approval(run: Run, cid: str, name: str, args: dict, reason: str) -> bool:
-    slot = {"event": threading.Event(), "allow": None}
+def request_approval(run: Run, cid: str, name: str, args: dict, reason: str, bereich: str | None = None,
+                     server: str | None = None) -> bool:
+    slot = {"event": threading.Event(), "allow": None, "always": False}
     run.approvals[cid] = slot
-    run.emit(t="approve", id=cid, name=name, args=args, reason=reason)
+    immer = (f"MCP-Server {server}" if server else permissions.BEREICHE[bereich][0]) if bereich else ""
+    run.emit(t="approve", id=cid, name=name, args=args, reason=reason, always=immer)
     deadline = time.time() + 600
     notify_approval(run, args, reason, deadline)
     while not slot["event"].wait(0.5):
         if run.cancel.is_set() or time.time() > deadline:
             break
     allow = slot["allow"] is True
+    if allow and slot["always"] and bereich:
+        RECHTE.setzen(f"mcp:{server}" if server else bereich, permissions.ERLAUBEN)
+        log(f"Berechtigung geändert: {immer} → immer erlauben")
     run.emit(t="approved" if allow else "denied", id=cid)
     run.approvals.pop(cid, None)
     return allow
@@ -1435,11 +1500,21 @@ def agent_loop(run: Run) -> None:
             keep_awake(True)
             LLAMA.wait_ready(run)
             while run.step < max_steps and not run.cancel.is_set():
+                if long and run.paused_at:
+                    run.emit(t="status", d="Pausiert – geht weiter, sobald du „Weiter“ tippst.")
+                    run.emit(t="work", **run.info())
+                    while run.paused_at and not run.cancel.is_set():
+                        time.sleep(0.5)
+                    if run.cancel.is_set():
+                        break
+                    run.emit(t="status", d="Geht weiter …")
                 if long and not final and run.remaining() <= 0:
                     final = 1
-                    _system_note(run, "Die Arbeitszeit ist um. Hör jetzt auf zu arbeiten und fasse kurz zusammen: "
-                                      "was du geschafft hast, was noch offen ist und wo die Ergebnisse liegen.",
-                                 "Arbeitszeit vorbei – fasse zusammen …")
+                    _system_note(run, ("Der Nutzer hat den Auftrag beendet." if run.finish_requested else
+                                       "Die Arbeitszeit ist um.") + " Hör jetzt auf zu arbeiten und fasse kurz "
+                                 "zusammen: was du geschafft hast, was noch offen ist und wo die Ergebnisse liegen.",
+                                 "Auftrag wird beendet – fasse zusammen …" if run.finish_requested
+                                 else "Arbeitszeit vorbei – fasse zusammen …")
                 if run.step:
                     run.emit(t="step")
                 run.step += 1
@@ -1482,6 +1557,8 @@ def agent_loop(run: Run) -> None:
                     repeats = repeats + 1 if sig == last_sig else 0
                     last_sig = sig
                     ok, result = execute_call(run, c)
+                    if ok:
+                        run.note_result(c["name"], result)
                     if repeats >= 2:
                         result += "\n\n[System: Du hast dieses Werkzeug dreimal genauso aufgerufen. Versuch einen anderen Weg.]"
                     if long:
@@ -1501,6 +1578,12 @@ def agent_loop(run: Run) -> None:
         summary = {"tokens": stats["predicted_n"], "tps": round(tps, 1), "tools": stats["tools"],
                    "seconds": round(time.time() - run.started, 1), "steps": run.step,
                    "cancelled": run.cancel.is_set(), "long": long}
+        if long:
+            try:
+                report = abschlussbericht(run, summary)
+                run.emit(t="report", **report)
+            except OSError as e:
+                log(f"Abschlussbericht ging nicht: {e}")
         run.emit(t="done", stats=summary)
         notify_done(run, summary, "time" if final else "steps" if run.step >= max_steps else "done")
     except LlamaError as e:
@@ -1514,6 +1597,48 @@ def agent_loop(run: Run) -> None:
         run.finish()
         if long:
             log(f"Auftrag beendet nach {fmt_dur(time.time() - run.started)}, {run.step} Schritte.")
+
+
+def abschlussbericht(run: Run, summary: dict) -> dict:
+    """Markdown-Bericht nach einem Zeit-Auftrag: was, wie lange, welche Werkzeuge, welche Dateien, Ergebnis."""
+    conv = run.conv
+    auftrag = next((m.get("_display") or m.get("content") for m in conv["messages"][run.base:] if m["role"] == "user"), "")
+    ergebnis = next((m.get("content") for m in reversed(conv["messages"]) if m["role"] == "assistant" and (m.get("content") or "").strip()), "")
+    ergebnis = re.sub(r"^\W*FERTIG\W*", "", ergebnis.strip(), flags=re.I)
+    ende = time.time()
+    plan = plan_aus_notizen(conv.get("_notes") or "")
+    fmt = lambda t: time.strftime("%d.%m.%Y %H:%M", time.localtime(t))
+    zeilen = [f"# Abschlussbericht: {conv.get('title') or 'Auftrag'}", "",
+              f"- **Auftrag:** {auftrag.strip()[:500]}",
+              f"- **Zeitraum:** {fmt(run.started)} – {time.strftime('%H:%M', time.localtime(ende))} "
+              f"({fmt_dur(ende - run.started)}, geplant {fmt_dur(run.minutes * 60)}"
+              + (f", davon pausiert {fmt_dur(run.paused_total)}" if run.paused_total >= 60 else "") + ")",
+              f"- **Beendet:** {'vom Nutzer' if run.finish_requested else 'abgebrochen' if summary.get('cancelled') else 'regulär'}",
+              f"- **Schritte:** {run.step} · **Werkzeuge:** {summary.get('tools', 0)}"
+              + (" (" + ", ".join(f"{n} ×{k}" for n, k in sorted(run.tool_counts.items(), key=lambda x: -x[1])) + ")"
+                 if run.tool_counts else ""), ""]
+    if plan:
+        zeilen += ["## Plan", *[f"- [{'x' if p['done'] else ' '}] {p['text']}" for p in plan], ""]
+    if run.files:
+        zeilen += ["## Erstellte oder geänderte Dateien", *[f"- `{f}`" for f in run.files], ""]
+    zeilen += ["## Ergebnis", ergebnis or "_(keine Zusammenfassung)_", ""]
+    ordner = WORKSPACE / "Berichte"
+    ordner.mkdir(parents=True, exist_ok=True)
+    slug = re.sub(r"[^A-Za-z0-9ÄÖÜäöüß_-]+", "-", conv.get("title") or "Auftrag").strip("-")[:40] or "Auftrag"
+    pfad = ordner / f"{time.strftime('%Y-%m-%d_%H%M', time.localtime(ende))}_{slug}.md"
+    pfad.write_text("\n".join(zeilen), encoding="utf-8")
+    report = {"path": str(pfad), "name": pfad.name, "size": pfad.stat().st_size, "dauer": round(ende - run.started),
+              "pausiert": round(run.paused_total), "schritte": run.step, "werkzeuge": summary.get("tools", 0),
+              "dateien": run.files[:30], "plan_fertig": sum(p["done"] for p in plan), "plan_gesamt": len(plan),
+              "vom_nutzer": run.finish_requested}
+    # am letzten Beitrag merken, damit der Bericht auch im Verlauf erscheint
+    for m in reversed(conv["messages"]):
+        if m["role"] == "assistant":
+            m["_report"] = report
+            Store.save(conv)
+            break
+    log(f"Abschlussbericht: {pfad.name}")
+    return report
 
 
 def execute_call(run: Run, call: dict) -> tuple[bool, str]:
@@ -1544,7 +1669,9 @@ def execute_call(run: Run, call: dict) -> tuple[bool, str]:
             run.emit(t="result", id=cid, ok=False, preview=msg)
             return False, msg
         run.conv["_groups"] = sorted(set(run.conv.get("_groups") or []) | {g})
-        msg = f"Werkzeuge geladen: {', '.join(sorted(TOOL_GROUPS[g]))}. Du kannst sie jetzt benutzen."
+        namen = [s["function"]["name"] for s in MCP.specs()] if g == "mcp" and MCP else sorted(TOOL_GROUPS[g])
+        msg = (f"Werkzeuge geladen: {', '.join(namen)}. Du kannst sie jetzt benutzen." if namen
+               else "Es sind gerade keine MCP-Integrationen bereit.")
         run.emit(t="result", id=cid, ok=True, preview=msg)
         return True, msg
     if group_of(name):
@@ -1552,29 +1679,48 @@ def execute_call(run: Run, call: dict) -> tuple[bool, str]:
     if name == "update_notes":
         run.conv["_notes"] = str(args.get("notes") or "")[:4000]
         run.emit(t="result", id=cid, ok=True, preview="Notizen gespeichert.")
+        if run.deadline:
+            run.emit(t="work", **run.info())
         return True, "Notizen gespeichert."
-    if name in SERVER_TOOLS:
-        if name in ("send_to_phone", "laptop_control"):
-            reason = (tools.approval_reason("read_file", args, CTX) if name == "send_to_phone" else
-                      f"Maus/Tastatur am Laptop steuern: {args.get('action')} "
-                      f"{args.get('text') or args.get('key') or (str(args.get('x')) + ',' + str(args.get('y')))}")
-            if reason and not run.free_hand and not request_approval(run, cid, name, args, reason):
+    # Genaue Berechtigungen: Bereich bestimmen → erlauben / fragen / verbieten
+    bereich, aktion = permissions.einteilen(name, args, CTX)
+    server = MCP.server_von(name) if name.startswith("mcp_") and MCP else None
+    entscheidung = "immer erlaubt"
+    if bereich:
+        stufe = RECHTE.stufe(bereich, server)
+        if stufe == permissions.VERBIETEN:
+            _protokoll(run, name, bereich, "verboten", args, False)
+            run.emit(t="result", id=cid, ok=False, denied=True, preview="In den Berechtigungen verboten.")
+            return False, (f"Diese Aktion ist in den Berechtigungen VERBOTEN ({permissions.BEREICHE[bereich][0]}). "
+                           "Nicht ausführen. Sag dem Nutzer, dass er es unter Einstellungen → Berechtigungen ändern kann.")
+        if stufe == permissions.FRAGEN and not run.free_hand:
+            if not request_approval(run, cid, name, args, aktion, bereich, server):
+                _protokoll(run, name, bereich, "abgelehnt", args, False)
                 run.emit(t="result", id=cid, ok=False, denied=True, preview="Abgelehnt.")
-                return False, "Der Nutzer hat das NICHT erlaubt."
+                return False, "Der Nutzer hat diese Aktion NICHT erlaubt. Führe sie nicht aus; frag nach oder löse es anders."
+            entscheidung = "vom Nutzer erlaubt"
+        else:
+            entscheidung = "Freie Hand" if stufe == permissions.FRAGEN else "Regel: erlauben"
+    if name.startswith("mcp_"):
+        t0 = time.time()
+        ok, result = MCP.aufrufen(name, args) if MCP else (False, "MCP ist nicht aktiv.")
+        result = tools._clip(result, 8000)
+        log(f"MCP {name} -> {'ok' if ok else 'Fehler'} ({time.time() - t0:.1f} s)", console=False)
+        _protokoll(run, name, bereich, entscheidung, args, ok)
+        run.emit(t="result", id=cid, ok=ok, preview=result[:2000])
+        return ok, result
+    if name in SERVER_TOOLS:
         try:
             run.current_call = cid
             ok, result = True, SERVER_TOOLS[name](run, args)
         except (tools.ToolError, ValueError, OSError) as e:
             ok, result = False, f"Fehler: {e}"
+        _protokoll(run, name, bereich, entscheidung, args, ok)
         run.emit(t="result", id=cid, ok=ok, preview=result[:2000])
         return ok, result
-    reason = tools.approval_reason(name, args, CTX) if name in tools.TOOLS else None
-    if reason and not run.free_hand and not request_approval(run, cid, name, args, reason):
-        msg = "Der Nutzer hat diese Aktion NICHT erlaubt. Führe sie nicht aus; frag nach oder löse es anders."
-        run.emit(t="result", id=cid, ok=False, denied=True, preview="Abgelehnt.")
-        return False, msg
     t0 = time.time()
     ok, result = tools.run_tool(name, args, CTX)
+    _protokoll(run, name, bereich, entscheidung, args, ok)
     made = re.search(r"^Pfad: (.+)$", result, re.M) if ok else None
     if made and Path(made.group(1).strip()).is_file() and tools._inside_workspace(Path(made.group(1).strip()), CTX):
         run.current_call = cid
@@ -1582,6 +1728,12 @@ def execute_call(run: Run, call: dict) -> tuple[bool, str]:
     log(f"Werkzeug {name} -> {'ok' if ok else 'Fehler'} ({time.time() - t0:.1f} s)", console=False)
     run.emit(t="result", id=cid, ok=ok, preview=result[:2000])
     return ok, result
+
+
+def _protokoll(run: Run, name: str, bereich: str | None, entscheidung: str, args: dict, ok: bool) -> None:
+    if AUDIT:
+        AUDIT.schreiben(chat=run.conv.get("id"), titel=(run.conv.get("title") or "")[:60], werkzeug=name,
+                        bereich=bereich or "-", entscheidung=entscheidung, ok=ok, args=permissions.kurz(args))
 
 
 def tool_set_reminder(run: Run, args: dict) -> str:
@@ -1962,8 +2114,9 @@ def start_run(conv: dict, text: str, images: list[str], settings: dict) -> Run:
     if run.minutes:
         until = time.strftime("%H:%M", time.localtime(run.deadline))
         content = (f"[Auftrag mit Arbeitszeit {fmt_dur(run.minutes * 60)} (bis {until} Uhr). Arbeite selbstständig "
-                   "und ohne Rückfragen, bis der Auftrag erledigt ist: Plane zuerst kurz, halte Plan und Fortschritt "
-                   "mit update_notes fest, arbeite Schritt für Schritt mit deinen Werkzeugen, teste deine Ergebnisse "
+                   "und ohne Rückfragen, bis der Auftrag erledigt ist: Plane zuerst kurz und halte den Plan mit update_notes "
+                   "als Checkliste fest (eine Zeile pro Schritt: „- [ ] Schritt“, erledigt: „- [x] Schritt“) – "
+                   "aktualisiere sie nach jedem fertigen Schritt. Arbeite Schritt für Schritt mit deinen Werkzeugen, teste deine Ergebnisse "
                    "und speichere Ergebnisse als Dateien im Arbeitsordner. Wenn alles fertig ist, antworte mit einer "
                    "Zusammenfassung, die mit FERTIG beginnt.]\n\n" + content)
     user_msg = {"role": "user", "content": content, "_display": text, "_images": image_ids, "_ts": time.time()}
@@ -2187,6 +2340,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._file(UPLOADS / m.group(1), cache="private, max-age=86400")
             if path == "/api/memory":
                 return self._json(200, {"memory": tools.load_memory(CTX)})
+            if path == "/api/permissions":
+                return self._json(200, {"bereiche": RECHTE.uebersicht(), "mcp": [
+                    {"name": s["name"], "stufe": RECHTE.stufe("mcp", s["name"]),
+                     "eigen": f"mcp:{s['name']}" in (CFG.get("permissions") or {})} for s in MCP.uebersicht()]})
+            if path == "/api/audit":
+                n = int(urllib.parse.parse_qs(url.query).get("n", ["200"])[0])
+                return self._json(200, {"eintraege": AUDIT.lesen(max(1, min(n, 2000)))})
+            if path == "/api/mcp":
+                return self._json(200, {"server": MCP.uebersicht(), "konfig_pfad": str(DATA / "mcp.json"),
+                                        "bearbeitbar": self._is_local()})
             if path == "/api/models":
                 return self._json(200, {"models": models_list(), "llama": LLAMA.state, **game_info()})
             if path == "/api/remote/frame":
@@ -2263,8 +2426,56 @@ class Handler(BaseHTTPRequestHandler):
                 if not slot:
                     return self._json(404, {"error": "Diese Freigabe ist nicht mehr offen."})
                 slot["allow"] = bool(body.get("allow"))
+                slot["always"] = bool(body.get("always"))
                 slot["event"].set()
                 return self._json(200, {"ok": True})
+            if path == "/api/permissions":
+                try:
+                    RECHTE.setzen(str(body.get("id") or ""), str(body.get("stufe") or ""))
+                except ValueError as e:
+                    return self._json(400, {"error": str(e)})
+                log(f"Berechtigung geändert: {body.get('id')} → {body.get('stufe')}")
+                return self._json(200, {"ok": True})
+            if path == "/api/mcp/reload":
+                MCP.starten()
+                return self._json(200, {"ok": True})
+            if path == "/api/mcp/toggle":
+                konf = MCP.konfig()
+                name = str(body.get("name") or "")
+                if name not in konf:
+                    return self._json(404, {"error": "unbekannter Server"})
+                konf[name]["enabled"] = bool(body.get("enabled"))
+                MCP.speichern(konf)
+                MCP.starten()
+                return self._json(200, {"ok": True})
+            if path == "/api/mcp/config":
+                # Neue Server = neue Programme auf dem Laptop → nur direkt am Laptop änderbar, nie übers Handy
+                if not self._is_local():
+                    return self._json(403, {"error": "MCP-Server lassen sich aus Sicherheitsgründen nur direkt am Laptop hinzufügen."})
+                server = body.get("mcpServers")
+                if not isinstance(server, dict):
+                    return self._json(400, {"error": "Erwartet: {\"mcpServers\": {…}}"})
+                MCP.speichern(server)
+                MCP.starten()
+                return self._json(200, {"ok": True})
+            if path == "/api/work":
+                run = RUNS.get(body.get("conversation_id") or "")
+                if not run or run.done or not run.deadline:
+                    return self._json(404, {"error": "Kein laufender Zeit-Auftrag in diesem Chat."})
+                aktion = body.get("action")
+                if aktion == "pause":
+                    run.pause()
+                elif aktion == "resume":
+                    run.resume()
+                elif aktion == "extend":
+                    run.extend(max(1, min(int(body.get("minutes") or 15), 240)))
+                elif aktion == "finish":
+                    run.finish_now()
+                else:
+                    return self._json(400, {"error": "action: pause, resume, extend oder finish"})
+                run.emit(t="work", **run.info())
+                log(f"Zeit-Auftrag: {aktion}" + (f" +{body.get('minutes')} min" if aktion == "extend" else ""))
+                return self._json(200, {"ok": True, "work": run.info()})
             if path == "/api/stop":
                 run = RUNS.get(body.get("conversation_id") or "")
                 if run:
@@ -2422,7 +2633,7 @@ class Server(ThreadingHTTPServer):
 
 
 def main() -> None:
-    global CFG, CTX
+    global CFG, CTX, RECHTE, AUDIT, MCP
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     for d in (DATA, CONV_DIR, UPLOADS, LOGS, WORKSPACE):
@@ -2431,6 +2642,9 @@ def main() -> None:
     CTX = tools.ToolContext(WORKSPACE, DATA / "memory.json", sys.executable)
     remote.make_dpi_aware()
     PUSH.setup()
+    RECHTE = permissions.Rechte(CFG, save_config)
+    AUDIT = permissions.Protokoll(DATA / "audit.jsonl")
+    MCP = mcp_client.McpManager(DATA / "mcp.json", LOGS, log, VERSION)
     global VIDEO
     VIDEO = video.Video(ENGINE, WORKSPACE, LOGS)
     threading.Thread(target=REMINDERS.loop, daemon=True, name="reminders").start()
@@ -2443,6 +2657,7 @@ def main() -> None:
         webbrowser.open(f"http://localhost:{port}/connect")
         return
     kill_children_on_exit()
+    MCP.starten()  # nach dem Job-Objekt: MCP-Server-Prozesse sterben mit Nova
     print("=" * 60)
     print(f"  KI-Agent {CFG['agent_name']}  –  läuft lokal auf diesem Laptop")
     print(f"  Handy koppeln:  http://localhost:{port}/connect")
@@ -2466,6 +2681,7 @@ def main() -> None:
         log("Beende …")
         TUNNEL.stop()
         LLAMA.stop()
+        MCP.stoppen()
         httpd.shutdown()
 
 
