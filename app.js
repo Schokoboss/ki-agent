@@ -441,7 +441,11 @@ const TOOL_META = {
   laptop_status: ['Laptop-Status', 'laptop', () => ''],
   remember: ['Merken', 'star', a => a.fact],
   forget: ['Vergessen', 'star', a => a.id],
-  update_notes: ['Notizen', 'edit', a => (a.notes || '').split('\n').find(l => l.trim()) || ''],
+  update_notes: ['Notizen', 'edit', a => {
+    const n = a.notes || '';
+    const all = n.match(/^\s*[-*]\s*\[[ xX]\]/gm);
+    return all ? `Plan ${(n.match(/^\s*[-*]\s*\[[xX]\]/gm) || []).length}/${all.length}` : n.split('\n').find(l => l.trim()) || '';
+  }],
   set_reminder: ['Erinnerung', 'clock', a => `${a.at || (a.minutes != null ? `in ${a.minutes} min` : '')} · ${a.text || ''}`],
   reminders: ['Erinnerungen', 'clock', a => a.cancel_id ? 'löschen' : 'ansehen'],
   send_to_phone: ['Ans Handy', 'download', a => (a.path || '').split(/[\\/]/).pop()],
@@ -463,6 +467,19 @@ const TOOL_META = {
   routine: ['Routine', 'repeat', a => a.action === 'list' ? 'ansehen' : a.action === 'delete' ? 'löschen' : `${a.days || 'täglich'} ${a.time || ''} · ${a.name || a.prompt || ''}`],
   notes: ['Notizen', 'edit', a => (a.text || '').split('\n').find(l => l.trim()) || ''],
 };
+
+// „FERTIG“ ist nur das Ende-Signal eines Zeit-Auftrags an den Server – nicht anzeigen
+const stripDone = s => s.replace(/^[\s*#_]*FERTIG\b[\s*_:.!–-]*/i, '');
+
+// Werkzeuge aus Integrationen (MCP) heißen mcp_<server>_<werkzeug>
+function toolMeta(name) {
+  if (TOOL_META[name]) return TOOL_META[name];
+  if (/^mcp_/.test(name || '')) {
+    return [name.slice(4).replace(/_/g, ' '), 'plug',
+      a => Object.values(a || {}).filter(v => v != null && typeof v !== 'object').join(' · ').slice(0, 90)];
+  }
+  return [name, 'sliders', () => ''];
+}
 
 function argsDetail(name, args) {
   if (name === 'update_notes') return args.notes || '';
@@ -498,6 +515,13 @@ function fmtDur(sec) {
   sec = Math.max(0, Math.round(sec));
   const hh = Math.floor(sec / 3600), mm = Math.floor(sec % 3600 / 60), ss = sec % 60;
   return hh ? `${hh}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')} h` : `${mm}:${String(ss).padStart(2, '0')} min`;
+}
+function fmtSpan(sec) {  // kurz für Kacheln: 45 s · 12 min · 1 h 5 min
+  sec = Math.max(0, Math.round(sec));
+  if (sec < 60) return `${sec} s`;
+  if (sec < 3600) return `${Math.round(sec / 60)} min`;
+  const m = Math.round(sec % 3600 / 60);
+  return `${Math.floor(sec / 3600)} h${m ? ` ${m} min` : ''}`;
 }
 function fmtMinutes(m) {
   if (!m) return 'Normal';
@@ -592,7 +616,7 @@ class TurnView {
   flush() {
     clearTimeout(this.renderTimer);
     this.renderTimer = null;
-    if (this.textEl) { this.textEl.innerHTML = md(this.raw); scrollDown(); }
+    if (this.textEl) { this.textEl.innerHTML = md(stripDone(this.raw)); scrollDown(); }
   }
   prep() {
     this.showTyping();
@@ -659,27 +683,81 @@ class TurnView {
   }
   work(info) {
     if (!info || !info.deadline) return;
-    this.workInfo = info;
+    this.workInfo = { ...this.workInfo, ...info };
     if (!this.workEl) {
       this.workEl = h('div', 'work-card', `
         <div class="wc-top">${icon('clock')}<b>Auftrag läuft</b><span class="wc-left"></span></div>
         <div class="wc-bar"><i></i></div><div class="wc-meta"></div>
+        <div class="wc-plan" hidden><div class="wc-plan-head"><span>Plan</span><b></b></div><ul></ul></div>
+        <div class="wc-ctrl" hidden>
+          <button type="button" class="btn" data-a="pause"></button>
+          <button type="button" class="btn" data-a="extend">${icon('plus')}<span>15 min</span></button>
+          <button type="button" class="btn ghost-danger" data-a="finish">${icon('flag')}<span>Jetzt beenden</span></button>
+        </div>
         <details class="wc-notes" hidden><summary>Arbeitsnotizen</summary><pre></pre></details>`);
       this.el.prepend(this.workEl);
       this.workTimer = setInterval(() => this.tickWork(), 1000);
+      // nur Aufträge am Laptop lassen sich steuern (die Handy-KI kennt kein „paused“)
+      if ('paused' in info) {
+        const ctrl = $('.wc-ctrl', this.workEl);
+        ctrl.hidden = false;
+        ctrl.addEventListener('click', e => {
+          const b = e.target.closest('button');
+          if (b) this.workAction(b.dataset.a, b);
+        });
+      }
     }
     if (info.notes) this.notes(info.notes);
+    if (info.plan) this.plan(info.plan);
     this.tickWork();
+  }
+  async workAction(a, btn) {
+    const action = a === 'pause' && this.workInfo?.paused ? 'resume' : a;
+    if (action === 'finish' && !confirm('Auftrag jetzt beenden? Nova fasst zusammen, was geschafft ist, und schreibt den Abschlussbericht.')) return;
+    btn.disabled = true;
+    try {
+      const r = await apiJSON('/api/work', { method: 'POST', body: JSON.stringify({ conversation_id: state.conv, action, minutes: 15 }) });
+      if (r.work) this.work(r.work);
+      toast({ pause: 'Pausiert – die Uhr steht.', resume: 'Geht weiter.', extend: '15 Minuten dazu.',
+              finish: 'Wird beendet – Nova fasst zusammen …' }[action]);
+    } catch (e) { toast(e.message); }
+    btn.disabled = false;
   }
   tickWork() {
     const w = this.workInfo;
     if (!w || !this.workEl) return;
-    const total = w.deadline - w.started;
-    const left = w.deadline - serverNow();
-    $('.wc-left', this.workEl).textContent = left > 0 ? 'noch ' + fmtDur(left) : 'Zeit um';
-    $('.wc-bar i', this.workEl).style.width = Math.min(100, 100 * (1 - Math.max(0, left) / total)) + '%';
+    const total = Math.max(1, w.deadline - w.started);
+    const left = w.paused && w.left != null ? w.left : w.deadline - serverNow();  // in der Pause steht die Uhr
+    const card = this.workEl;
+    card.classList.toggle('paused', !!w.paused);
+    $('.wc-top b', card).textContent = w.finishing ? 'Wird beendet …' : w.paused ? 'Pausiert' : 'Auftrag läuft';
+    $('.wc-left', card).textContent = left > 0 ? 'noch ' + fmtDur(left) : 'Zeit um';
+    $('.wc-bar i', card).style.width = Math.min(100, 100 * (1 - Math.max(0, left) / total)) + '%';
     const until = new Date((w.deadline - state.skew) * 1000).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
-    $('.wc-meta', this.workEl).textContent = `Schritt ${w.step || 1} · bis ${until} Uhr${w.free_hand ? ' · ohne Nachfragen' : ''}`;
+    $('.wc-meta', card).textContent = [`Schritt ${w.step || 1}`, w.paused ? 'Uhr angehalten' : `bis ${until} Uhr`,
+      w.minutes ? `${fmtMinutes(w.minutes)} geplant` : '', w.free_hand ? 'ohne Nachfragen' : ''].filter(Boolean).join(' · ');
+    const ctrl = $('.wc-ctrl', card);
+    if (!ctrl.hidden && w.finishing) ctrl.hidden = true;
+    const pb = $('[data-a="pause"]', ctrl);
+    const want = w.paused ? 'resume' : 'pause';
+    if (pb.dataset.s !== want) {
+      pb.dataset.s = want;
+      pb.innerHTML = w.paused ? `${icon('resume')}<span>Weiter</span>` : `${icon('pause')}<span>Pause</span>`;
+      pb.classList.toggle('primary', !!w.paused);
+    }
+  }
+  plan(list) {
+    if (!this.workEl || !list?.length) return;
+    const box = $('.wc-plan', this.workEl);
+    box.hidden = false;
+    $('.wc-plan-head b', box).textContent = `${list.filter(p => p.done).length} von ${list.length} erledigt`;
+    const ul = $('ul', box);
+    ul.innerHTML = '';
+    for (const p of list) {
+      const li = h('li', p.done ? 'done' : '', `<span class="ck">${p.done ? icon('check') : ''}</span><span class="tx"></span>`);
+      $('.tx', li).textContent = p.text;
+      ul.append(li);
+    }
   }
   notes(text) {
     if (!this.workEl || !text) return;
@@ -687,9 +765,50 @@ class TurnView {
     d.hidden = false;
     $('pre', d).textContent = text;
   }
+  report(r) {
+    if (!r?.path) return;
+    this.flush();
+    const card = h('div', 'report-card', `
+      <div class="rc-top">${icon('flag')}<b>Abschlussbericht</b><span class="rc-sub"></span></div>
+      <div class="rc-stats"></div>
+      <ul class="rc-files" hidden></ul>
+      <div class="rc-btns">
+        <button type="button" class="btn primary rc-open">${icon('eye')}<span>Bericht ansehen</span></button>
+        <button type="button" class="btn rc-dl">${icon('download')}<span>Herunterladen</span></button>
+      </div>`);
+    $('.rc-sub', card).textContent = r.vom_nutzer ? 'vorzeitig beendet' : 'abgeschlossen';
+    const stats = [[fmtSpan(r.dauer || 0), 'Dauer'], [r.schritte || 0, 'Schritte'], [r.werkzeuge || 0, 'Werkzeuge']];
+    if (r.plan_gesamt) stats.push([`${r.plan_fertig}/${r.plan_gesamt}`, 'Plan']);
+    if (r.pausiert >= 60) stats.push([fmtSpan(r.pausiert), 'Pause']);
+    $('.rc-stats', card).innerHTML = stats.map(([v, l]) => `<span><b>${esc(String(v))}</b><small>${l}</small></span>`).join('');
+    const files = r.dateien || [];
+    if (files.length) {
+      const ul = $('.rc-files', card);
+      ul.hidden = false;
+      for (const f of files.slice(0, 12)) {
+        const name = f.split(/[\\/]/).pop();
+        const li = h('li', '', `${icon('file')}<span></span>`);
+        $('span', li).textContent = name;
+        li.title = f;
+        if (/^[A-Za-z]:[\\/]/.test(f)) {
+          const b = h('button', 'btn', 'Laden');
+          b.type = 'button';
+          b.onclick = () => downloadFile(f, name, b);
+          li.append(b);
+        }
+        ul.append(li);
+      }
+      if (files.length > 12) ul.append(h('li', 'more', `+ ${files.length - 12} weitere im Bericht`));
+    }
+    $('.rc-open', card).onclick = () => openReport(r);
+    $('.rc-dl', card).onclick = e => downloadFile(r.path, r.name, e.currentTarget);
+    this.append(card);
+  }
   endWork(stats) {
     if (!this.workEl) return;
     clearInterval(this.workTimer);
+    this.workEl.classList.remove('paused');
+    $('.wc-ctrl', this.workEl).hidden = true;
     this.workEl.classList.add('finished');
     const label = stats?.cancelled ? 'Auftrag abgebrochen' : 'Auftrag beendet';
     $('.wc-top b', this.workEl).textContent = label;
@@ -702,7 +821,7 @@ class TurnView {
     if (ev.name === 'update_notes') this.notes(ev.args?.notes);
     if (this.thinkEl && this.thinkEl.open) this.thinkEl.open = false;
     this.flush();
-    const [label, ic, summary] = TOOL_META[ev.name] || [ev.name, 'sliders', () => ''];
+    const [label, ic, summary] = toolMeta(ev.name);
     const args = ev.args || {};
     const el = h('details', 'tool running', `
       <summary><span class="ic">${icon(ic)}</span><span class="tname">${esc(label)}</span>
@@ -720,17 +839,24 @@ class TurnView {
     t.el.open = false;
     const box = h('div', 'approval', `
       <div class="why">${icon('alert')}<span></span></div><pre></pre>
-      <div class="btns"><button class="deny" type="button">Ablehnen</button><button class="allow" type="button">Erlauben</button></div>`);
+      <div class="btns"><button class="deny" type="button">Ablehnen</button><button class="allow" type="button">${ev.always ? 'Einmal erlauben' : 'Erlauben'}</button></div>
+      ${ev.always ? `<button class="always" type="button">${icon('shield')}<span></span></button>` : ''}`);
     $('.why span', box).textContent = ev.reason || 'Darf der Agent das?';
     $('pre', box).textContent = argsDetail(ev.name, ev.args || {});
-    const answer = async allow => {
+    const answer = async (allow, always = false) => {
       $('.btns', box).innerHTML = `<span class="note">${allow ? 'Erlaubt – wird ausgeführt …' : 'Abgelehnt.'}</span>`;
+      $('.always', box)?.remove();
       try {
-        await apiJSON('/api/approve', { method: 'POST', body: JSON.stringify({ conversation_id: convId, id: ev.id, allow }) });
+        await apiJSON('/api/approve', { method: 'POST', body: JSON.stringify({ conversation_id: convId, id: ev.id, allow, always }) });
+        if (always) toast(`${ev.always}: ab jetzt ohne Nachfrage. Ändern unter Einstellungen → Sicherheit.`, 5000);
       } catch (e) { toast(e.message); }
     };
     $('.deny', box).onclick = () => answer(false);
     $('.allow', box).onclick = () => answer(true);
+    if (ev.always) {
+      $('.always span', box).textContent = `Immer erlauben: ${ev.always}`;
+      $('.always', box).onclick = () => answer(true, true);
+    }
     t.box = box;
     t.el.after(box);
     box.style.cssText = 'border:1px solid var(--border);border-radius:14px;margin-top:-4px';
@@ -797,6 +923,7 @@ class TurnView {
       edit.onclick = () => { els.input.value = lastQ; autoGrow(); state.replaceNext = true; els.input.focus(); toast('Ändere die Frage und tippe auf Senden.'); };
       foot.append(again, edit);
     }
+    this.allText = stripDone(this.allText);
     if (this.allText) {
       const copy = h('button', '', icon('copy'));
       copy.type = 'button';
@@ -855,6 +982,7 @@ function renderHistory(messages, live) {
         try { args = JSON.parse(tc.function.arguments || '{}'); } catch { /* egal */ }
         view.tool({ id: tc.id, name: tc.function.name, args });
       }
+      if (m._report) view.report(m._report);
     } else if (m.role === 'tool') {
       view.result({ id: m.tool_call_id, ok: m._ok !== false, preview: (m.content || '').slice(0, 2000) });
       const t = view.tools[m.tool_call_id];
@@ -909,6 +1037,7 @@ function handleEvent(ev, ctx) {
     case 'action': view().actionCard(ev.action); break;
     case 'image': view().image(ev.id); break;
     case 'work': view().work(ev); break;
+    case 'report': view().report(ev); break;
     case 'think': view().think(ev.d); break;
     case 'text': view().text(ev.d); break;
     case 'step': view().step(); break;
@@ -1403,6 +1532,26 @@ async function downloadFile(path, name, btn) {
   }
 }
 
+async function openReport(r) {
+  const body = $('#viewerBody');
+  let text = '';
+  $('#viewerTitle').textContent = 'Abschlussbericht';
+  body.innerHTML = '<p class="muted">Lädt …</p>';
+  $('#viewerCopy').onclick = () => navigator.clipboard?.writeText(text).then(() => toast('Kopiert'));
+  $('#viewerSave').onclick = e => downloadFile(r.path, r.name, e.currentTarget);
+  $('#viewerSave').textContent = 'Herunterladen';
+  $('#viewer').showModal();
+  try {
+    const res = await api('/api/download?path=' + encodeURIComponent(r.path));
+    if (!res.ok) throw new Error(res.status === 403 ? 'Der Bericht ist nicht mehr da.' : `Fehler ${res.status}`);
+    text = (await res.text()).replace(/\r\n?/g, '\n');  // am Laptop mit Windows-Zeilenenden gespeichert
+    const title = text.match(/^# (.+)$/m);
+    if (title) $('#viewerTitle').textContent = title[1].replace(/^Abschlussbericht:\s*/, '');
+    body.innerHTML = md(text.replace(/^# .+\n+/, '')
+      .replace(/^(\s*[-*]) \[[xX]\]/gm, '$1 ☑').replace(/^(\s*[-*]) \[ \]/gm, '$1 ☐'));
+  } catch (e) { body.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+}
+
 function readDataURL(file) {
   return new Promise((ok, fail) => {
     const fr = new FileReader();
@@ -1632,18 +1781,259 @@ async function loadPhoneModels() {
   }
 }
 
-function openSettings() {
+function openSettings(tab) {
   closeDrawer();
   $('#btnInstall').hidden = !state.installPrompt;
   renderModeSeg();
   $('#setPush').checked = !!LS.get('nova.push', false) && typeof Notification !== 'undefined' && Notification.permission === 'granted';
-  loadReminders();
-  loadRoutines();
-  loadMemory();
-  loadLaptopModels();
-  loadPhoneModels();
+  showTab(typeof tab === 'string' ? tab : LS.get('nova.setTab', 'allg'));
   els.settings.showModal();
 }
+
+/* ------------------------------------------------------------ Einstellungen: Bereiche, Rechte, Protokoll, MCP */
+
+function showTab(tab) {
+  const tabs = [...document.querySelectorAll('#setTabs button')];
+  if (!tabs.some(b => b.dataset.tab === tab)) tab = 'allg';
+  tabs.forEach(b => {
+    const on = b.dataset.tab === tab;
+    b.classList.toggle('sel', on);
+    b.setAttribute('aria-selected', on);
+  });
+  document.querySelectorAll('#settings .tab-panel').forEach(p => { p.hidden = p.dataset.panel !== tab; });
+  els.settings.scrollTop = 0;
+  LS.set('nova.setTab', tab);
+  if (tab === 'allg') { loadLaptopModels(); loadPhoneModels(); }
+  if (tab === 'sicher') loadPermissions().then(loadAudit);
+  if (tab === 'integ') loadMcp();
+  if (tab === 'auto') { loadReminders(); loadRoutines(); }
+  if (tab === 'daten') loadMemory();
+}
+$('#setTabs').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (b) showTab(b.dataset.tab);
+});
+
+const STUFEN = [['erlauben', 'Erlauben'], ['fragen', 'Fragen'], ['verbieten', 'Verbieten']];
+const STUFE_NAME = Object.fromEntries(STUFEN);
+const permNames = {};
+const offline = box => { box.innerHTML = '<p class="muted">Laptop nicht verbunden.</p>'; };
+const oldServer = e => /unbekannt/.test(e.message)
+  ? 'Der Laptop-Teil ist noch nicht aktualisiert – Nova am Laptop einmal neu starten.' : e.message;
+
+function levelControl(current, onPick) {
+  const seg = h('div', 'lvl', STUFEN.map(([v, l]) => `<button type="button" data-l="${v}" aria-pressed="${v === current}">${l}</button>`).join(''));
+  seg.setAttribute('role', 'group');
+  seg.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b || b.getAttribute('aria-pressed') === 'true') return;
+    seg.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b));
+    onPick(b.dataset.l);
+  });
+  return seg;
+}
+
+async function setPermission(id, stufe) {
+  try {
+    await apiJSON('/api/permissions', { method: 'POST', body: JSON.stringify({ id, stufe }) });
+    toast(stufe === 'standard' ? 'Auf Standard zurückgesetzt' : `Gespeichert: ${STUFE_NAME[stufe]}`);
+    return true;
+  } catch (e) { toast(e.message); return false; }
+}
+
+async function loadPermissions() {
+  const box = $('#permList');
+  if (!state.online) return offline(box);
+  try {
+    const { bereiche } = await apiJSON('/api/permissions');
+    box.innerHTML = '';
+    for (const b of bereiche) {
+      permNames[b.id] = b.name;
+      const row = h('div', 'perm-row', `<div class="pr-text"><b></b><small></small>
+        <small class="pr-std" hidden>Geändert · Standard: ${esc(STUFE_NAME[b.standard])} · <button type="button">zurücksetzen</button></small></div>`);
+      $('b', row).textContent = b.name;
+      $('small', row).textContent = b.info + (b.id === 'mcp' ? ' – pro Integration einstellbar unter „Integrationen“.' : '');
+      const std = $('.pr-std', row);
+      std.hidden = b.stufe === b.standard;
+      $('button', std).onclick = async () => { if (await setPermission(b.id, 'standard')) loadPermissions(); };
+      row.append(levelControl(b.stufe, async l => { if (await setPermission(b.id, l)) std.hidden = l === b.standard; }));
+      box.append(row);
+    }
+  } catch (e) { box.innerHTML = `<p class="muted">${esc(oldServer(e))}</p>`; }
+}
+
+const audit = { n: 100, filter: 'alle', rows: [] };
+const auditArt = e => /verboten|abgelehnt/.test(e.entscheidung) ? 'block' : /Nutzer|Freie Hand/.test(e.entscheidung) ? 'frage' : 'ok';
+const fmtStamp = t => new Date((t - state.skew) * 1000).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+async function loadAudit() {
+  const box = $('#auditList');
+  if (!state.online) return offline(box);
+  try {
+    const { eintraege } = await apiJSON('/api/audit?n=' + audit.n);
+    audit.rows = eintraege;
+    $('#auditMore').hidden = eintraege.length < audit.n || audit.n >= 2000;
+    renderAudit();
+  } catch (e) { box.innerHTML = `<p class="muted">${esc(oldServer(e))}</p>`; }
+}
+
+function renderAudit() {
+  const box = $('#auditList');
+  const f = audit.filter;
+  const rows = audit.rows.filter(e => f === 'alle' || (f === 'fehler' ? e.ok === false && auditArt(e) !== 'block' : auditArt(e) === f));
+  if (!rows.length) {
+    box.innerHTML = `<p class="muted">${audit.rows.length ? 'Keine Einträge für diesen Filter.'
+      : 'Noch nichts protokolliert. Jede Aktion von Nova erscheint hier – mit Zeit, Chat, Bereich und Entscheidung.'}</p>`;
+    return;
+  }
+  box.innerHTML = '';
+  for (const e of rows.slice(0, 400)) {
+    const [label, ic] = toolMeta(e.werkzeug);
+    const art = auditArt(e);
+    const row = h('div', `audit-row a-${art}`, `<span class="ai">${icon(ic)}</span>
+      <div class="am"><div class="at"><b></b><span class="badge"></span></div><small class="aa"></small><small class="mt"></small></div>`);
+    $('b', row).textContent = label;
+    $('.badge', row).textContent = e.entscheidung + (e.ok === false && art !== 'block' ? ' · Fehler' : '');
+    if (e.ok === false && art !== 'block') row.classList.add('a-fail');
+    $('.aa', row).textContent = e.args || '';
+    $('.aa', row).hidden = !e.args;
+    $('.aa', row).onclick = ev => ev.currentTarget.classList.toggle('open');
+    $('.mt', row).textContent = [fmtStamp(e.t), e.titel || 'Chat', permNames[e.bereich]].filter(Boolean).join(' · ');
+    box.append(row);
+  }
+}
+
+$('#auditFilter').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  audit.filter = b.dataset.f;
+  document.querySelectorAll('#auditFilter button').forEach(x => x.classList.toggle('sel', x === b));
+  renderAudit();
+});
+$('#auditMore').onclick = () => { audit.n = Math.min(2000, audit.n + 300); loadAudit(); };
+$('#auditExport').onclick = () => {
+  if (!audit.rows.length) return toast('Keine Einträge zum Exportieren.');
+  // ; für deutsches Excel, BOM für Umlaute; führende = + - @ entschärfen (keine Formeln aus KI-Text)
+  const q = v => `"${String(v ?? '').replace(/^[=+\-@\t\r]/, "'$&").replace(/"/g, '""')}"`;
+  const lines = [['Zeit', 'Chat', 'Werkzeug', 'Bereich', 'Entscheidung', 'Erfolgreich', 'Details'].join(';'),
+    ...audit.rows.map(e => [new Date((e.t - state.skew) * 1000).toLocaleString('de-DE'), e.titel, e.werkzeug,
+      permNames[e.bereich] || e.bereich, e.entscheidung, e.ok ? 'ja' : 'nein', e.args].map(q).join(';'))];
+  const url = URL.createObjectURL(new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+  const a = h('a');
+  a.href = url;
+  a.download = `nova-protokoll-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+};
+
+const MCP_STATUS = { bereit: 'verbunden', startet: 'startet …', fehler: 'Fehler', aus: 'ausgeschaltet' };
+let mcpInfo = null;
+let mcpPoll = null;
+
+async function loadMcp() {
+  clearTimeout(mcpPoll);
+  const box = $('#mcpList');
+  if (!state.online) return offline(box);
+  try {
+    const [m, p] = await Promise.all([apiJSON('/api/mcp'), apiJSON('/api/permissions')]);
+    mcpInfo = m;
+    const rechte = Object.fromEntries(p.mcp.map(x => [x.name, x]));
+    const mcpStd = p.bereiche.find(b => b.id === 'mcp')?.stufe || 'fragen';
+    $('#mcpEdit').hidden = !m.bearbeitbar || !$('#mcpEditor').hidden;
+    $('#mcpHint').innerHTML = m.bearbeitbar
+      ? `Konfiguration: <span class="mono">${esc(m.konfig_pfad)}</span>`
+      : 'Neue Integrationen lassen sich aus Sicherheitsgründen nur direkt am Laptop hinzufügen (dort Nova im Browser öffnen). Ein-/Ausschalten und Rechte gehen auch hier.';
+    if (!m.server.length) {
+      box.innerHTML = `<div class="empty-card">${icon('plug')}<b>Noch keine Integrationen</b>
+        <small>${m.bearbeitbar ? 'Tippe auf „Konfiguration bearbeiten“ und füge einen MCP-Server hinzu – z. B. mit „Beispiel einfügen“.'
+          : 'Am Laptop unter Einstellungen → Integrationen hinzufügen.'}</small></div>`;
+      if (m.bearbeitbar) $('#mcpEdit').hidden = !$('#mcpEditor').hidden;
+      return;
+    }
+    box.innerHTML = '';
+    for (const s of m.server) {
+      const card = h('div', 'mcp-card', `
+        <div class="mc-top"><span class="dot" data-s="${esc(s.status)}"></span><span class="mc-name"><b></b><small></small></span>
+          <label class="switch mini"><input type="checkbox"><i></i></label></div>
+        <div class="mc-err" hidden></div>
+        <details class="mc-tools" hidden><summary></summary><div class="tags"></div></details>
+        <div class="mc-perm"><span>Aufrufe</span></div>
+        <small class="mc-own" hidden>Eigene Regel für diese Integration · <button type="button">wie Bereich „MCP“ (${esc(STUFE_NAME[mcpStd])})</button></small>`);
+      $('.mc-name b', card).textContent = s.name;
+      $('.mc-name small', card).textContent = `${s.art === 'http' ? 'Fernserver (HTTP)' : 'Programm am Laptop'} · ${MCP_STATUS[s.status] || s.status}`;
+      const sw = $('input', card);
+      sw.checked = s.enabled;
+      sw.setAttribute('aria-label', `${s.name} einschalten`);
+      sw.onchange = async () => {
+        try {
+          await apiJSON('/api/mcp/toggle', { method: 'POST', body: JSON.stringify({ name: s.name, enabled: sw.checked }) });
+          toast(sw.checked ? `${s.name} wird verbunden …` : `${s.name} ausgeschaltet`);
+          mcpPoll = setTimeout(loadMcp, 900);
+        } catch (e) { toast(e.message); sw.checked = !sw.checked; }
+      };
+      if (s.fehler) { const er = $('.mc-err', card); er.hidden = false; er.textContent = s.fehler; }
+      if (s.werkzeuge.length) {
+        const d = $('.mc-tools', card);
+        d.hidden = false;
+        $('summary', d).textContent = `${s.werkzeuge.length} Werkzeug${s.werkzeuge.length > 1 ? 'e' : ''}`;
+        $('.tags', d).innerHTML = s.werkzeuge.map(t => `<span>${esc(t)}</span>`).join('');
+      }
+      const r = rechte[s.name] || { stufe: mcpStd, eigen: false };
+      const own = $('.mc-own', card);
+      own.hidden = !r.eigen;
+      $('button', own).onclick = async () => { if (await setPermission('mcp:' + s.name, 'standard')) loadMcp(); };
+      $('.mc-perm', card).append(levelControl(r.stufe, async l => { if (await setPermission('mcp:' + s.name, l)) own.hidden = false; }));
+      box.append(card);
+    }
+    // startende Server nachladen, solange der Bereich offen ist
+    if (m.server.some(s => s.status === 'startet') && els.settings.open && !$('[data-panel="integ"]').hidden) {
+      mcpPoll = setTimeout(loadMcp, 1500);
+    }
+  } catch (e) { box.innerHTML = `<p class="muted">${esc(oldServer(e))}</p>`; }
+}
+
+$('#mcpReload').onclick = async () => {
+  try {
+    await apiJSON('/api/mcp/reload', { method: 'POST', body: '{}' });
+    toast('Integrationen werden neu verbunden …');
+    mcpPoll = setTimeout(loadMcp, 700);
+  } catch (e) { toast(oldServer(e)); }
+};
+$('#mcpEdit').onclick = async () => {
+  try {
+    const { mcpServers } = await apiJSON('/api/mcp/config');
+    $('#mcpJson').value = JSON.stringify({ mcpServers }, null, 2);
+    $('#mcpEditor').hidden = false;
+    $('#mcpEdit').hidden = true;
+    $('#mcpJson').focus();
+  } catch (e) { toast(e.message, 5000); }
+};
+$('#mcpCancel').onclick = () => { $('#mcpEditor').hidden = true; $('#mcpEdit').hidden = !mcpInfo?.bearbeitbar; };
+$('#mcpExample').onclick = () => {
+  let cur;
+  try { cur = JSON.parse($('#mcpJson').value || '{}'); } catch { return toast('Das JSON ist gerade ungültig – erst korrigieren.'); }
+  cur.mcpServers ||= {};
+  cur.mcpServers.dateien ||= { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', 'C:\\Users\\DEIN-NAME\\Documents'] };
+  cur.mcpServers.beispiel_fern ||= { url: 'http://127.0.0.1:8000/mcp', enabled: false };
+  $('#mcpJson').value = JSON.stringify(cur, null, 2);
+};
+$('#mcpSave').onclick = async () => {
+  let cfg;
+  try { cfg = JSON.parse($('#mcpJson').value); } catch (e) { return toast('Ungültiges JSON: ' + e.message, 5000); }
+  const servers = cfg?.mcpServers ?? cfg;
+  if (!servers || typeof servers !== 'object' || Array.isArray(servers)) return toast('Erwartet: {"mcpServers": {…}}', 4000);
+  for (const [n, s] of Object.entries(servers)) {
+    if (!s || typeof s !== 'object' || (!s.command && !s.url)) return toast(`„${n}“: es fehlt „command“ oder „url“.`, 5000);
+  }
+  try {
+    await apiJSON('/api/mcp/config', { method: 'POST', body: JSON.stringify({ mcpServers: servers }) });
+    toast('Gespeichert – Integrationen starten …');
+    $('#mcpEditor').hidden = true;
+    mcpPoll = setTimeout(loadMcp, 800);
+  } catch (e) { toast(e.message, 5000); }
+};
 
 $('#modeSeg').addEventListener('click', e => {
   const b = e.target.closest('button');
@@ -1685,6 +2075,25 @@ $('#workCustom').onclick = () => {
   $('#work').close();
 };
 $('#workFree').onchange = e => { state.work.free = e.target.checked; updateWorkChip(); };
+
+// „Bis 18:30“ → Minuten ab jetzt (schon vorbei = morgen)
+function minutesUntil(hhmm) {
+  const [hh, mm] = hhmm.split(':').map(Number);
+  const now = new Date();
+  const t = new Date(now);
+  t.setHours(hh, mm, 0, 0);
+  if (t <= now) t.setDate(t.getDate() + 1);
+  return Math.max(1, Math.round((t - now) / 60000));
+}
+$('#workUntil').oninput = e => {
+  $('#workUntilHint').textContent = e.target.value ? `= ${fmtMinutes(minutesUntil(e.target.value))}` : '';
+};
+$('#workUntilOk').onclick = () => {
+  const v = $('#workUntil').value;
+  if (!v) return toast('Bitte eine Uhrzeit wählen.');
+  setWork(minutesUntil(v));
+  $('#work').close();
+};
 
 /* ------------------------------------------------------------ Eingabe-Verhalten */
 

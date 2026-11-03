@@ -31,12 +31,12 @@
       <section id="empty" class="empty">
         <div class="hero-logo"><svg><use href="#i-spark"/></svg></div>
         <h1 id="hello">Hey! Was soll ich für dich tun?</h1>
-        <p class="sub">Ich laufe komplett auf deinem Laptop – mit Websuche, Python, Dateien, Wetter und Gedächtnis.</p>
+        <p class="sub">Läuft komplett lokal auf deinem Laptop – deine Daten bleiben bei dir. Websuche, Dokumente, Dateien, Code und Integrationen.</p>
         <div class="chips" id="suggestions">
+          <button data-q="Recherchiere die wichtigsten KI-News dieser Woche und fass sie mit Quellen zusammen."><svg><use href="#i-search"/></svg>Recherche mit Quellen</button>
+          <button data-q="Erstell ein kurzes Angebot als Word-Dokument: Webdesign für ein Café, 3 Positionen mit Preisen und Gesamtsumme."><svg><use href="#i-file"/></svg>Angebot erstellen</button>
           <button data-q="Wie wird das Wetter morgen in Landshut?"><svg><use href="#i-cloud"/></svg>Wetter morgen</button>
-          <button data-q="Such die neuesten Minecraft-News und fass sie kurz zusammen."><svg><use href="#i-search"/></svg>Minecraft-News</button>
           <button data-q="Wie voll ist der Akku am Laptop und wie viel RAM ist frei?"><svg><use href="#i-laptop"/></svg>Laptop-Status</button>
-          <button data-q="Schreib und starte ein Python-Skript, das die ersten 20 Primzahlen ausgibt."><svg><use href="#i-code"/></svg>Python testen</button>
           <button data-photo="1"><svg><use href="#i-image"/></svg>Foto erklären</button>
         </div>
       </section>
@@ -80,13 +80,20 @@
         <button class="icon-btn" value="close" aria-label="Schließen"><svg><use href="#i-x"/></svg></button>
       </div>
 
+      <nav class="tabs" id="setTabs" role="tablist" aria-label="Bereiche der Einstellungen">
+        <button type="button" role="tab" data-tab="allg">Allgemein</button>
+        <button type="button" role="tab" data-tab="sicher">Sicherheit</button>
+        <button type="button" role="tab" data-tab="integ">Integrationen</button>
+        <button type="button" role="tab" data-tab="auto">Automatik</button>
+        <button type="button" role="tab" data-tab="daten">Daten</button>
+      </nav>
+
+      <section class="tab-panel" data-panel="allg" role="tabpanel">
       <div class="group">
         <label class="switch"><span><b>Denkmodus</b><small>Gründlicher bei kniffligen Aufgaben, aber langsamer.</small></span>
           <input type="checkbox" id="setThinking"><i></i></label>
         <label class="switch"><span><b>Antworten vorlesen</b><small>Liest jede fertige Antwort laut vor.</small></span>
           <input type="checkbox" id="setSpeak"><i></i></label>
-        <label class="switch danger"><span><b>Freie Hand</b><small>Code, Befehle und Dateien ohne Nachfrage. Nur einschalten, wenn du weißt, was du tust.</small></span>
-          <input type="checkbox" id="setFree"><i></i></label>
       </div>
 
       <h3>Benachrichtigungen</h3>
@@ -95,12 +102,6 @@
           <input type="checkbox" id="setPush"><i></i></label>
         <div class="btn-row"><button type="button" class="btn" id="btnPushTest">Test-Benachrichtigung</button></div>
       </div>
-
-      <h3>Erinnerungen</h3>
-      <div class="group" id="reminderList"><p class="muted">Lädt …</p></div>
-
-      <h3>Routinen</h3>
-      <div class="group" id="routineList"><p class="muted">Lädt …</p></div>
 
       <h3>KI-Modus</h3>
       <div class="seg" id="modeSeg">
@@ -115,7 +116,57 @@
       <h3>Handy-Modell</h3>
       <div class="group" id="phoneModels"><p class="muted">Lädt …</p></div>
       <p class="muted small">Das Handy-Modell wird einmal heruntergeladen (WLAN!) und läuft danach direkt auf deinem Handy – auch ohne Laptop. Werkzeuge im Handy-Modus: Wetter, Wikipedia, Rechnen, Merken.</p>
+      </section>
 
+      <section class="tab-panel" data-panel="sicher" role="tabpanel" hidden>
+      <div class="group">
+        <label class="switch danger"><span><b>Freie Hand</b><small>Alles, was auf „Fragen“ steht, läuft ohne Nachfrage. „Verbieten“ gilt trotzdem immer.</small></span>
+          <input type="checkbox" id="setFree"><i></i></label>
+      </div>
+      <h3>Berechtigungen</h3>
+      <p class="muted small pad">Lege pro Bereich fest, was Nova darf: <b class="t-ok">Erlauben</b> = ohne Nachfrage, <b class="t-warn">Fragen</b> = wartet auf deine Freigabe, <b class="t-danger">Verbieten</b> = nie.</p>
+      <div class="group" id="permList"><p class="muted">Lädt …</p></div>
+      <h3>Protokoll</h3>
+      <div class="filter" id="auditFilter" role="group" aria-label="Protokoll filtern">
+        <button type="button" data-f="alle" class="sel">Alle</button>
+        <button type="button" data-f="frage">Nachgefragt</button>
+        <button type="button" data-f="block">Blockiert</button>
+        <button type="button" data-f="fehler">Fehlgeschlagen</button>
+      </div>
+      <div class="group" id="auditList"><p class="muted">Lädt …</p></div>
+      <div class="btn-row">
+        <button type="button" class="btn" id="auditMore">Mehr laden</button>
+        <button type="button" class="btn" id="auditExport">Als CSV exportieren</button>
+      </div>
+      </section>
+
+      <section class="tab-panel" data-panel="integ" role="tabpanel" hidden>
+      <p class="muted small pad">Integrationen (MCP-Server) verbinden Nova mit anderen Programmen und Diensten – etwa Dateien, Kalender, Datenbanken oder GitHub. Das Format ist dasselbe wie bei Claude Desktop.</p>
+      <div id="mcpList" class="mcp-list"><p class="muted">Lädt …</p></div>
+      <div class="btn-row">
+        <button type="button" class="btn" id="mcpReload">Neu verbinden</button>
+        <button type="button" class="btn" id="mcpEdit" hidden>Konfiguration bearbeiten</button>
+      </div>
+      <div id="mcpEditor" class="mcp-editor" hidden>
+        <textarea id="mcpJson" class="code-edit" spellcheck="false" autocomplete="off" aria-label="MCP-Konfiguration (JSON)"></textarea>
+        <div class="btn-row">
+          <button type="button" class="btn primary" id="mcpSave">Speichern &amp; starten</button>
+          <button type="button" class="btn" id="mcpExample">Beispiel einfügen</button>
+          <button type="button" class="btn" id="mcpCancel">Abbrechen</button>
+        </div>
+      </div>
+      <p class="muted small pad" id="mcpHint"></p>
+      </section>
+
+      <section class="tab-panel" data-panel="auto" role="tabpanel" hidden>
+      <h3>Erinnerungen</h3>
+      <div class="group" id="reminderList"><p class="muted">Lädt …</p></div>
+
+      <h3>Routinen</h3>
+      <div class="group" id="routineList"><p class="muted">Lädt …</p></div>
+      </section>
+
+      <section class="tab-panel" data-panel="daten" role="tabpanel" hidden>
       <h3>Gedächtnis</h3>
       <div class="group" id="memoryList"><p class="muted">Lädt …</p></div>
 
@@ -131,6 +182,21 @@
         </div>
       </div>
       <p class="muted small">Alles rechnet lokal auf deinem Laptop. Nur die Spracheingabe nutzt die Google-Spracherkennung deines Handys.</p>
+      </section>
+    </form>
+  </dialog>
+
+  <dialog id="viewer" class="sheet">
+    <form method="dialog" class="sheet-inner">
+      <div class="sheet-head">
+        <h2 id="viewerTitle">Bericht</h2>
+        <button class="icon-btn" value="close" aria-label="Schließen"><svg><use href="#i-x"/></svg></button>
+      </div>
+      <div id="viewerBody" class="md viewer-body"></div>
+      <div class="btn-row">
+        <button type="button" class="btn" id="viewerCopy">Text kopieren</button>
+        <button type="button" class="btn" id="viewerSave">Herunterladen</button>
+      </div>
     </form>
   </dialog>
 
@@ -157,10 +223,17 @@
         <input type="number" id="workM" min="0" max="59" step="5" inputmode="numeric" aria-label="Minuten" value="45"><span>min</span>
         <button type="button" class="btn" id="workCustom">OK</button>
       </div>
+      <div class="custom-time">
+        <span>Bis Uhrzeit</span>
+        <input type="time" id="workUntil" aria-label="Arbeiten bis" class="time-in">
+        <button type="button" class="btn" id="workUntilOk">OK</button>
+        <small class="muted" id="workUntilHint"></small>
+      </div>
       <div class="group">
         <label class="switch danger"><span><b>Ohne Nachfragen arbeiten</b><small>Code, Befehle und Dateien ohne Freigabe. Sonst wartet der Agent bei jeder solchen Aktion bis zu 10 min auf dich.</small></span>
           <input type="checkbox" id="workFree"><i></i></label>
       </div>
+      <p class="muted small">Während des Auftrags kannst du pausieren, Zeit dazugeben oder ihn vorzeitig beenden. Am Ende bekommst du einen Abschlussbericht (gespeichert unter Berichte im Arbeitsordner).</p>
       <p class="muted small">Tipp: Laptop ans Ladekabel und Deckel offen lassen – er schläft währenddessen nicht ein. Du kannst die App schließen, der Agent arbeitet am Laptop weiter.</p>
     </form>
   </dialog>
@@ -246,6 +319,12 @@
     <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></symbol>
     <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
     <symbol id="i-retry" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></symbol>
+    <symbol id="i-resume" viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5z"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v5.5c0 4.2-3 7.8-7 9.5-4-1.7-7-5.3-7-9.5V6z"/><path d="M9 12l2 2 4-4"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3v5M15 3v5M6.5 8h11v3a5.5 5.5 0 0 1-11 0zM12 16.5V21"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></symbol>
   </svg>
 
   <script src="local.js"></script>
