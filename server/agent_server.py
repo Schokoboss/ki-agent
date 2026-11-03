@@ -72,7 +72,11 @@ DEFAULT_CONFIG = {
     "game_mode": True,           # Spiel läuft → große Modelle machen Platz
     "game_model": "qwen35-4b",
     "game_processes": {},        # eigene Ergänzungen: {"spiel.exe": "Name"}
+    "resume_work": True,         # unterbrochene Aufträge nach einem Neustart fortsetzen
+    "interim_minutes": 60,       # Zwischenstand aufs Handy bei langen Aufträgen
 }
+
+ENDLOS_MIN = 7 * 24 * 60  # „Bis fertig“: Sicherheitsgrenze 7 Tage
 
 _log_lock = threading.Lock()
 
@@ -760,7 +764,7 @@ def notify_done(run: "Run", stats: dict, why: str) -> None:
     last = next((m["content"] for m in reversed(run.conv["messages"])
                  if m["role"] == "assistant" and (m.get("content") or "").strip()), "")
     answer = _plain(re.sub(r"^\W*FERTIG\W*", "", last.strip(), flags=re.I), 220)
-    title = {"time": "⏰ Arbeitszeit vorbei", "steps": "⏸️ Angehalten"}.get(
+    title = {"time": "⏰ Arbeitszeit vorbei", "steps": "⏸️ Angehalten", "user": "🏁 Auftrag beendet"}.get(
         why, "✅ Auftrag fertig" if stats["long"] else "💬 Antwort fertig")
     head = run.conv.get("title") or "Chat"
     if stats["long"]:
@@ -1031,7 +1035,8 @@ class Run:
         self.saved_idx = 0      # Events ab hier stehen noch nicht in conv["messages"]
         self.compact_upto = 0   # Text-Events davor wurden zum RAM-Sparen entfernt
         self.started = time.time()
-        self.minutes = max(0, min(int(settings.get("work_minutes") or 0), 24 * 60))
+        self.endless = bool(settings.get("work_endless"))
+        self.minutes = ENDLOS_MIN if self.endless else max(0, min(int(settings.get("work_minutes") or 0), 24 * 60))
         self.deadline = self.started + self.minutes * 60 if self.minutes else None
         self.free_hand = bool(settings.get("free_hand"))
         self.thinking = bool(settings.get("thinking"))
@@ -1045,6 +1050,33 @@ class Run:
         self.finish_requested = False
         self.files: list[str] = []  # im Auftrag erstellte/geänderte Dateien (für den Abschlussbericht)
         self.tool_counts: dict[str, int] = {}
+        self.interim_at = time.time()  # letzter Zwischenstand
+        self.restarts = 0
+
+    def save_state(self) -> None:
+        """Stand eines Zeit-Auftrags im Chat merken – stirbt Nova (Neustart, Absturz, Laptop aus), geht es danach weiter."""
+        self.conv["_work_state"] = {
+            "started": self.started, "deadline": self.deadline, "minutes": self.minutes, "endless": self.endless,
+            "free_hand": self.free_hand, "thinking": self.thinking, "base": self.base, "step": self.step,
+            "paused": bool(self.paused_at), "paused_total": self.paused_total, "files": self.files[-50:],
+            "tool_counts": self.tool_counts, "restarts": self.restarts, "saved": time.time()}
+
+    @classmethod
+    def restore(cls, conv: dict, st: dict) -> "Run":
+        run = cls(conv, {"work_minutes": st.get("minutes") or 0, "work_endless": st.get("endless"),
+                         "free_hand": st.get("free_hand"), "thinking": st.get("thinking")})
+        aus = max(0.0, time.time() - float(st.get("saved") or time.time()))  # so lange war Nova weg – die Uhr stand
+        run.started = float(st.get("started") or run.started)
+        run.deadline = float(st.get("deadline") or run.deadline) + aus
+        run.paused_total = float(st.get("paused_total") or 0) + aus
+        run.base = min(int(st.get("base") or 0), max(0, len(conv["messages"]) - 1))
+        run.step = int(st.get("step") or 0)
+        run.files = list(st.get("files") or [])
+        run.tool_counts = dict(st.get("tool_counts") or {})
+        run.restarts = int(st.get("restarts") or 0) + 1
+        if st.get("paused"):
+            run.paused_at = time.time()
+        return run
 
     def pause(self) -> None:
         if self.deadline and not self.paused_at:
@@ -1058,7 +1090,7 @@ class Run:
             self.paused_at = None
 
     def extend(self, minutes: int) -> None:
-        if self.deadline:
+        if self.deadline and not self.endless:
             self.deadline += minutes * 60
             self.minutes += minutes
 
@@ -1117,7 +1149,8 @@ class Run:
         return {"started": self.started, "deadline": self.deadline, "minutes": self.minutes,
                 "step": self.step, "free_hand": self.free_hand, "paused": bool(self.paused_at),
                 "left": self.remaining(), "plan": plan_aus_notizen(self.conv.get("_notes") or ""),
-                "finishing": self.finish_requested}
+                "finishing": self.finish_requested, "endless": self.endless,
+                "paused_total": self.paused_total + ((time.time() - self.paused_at) if self.paused_at else 0)}
 
 
 def plan_aus_notizen(notes: str) -> list[dict]:
@@ -1491,7 +1524,7 @@ def agent_loop(run: Run) -> None:
     conv = run.conv
     long = run.deadline is not None
     stats = {"predicted_n": 0, "predicted_ms": 0.0, "tools": 0}
-    max_steps = 3000 if long else MAX_STEPS
+    max_steps = 20000 if run.endless else 3000 if long else MAX_STEPS
     nudges, last_sig, repeats, final = 0, None, 0, 0
     try:
         if not RUN_LOCK.acquire(blocking=False):
@@ -1506,6 +1539,9 @@ def agent_loop(run: Run) -> None:
                 if long and run.paused_at:
                     run.emit(t="status", d="Pausiert – geht weiter, sobald du „Weiter“ tippst.")
                     run.emit(t="work", **run.info())
+                    with run.cond:
+                        run.save_state()
+                        Store.save(conv)
                     while run.paused_at and not run.cancel.is_set():
                         time.sleep(0.5)
                     if run.cancel.is_set():
@@ -1522,7 +1558,12 @@ def agent_loop(run: Run) -> None:
                     run.emit(t="step")
                 run.step += 1
                 if long:
+                    run.save_state()  # wird mit der nächsten Nachricht gespeichert
                     run.emit(t="work", **run.info())
+                    zwischenstand(run)
+                    if run.step % 25 == 0:
+                        with run.cond:
+                            _schlank(conv, run.base)
                 content, reasoning, calls, timings, finish = llm_stream_safe(lambda: build_messages(conv, run.base, run), run)
                 stats["predicted_n"] += timings.get("predicted_n", 0)
                 stats["predicted_ms"] += timings.get("predicted_ms", 0.0)
@@ -1549,7 +1590,8 @@ def agent_loop(run: Run) -> None:
                     if (long and not final and left > 90 and nudges < 3
                             and not content.lstrip().lstrip("*#").upper().startswith("FERTIG")):
                         nudges += 1
-                        _system_note(run, f"Du hast noch {fmt_dur(left)} Arbeitszeit. Prüfe ehrlich: Ist der Auftrag "
+                        zeit = "Du hast kein Zeitlimit." if run.endless else f"Du hast noch {fmt_dur(left)} Arbeitszeit."
+                        _system_note(run, f"{zeit} Prüfe ehrlich: Ist der Auftrag "
                                           "komplett erledigt und getestet? Wenn ja, antworte mit einer kurzen "
                                           "Zusammenfassung, die mit FERTIG beginnt. Wenn nicht, arbeite mit deinen "
                                           "Werkzeugen weiter.", "Prüft, ob der Auftrag wirklich fertig ist …")
@@ -1565,7 +1607,8 @@ def agent_loop(run: Run) -> None:
                     if repeats >= 2:
                         result += "\n\n[System: Du hast dieses Werkzeug dreimal genauso aufgerufen. Versuch einen anderen Weg.]"
                     if long:
-                        result += f"\n\n[Noch {fmt_dur(run.remaining())} Arbeitszeit]"
+                        result += (f"\n\n[Schritt {run.step} – kein Zeitlimit, arbeite bis alles erledigt ist]" if run.endless
+                                   else f"\n\n[Noch {fmt_dur(run.remaining())} Arbeitszeit]")
                     stats["tools"] += 1
                     run.commit({"role": "tool", "tool_call_id": c["id"], "name": c["name"], "content": result,
                                 "_ok": ok, **run.tool_extra.pop(c["id"], {})})
@@ -1588,7 +1631,8 @@ def agent_loop(run: Run) -> None:
             except OSError as e:
                 log(f"Abschlussbericht ging nicht: {e}")
         run.emit(t="done", stats=summary)
-        notify_done(run, summary, "time" if final else "steps" if run.step >= max_steps else "done")
+        notify_done(run, summary, "user" if run.finish_requested else "time" if final
+                    else "steps" if run.step >= max_steps else "done")
     except LlamaError as e:
         run.emit(t="error", d=str(e))
         notify_error(run, str(e))
@@ -1597,9 +1641,113 @@ def agent_loop(run: Run) -> None:
         run.emit(t="error", d=f"Interner Fehler: {e}")
         notify_error(run, f"Interner Fehler: {e}")
     finally:
+        if long and conv.pop("_work_state", None) is not None:
+            with run.cond:
+                Store.save(conv)
         run.finish()
         if long:
             log(f"Auftrag beendet nach {fmt_dur(time.time() - run.started)}, {run.step} Schritte.")
+
+
+def zwischenstand(run: Run) -> None:
+    """Bei langen Aufträgen regelmäßig ein kurzer Stand aufs Handy – auch wenn die App zu ist."""
+    alle = int(CFG.get("interim_minutes") or 0) * 60
+    if not alle or time.time() - run.interim_at < alle:
+        return
+    run.interim_at = time.time()
+    plan = plan_aus_notizen(run.conv.get("_notes") or "")
+    teile = [f"Schritt {run.step}", f"läuft seit {fmt_dur(time.time() - run.started - run.paused_total)}"]
+    if plan:
+        teile.insert(1, f"Plan {sum(p['done'] for p in plan)}/{len(plan)}")
+        offen = next((p["text"] for p in plan if not p["done"]), "")
+        if offen:
+            teile.append(f"jetzt: {offen[:80]}")
+    PUSH.notify("progress", "⏳ Zwischenstand", f"{run.conv.get('title') or 'Auftrag'}\n" + " · ".join(teile),
+                run, ttl=3 * 3600)
+
+
+def _schlank(conv: dict, base: int, keep: int = 150) -> None:
+    """Endlos-Aufträge: alte Werkzeug-Ausgaben kürzen, damit die Chat-Datei nicht ins Riesige wächst
+    (die KI sieht ohnehin nur die letzten Schritte; Auftrag und Notizen bleiben vollständig)."""
+    msgs = conv["messages"]
+    for i, m in enumerate(msgs[:max(0, len(msgs) - keep)]):
+        if i == base or m.get("_trimmed"):
+            continue
+        if m["role"] == "tool" and len(m.get("content") or "") > 600:
+            m["content"] = m["content"][:600] + "\n[… älteres Ergebnis gekürzt]"
+            m["_trimmed"] = True
+        elif m["role"] == "assistant":
+            m.pop("_thinking", None)
+            if len(m.get("content") or "") > 3000:
+                m["content"] = m["content"][:3000] + "\n[… gekürzt]"
+                m["_trimmed"] = True
+
+
+def _heilen(conv: dict) -> None:
+    """Nach einem Absturz mitten im Werkzeug: offene Aufrufe beantworten, sonst lehnt das Modell den Verlauf ab."""
+    msgs = conv["messages"]
+    offen: dict[str, str] = {}
+    for m in msgs:
+        if m["role"] == "assistant":
+            offen = {c["id"]: c["function"]["name"] for c in m.get("tool_calls") or []}
+        elif m["role"] == "tool":
+            offen.pop(m.get("tool_call_id"), None)
+    for cid, name in offen.items():
+        msgs.append({"role": "tool", "tool_call_id": cid, "name": name, "_ok": False,
+                     "content": "Nicht fertig geworden – Nova wurde mittendrin beendet. Prüfe, ob du das wiederholen musst."})
+
+
+def resume_unfinished() -> None:
+    """Aufträge, die beim letzten Beenden noch liefen, fortsetzen (Neustart, Absturz, Laptop war aus)."""
+    if not CFG.get("resume_work", True):
+        return
+    for p in sorted(CONV_DIR.glob("*.json"), key=lambda f: f.stat().st_mtime):
+        try:
+            if '"_work_state"' not in p.read_text(encoding="utf-8"):
+                continue
+            conv = Store.load(p.stem)
+        except (OSError, ValueError):
+            continue
+        st = (conv or {}).get("_work_state")
+        if not st or conv["id"] in RUNS:
+            continue
+        if int(st.get("restarts") or 0) >= 5:  # stürzt immer wieder ab → nicht endlos neu starten
+            conv.pop("_work_state", None)
+            Store.save(conv)
+            log(f"Auftrag „{conv.get('title')}“ nach 5 Neustarts nicht mehr fortgesetzt.")
+            continue
+        _heilen(conv)
+        run = Run.restore(conv, st)
+        _system_note(run, "Nova wurde neu gestartet (Laptop war aus, neu gestartet oder Nova wurde beendet). Mach mit "
+                          "deinem Auftrag weiter: Schau in deine Checkliste, was erledigt ist und was als Nächstes dran ist. "
+                          "Prüfe kurz, ob das Letzte, woran du gearbeitet hast, wirklich fertig gespeichert ist.",
+                     "Nova wurde neu gestartet – macht weiter …")
+        RUNS[conv["id"]] = run
+        threading.Thread(target=agent_loop, args=(run,), daemon=True, name="agent").start()
+        log(f"Auftrag „{conv.get('title')}“ wird nach dem Neustart fortgesetzt.")
+        PUSH.notify("progress", "▶️ Auftrag läuft weiter", f"{conv.get('title') or 'Auftrag'}\nNova wurde neu gestartet "
+                    "und macht dort weiter, wo sie war.", run, ttl=6 * 3600)
+
+
+# ---------------------------------------------------------------- Autostart (ohne Admin: Autostart-Ordner des Nutzers)
+
+def _autostart_datei() -> Path:
+    return (Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+            / f"{CFG.get('agent_name') or 'Nova'} (KI-Agent).cmd")
+
+
+def autostart(on: bool | None = None) -> bool:
+    f = _autostart_datei()
+    if on is True:
+        f.write_text("@echo off\r\nrem Startet den KI-Agenten bei der Windows-Anmeldung (Einstellung in der App).\r\n"
+                     f'cd /d "{ROOT}"\r\nset NOVA_AUTOSTART=1\r\n'
+                     f'start "{CFG.get("agent_name") or "Nova"}" /min "{sys.executable}" -u "{ROOT / "server" / "agent_server.py"}"\r\n',
+                     encoding="utf-8")
+        log(f"Autostart an: {f}")
+    elif on is False and f.exists():
+        f.unlink()
+        log("Autostart aus.")
+    return f.exists()
 
 
 def abschlussbericht(run: Run, summary: dict) -> dict:
@@ -1610,14 +1758,16 @@ def abschlussbericht(run: Run, summary: dict) -> dict:
     ergebnis = re.sub(r"^\W*FERTIG\W*", "", ergebnis.strip(), flags=re.I)
     ende = time.time()
     plan = plan_aus_notizen(conv.get("_notes") or "")
+    werkzeuge = max(summary.get("tools", 0), sum(run.tool_counts.values()))  # nach Neustart: auch die von vorher
     fmt = lambda t: time.strftime("%d.%m.%Y %H:%M", time.localtime(t))
     zeilen = [f"# Abschlussbericht: {conv.get('title') or 'Auftrag'}", "",
               f"- **Auftrag:** {auftrag.strip()[:500]}",
               f"- **Zeitraum:** {fmt(run.started)} – {time.strftime('%H:%M', time.localtime(ende))} "
-              f"({fmt_dur(ende - run.started)}, geplant {fmt_dur(run.minutes * 60)}"
+              f"({fmt_dur(ende - run.started)}, {'ohne Zeitlimit' if run.endless else 'geplant ' + fmt_dur(run.minutes * 60)}"
               + (f", davon pausiert {fmt_dur(run.paused_total)}" if run.paused_total >= 60 else "") + ")",
-              f"- **Beendet:** {'vom Nutzer' if run.finish_requested else 'abgebrochen' if summary.get('cancelled') else 'regulär'}",
-              f"- **Schritte:** {run.step} · **Werkzeuge:** {summary.get('tools', 0)}"
+              f"- **Beendet:** {'vom Nutzer' if run.finish_requested else 'abgebrochen' if summary.get('cancelled') else 'regulär'}"
+              + (f" · nach {run.restarts} Neustart{'s' if run.restarts > 1 else ''} fortgesetzt" if run.restarts else ""),
+              f"- **Schritte:** {run.step} · **Werkzeuge:** {werkzeuge}"
               + (" (" + ", ".join(f"{n} ×{k}" for n, k in sorted(run.tool_counts.items(), key=lambda x: -x[1])) + ")"
                  if run.tool_counts else ""), ""]
     if plan:
@@ -1631,7 +1781,7 @@ def abschlussbericht(run: Run, summary: dict) -> dict:
     pfad = ordner / f"{time.strftime('%Y-%m-%d_%H%M', time.localtime(ende))}_{slug}.md"
     pfad.write_text("\n".join(zeilen), encoding="utf-8")
     report = {"path": str(pfad), "name": pfad.name, "size": pfad.stat().st_size, "dauer": round(ende - run.started),
-              "pausiert": round(run.paused_total), "schritte": run.step, "werkzeuge": summary.get("tools", 0),
+              "pausiert": round(run.paused_total), "schritte": run.step, "werkzeuge": werkzeuge,
               "dateien": run.files[:30], "plan_fertig": sum(p["done"] for p in plan), "plan_gesamt": len(plan),
               "vom_nutzer": run.finish_requested}
     # am letzten Beitrag merken, damit der Bericht auch im Verlauf erscheint
@@ -2116,7 +2266,9 @@ def start_run(conv: dict, text: str, images: list[str], settings: dict) -> Run:
     content = text or "(Bild ohne Text)"
     if run.minutes:
         until = time.strftime("%H:%M", time.localtime(run.deadline))
-        content = (f"[Auftrag mit Arbeitszeit {fmt_dur(run.minutes * 60)} (bis {until} Uhr). Arbeite selbstständig "
+        zeit = ("ohne Zeitlimit (bis er wirklich erledigt ist)" if run.endless
+                else f"mit Arbeitszeit {fmt_dur(run.minutes * 60)} (bis {until} Uhr)")
+        content = (f"[Auftrag {zeit}. Arbeite selbstständig "
                    "und ohne Rückfragen, bis der Auftrag erledigt ist: Plane zuerst kurz und halte den Plan mit update_notes "
                    "als Checkliste fest (eine Zeile pro Schritt: „- [ ] Schritt“, erledigt: „- [x] Schritt“) – "
                    "aktualisiere sie nach jedem fertigen Schritt. Arbeite Schritt für Schritt mit deinen Werkzeugen, teste deine Ergebnisse "
@@ -2124,15 +2276,17 @@ def start_run(conv: dict, text: str, images: list[str], settings: dict) -> Run:
                    "Zusammenfassung, die mit FERTIG beginnt.]\n\n" + content)
     user_msg = {"role": "user", "content": content, "_display": text, "_images": image_ids, "_ts": time.time()}
     if run.minutes:
-        user_msg["_work"] = run.minutes
+        user_msg["_work"] = -1 if run.endless else run.minutes
     if not conv.get("title") or conv["title"] == "Neuer Chat":
         title = re.sub(r"\s+", " ", text).strip() or "Bild"
         conv["title"] = title[:48] + ("…" if len(title) > 48 else "")
     run.emit(t="conv", id=conv["id"], title=conv["title"])
-    run.emit(t="user", text=text, images=image_ids, work=run.minutes)
+    run.emit(t="user", text=text, images=image_ids, work=-1 if run.endless else run.minutes)
     run.commit(user_msg)
     run.base = len(conv["messages"]) - 1
     if run.minutes:
+        run.save_state()
+        Store.save(conv)
         run.emit(t="work", **run.info())
     RUNS[conv["id"]] = run
     threading.Thread(target=agent_loop, args=(run,), daemon=True, name="agent").start()
@@ -2145,7 +2299,7 @@ def game_info() -> dict:
 
 
 def active_runs() -> list[dict]:
-    return [{"id": r.conv_id, "title": r.conv.get("title"), "deadline": r.deadline}
+    return [{"id": r.conv_id, "title": r.conv.get("title"), "deadline": r.deadline, "endless": r.endless}
             for r in list(RUNS.values()) if not r.done]
 
 
@@ -2313,6 +2467,7 @@ class Handler(BaseHTTPRequestHandler):
                                         "version": VERSION, "workspace": str(WORKSPACE),
                                         "vision": (MODELS / (current_model().get("mmproj") or "-")).is_file(),
                                         "active": active_runs(),
+                                        "autostart": autostart(), "resume_work": bool(CFG.get("resume_work", True)),
                                         "now": time.time()})
             if path == "/api/conversations":
                 return self._json(200, {"conversations": Store.list()})
@@ -2528,6 +2683,16 @@ class Handler(BaseHTTPRequestHandler):
                     log(f"Wechsle Modell zu {MODEL_CATALOG[mid]['label']} …")
                     LLAMA.switch(mid)
                 return self._json(200, {"models": models_list(), "llama": LLAMA.state, **game_info()})
+            if path == "/api/dauerbetrieb":
+                if "autostart" in body:
+                    try:
+                        autostart(bool(body["autostart"]))
+                    except OSError as e:
+                        return self._json(500, {"error": f"Autostart ging nicht: {e}"})
+                if "resume_work" in body:
+                    CFG["resume_work"] = bool(body["resume_work"])
+                    save_config(CFG)
+                return self._json(200, {"autostart": autostart(), "resume_work": bool(CFG.get("resume_work", True))})
             if path == "/api/game_mode":
                 CFG["game_mode"] = bool(body.get("on"))
                 save_config(CFG)
@@ -2662,7 +2827,8 @@ def main() -> None:
         httpd = Server(("127.0.0.1", port), Handler)
     except OSError:
         print(f"Port {port} ist belegt – der Agent läuft wahrscheinlich schon.")
-        webbrowser.open(f"http://localhost:{port}/connect")
+        if not os.environ.get("NOVA_AUTOSTART"):
+            webbrowser.open(f"http://localhost:{port}/connect")
         return
     kill_children_on_exit()
     MCP.starten()  # nach dem Job-Objekt: MCP-Server-Prozesse sterben mit Nova
@@ -2678,7 +2844,8 @@ def main() -> None:
     LLAMA.start()
     threading.Thread(target=ensure_gist, daemon=True).start()
     TUNNEL.start()
-    if CFG.get("open_connect_page"):
+    threading.Thread(target=resume_unfinished, daemon=True, name="resume").start()
+    if CFG.get("open_connect_page") and not os.environ.get("NOVA_AUTOSTART"):
         webbrowser.open(f"http://localhost:{port}/connect")
     try:
         while True:

@@ -39,6 +39,23 @@ Unten links über dem Eingabefeld ist der Knopf **„Normal“**. Tipp drauf und
   Ergebnis. Er steht als Karte im Chat (ansehen/herunterladen) und liegt als Markdown in `workspace\Berichte\`.
 - Mit dem ■-Knopf brichst du hart ab (ohne Zusammenfassung).
 
+### Bis fertig – Dauerbetrieb
+
+- **„∞ Bis fertig“** im Arbeitszeit-Dialog: kein Zeitlimit, Nova arbeitet, bis der Auftrag erledigt ist (Sicherheitsgrenze
+  7 Tage / 20.000 Schritte). Die Karte zeigt die Arbeitszeit und als Balken den Fortschritt der Checkliste.
+- **Läuft ohne dich weiter:** App zu oder Handy aus ist egal – Nova arbeitet am Laptop. Jede Stunde kommt ein
+  **Zwischenstand** aufs Handy (Schritt, Plan x/y, woran sie gerade sitzt).
+- **Übersteht Neustarts:** Der Stand jedes Zeit-Auftrags liegt im Chat. Stürzt Nova ab, wird sie beendet oder startet der
+  Laptop neu, macht sie beim nächsten Start dort weiter (offene Werkzeug-Aufrufe werden sauber abgeschlossen, die Uhr
+  stand solange still, der Bericht nennt die Neustarts). Nach 5 Neustarts im selben Auftrag hört sie auf, damit ein
+  Fehler nicht endlos kreist. Abschaltbar unter Einstellungen → Allgemein → Dauerbetrieb.
+- **Mit Windows starten** (gleiche Stelle): legt `Nova (KI-Agent).cmd` in den Autostart-Ordner des Benutzers – ohne
+  Admin-Rechte, startet minimiert und ohne Browser.
+- Der Laptop selbst muss an sein: Ladekabel dran, Deckel offen – oder in den Windows-Energieoptionen „Zuklappen:
+  Nichts unternehmen“. Einschlafen verhindert Nova während eines Auftrags selbst.
+- Damit Chat-Dateien bei tagelangen Aufträgen nicht riesig werden, kürzt Nova alte Werkzeug-Ausgaben (Auftrag und die
+  letzten 150 Nachrichten bleiben vollständig). Im Handy-Modus gibt es „Bis fertig“ nicht (dort höchstens 3 h).
+
 ## Handy-Modus (ohne Laptop)
 
 Nova kann auch **direkt auf dem Handy** laufen – ganz ohne Laptop, sogar ohne Internet (nur Wetter/Wikipedia brauchen Netz).
@@ -177,8 +194,17 @@ models\      das KI-Modell (2,6 GB) + Bildverständnis (0,6 GB)
 server\      der Agent (Python, nur Standardbibliothek)
 app\         die Handy-App (liegt auch auf GitHub Pages)
 workspace\   Arbeitsordner des Agenten – hier landen seine Dateien
+werkzeuge\   Testserver mit Fake-KI, Handy-Test (6 Handy-Profile), MCP-Testserver
 data\        Chats, Gedächtnis, Schlüssel, Logs (privat, nicht auf GitHub)
 ```
+
+## Testen
+
+- **Handy-Test:** `python werkzeuge/ui_testserver.py` (isolierter Nova mit Fake-KI auf Port 8799, eigene Temp-Daten)
+  und dann `node werkzeuge/handytest.mjs --app nova`. Spielt Startseite, Einstellungen, Freigabe, Auftrag „bis fertig“
+  mit Pause und Abschlussbericht auf 6 Handy-Profilen durch und prüft Überstand, Tippflächen (mind. 40 px), Schrift,
+  abgeschnittene Platzhalter, Dialoge und JavaScript-Fehler. Bericht mit Bildschirmfotos:
+  `werkzeuge/handytest-ergebnis/index.html`.
 
 ## Wenn was nicht geht
 

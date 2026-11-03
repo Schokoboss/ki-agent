@@ -5,3 +5,4 @@ engine/
 workspace/
 __pycache__/
 *.pyc
+werkzeuge/handytest-ergebnis/

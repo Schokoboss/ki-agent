@@ -231,7 +231,8 @@ async function sendLocal(text, replaceLast) {
     state.conv = conv.id;
     LS.set('nova.lastConv', conv.id);
   }
-  const minutes = state.work.minutes;
+  const minutes = state.work.minutes === -1 ? 180 : state.work.minutes;  // am Handy kein „bis fertig“
+  if (state.work.minutes === -1) toast('Am Handy höchstens 3 Stunden – „Bis fertig“ geht nur am Laptop.', 4000);
   const work = minutes ? { started: Date.now(), deadline: Date.now() + minutes * 60000 } : null;
   if (replaceLast) {
     const idx = conv.messages.map(m => m.role === 'user' && !m._system).lastIndexOf(true);
@@ -525,6 +526,7 @@ function fmtSpan(sec) {  // kurz für Kacheln: 45 s · 12 min · 1 h 5 min
 }
 function fmtMinutes(m) {
   if (!m) return 'Normal';
+  if (m === -1) return 'bis fertig';
   if (m < 60) return `${m} min`;
   return m % 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m / 60} h`;
 }
@@ -730,13 +732,26 @@ class TurnView {
     const left = w.paused && w.left != null ? w.left : w.deadline - serverNow();  // in der Pause steht die Uhr
     const card = this.workEl;
     card.classList.toggle('paused', !!w.paused);
-    $('.wc-top b', card).textContent = w.finishing ? 'Wird beendet …' : w.paused ? 'Pausiert' : 'Auftrag läuft';
-    $('.wc-left', card).textContent = left > 0 ? 'noch ' + fmtDur(left) : 'Zeit um';
-    $('.wc-bar i', card).style.width = Math.min(100, 100 * (1 - Math.max(0, left) / total)) + '%';
-    const until = new Date((w.deadline - state.skew) * 1000).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
-    $('.wc-meta', card).textContent = [`Schritt ${w.step || 1}`, w.paused ? 'Uhr angehalten' : `bis ${until} Uhr`,
-      w.minutes ? `${fmtMinutes(w.minutes)} geplant` : '', w.free_hand ? 'ohne Nachfragen' : ''].filter(Boolean).join(' · ');
+    card.classList.toggle('endless', !!w.endless);
+    $('.wc-top b', card).textContent = w.finishing ? 'Wird beendet …' : w.paused ? 'Pausiert' : w.endless ? 'Auftrag läuft · bis fertig' : 'Auftrag läuft';
+    const hhmm = t => new Date((t - state.skew) * 1000).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    if (w.endless) {
+      // kein Countdown: Arbeitszeit seit dem Start (ohne Pausen), Balken = Fortschritt der Checkliste
+      const seit = Math.max(0, (w.paused ? w._pausedAt || serverNow() : serverNow()) - w.started - (w.paused_total || 0));
+      if (w.paused && !w._pausedAt) w._pausedAt = serverNow();
+      if (!w.paused) w._pausedAt = 0;
+      $('.wc-left', card).textContent = fmtDur(seit);
+      const plan = w.plan || [];
+      $('.wc-bar', card).classList.toggle('indet', !plan.length);
+      $('.wc-bar i', card).style.width = plan.length ? 100 * plan.filter(p => p.done).length / plan.length + '%' : '';
+    } else {
+      $('.wc-left', card).textContent = left > 0 ? 'noch ' + fmtDur(left) : 'Zeit um';
+      $('.wc-bar i', card).style.width = Math.min(100, 100 * (1 - Math.max(0, left) / total)) + '%';
+    }
+    $('.wc-meta', card).textContent = [`Schritt ${w.step || 1}`, w.paused ? 'Uhr angehalten' : w.endless ? `seit ${hhmm(w.started)} Uhr` : `bis ${hhmm(w.deadline)} Uhr`,
+      w.endless ? 'ohne Zeitlimit' : w.minutes ? `${fmtMinutes(w.minutes)} geplant` : '', w.free_hand ? 'ohne Nachfragen' : ''].filter(Boolean).join(' · ');
     const ctrl = $('.wc-ctrl', card);
+    $('[data-a="extend"]', ctrl).hidden = !!w.endless;
     if (!ctrl.hidden && w.finishing) ctrl.hidden = true;
     const pb = $('[data-a="pause"]', ctrl);
     const want = w.paused ? 'resume' : 'pause';
@@ -1130,7 +1145,8 @@ async function send(textOverride, opts = {}) {
     } catch (e) { toast('Upload fehlgeschlagen: ' + e.message); return; }
   }
   const work = state.work.minutes;
-  const settings = { ...state.settings, work_minutes: work, free_hand: state.settings.free_hand || (work > 0 && state.work.free) };
+  const settings = { ...state.settings, work_minutes: Math.max(0, work), work_endless: work === -1,
+    free_hand: state.settings.free_hand || (work !== 0 && state.work.free) };
   els.input.value = '';
   autoGrow();
   state.pendingImages = [];
@@ -1803,7 +1819,7 @@ function showTab(tab) {
   document.querySelectorAll('#settings .tab-panel').forEach(p => { p.hidden = p.dataset.panel !== tab; });
   els.settings.scrollTop = 0;
   LS.set('nova.setTab', tab);
-  if (tab === 'allg') { loadLaptopModels(); loadPhoneModels(); }
+  if (tab === 'allg') { loadLaptopModels(); loadPhoneModels(); loadDauerbetrieb(); }
   if (tab === 'sicher') loadPermissions().then(loadAudit);
   if (tab === 'integ') loadMcp();
   if (tab === 'auto') { loadReminders(); loadRoutines(); }
@@ -1813,6 +1829,30 @@ $('#setTabs').addEventListener('click', e => {
   const b = e.target.closest('button');
   if (b) showTab(b.dataset.tab);
 });
+
+async function loadDauerbetrieb() {
+  const a = $('#setAutostart'), r = $('#setResume');
+  a.disabled = r.disabled = !state.online;
+  if (!state.online) return;
+  try {
+    const s = await apiJSON('/api/status');
+    a.checked = !!s.autostart;
+    r.checked = s.resume_work !== false;
+    a.disabled = r.disabled = s.autostart === undefined;  // Laptop-Teil noch alt
+  } catch { /* Verbindung kommt gleich wieder */ }
+}
+async function setDauerbetrieb(body, msg) {
+  try {
+    const s = await apiJSON('/api/dauerbetrieb', { method: 'POST', body: JSON.stringify(body) });
+    $('#setAutostart').checked = !!s.autostart;
+    $('#setResume').checked = !!s.resume_work;
+    toast(msg(s));
+  } catch (e) { toast(oldServer(e)); loadDauerbetrieb(); }
+}
+$('#setAutostart').onchange = e => setDauerbetrieb({ autostart: e.target.checked },
+  s => s.autostart ? 'Nova startet jetzt mit Windows.' : 'Autostart aus.');
+$('#setResume').onchange = e => setDauerbetrieb({ resume_work: e.target.checked },
+  s => s.resume_work ? 'Unterbrochene Aufträge laufen nach einem Neustart weiter.' : 'Aufträge werden nach einem Neustart nicht fortgesetzt.');
 
 const STUFEN = [['erlauben', 'Erlauben'], ['fragen', 'Fragen'], ['verbieten', 'Verbieten']];
 const STUFE_NAME = Object.fromEntries(STUFEN);
@@ -2049,11 +2089,18 @@ function updateWorkChip() {
   $('#workLabel').textContent = state.work.minutes
     ? `Auftrag ${fmtMinutes(state.work.minutes)}${state.work.free ? ' · ohne Nachfragen' : ''}`
     : 'Normal';
-  els.input.placeholder = state.work.minutes ? 'Beschreib deinen Auftrag …' : 'Frag mich irgendwas …';
+  setPlaceholder();
+}
+
+// Kurzer Platzhalter, wenn das Eingabefeld schmal ist (kleine Handys: sonst abgeschnitten)
+function setPlaceholder() {
+  const eng = els.input.clientWidth > 0 && els.input.clientWidth < 175;
+  els.input.placeholder = state.work.minutes ? (eng ? 'Dein Auftrag …' : 'Beschreib deinen Auftrag …')
+    : (eng ? 'Frag mich was …' : 'Frag mich irgendwas …');
 }
 
 function setWork(minutes) {
-  state.work.minutes = Math.max(0, Math.min(24 * 60, Math.round(minutes)));
+  state.work.minutes = minutes === -1 ? -1 : Math.max(0, Math.min(24 * 60, Math.round(minutes)));
   document.querySelectorAll('#workGrid button').forEach(b => b.classList.toggle('sel', +b.dataset.m === state.work.minutes));
   updateWorkChip();
 }
@@ -2104,7 +2151,7 @@ function autoGrow() {
   }
   updateSend();
 }
-window.addEventListener('resize', autoGrow);
+window.addEventListener('resize', () => { autoGrow(); setPlaceholder(); });
 
 els.input.addEventListener('input', autoGrow);
 els.input.addEventListener('keydown', e => {
