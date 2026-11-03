@@ -204,6 +204,9 @@ textarea::placeholder { color: var(--muted); }
 .work-grid button b { font-size: 15.5px; }
 .work-grid button small { color: var(--muted); font-size: 12px; }
 .work-grid button.sel { border-color: var(--accent); background: var(--accent-soft); }
+.work-grid .wide { grid-column: 1 / -1; }
+.wc-bar.indet i { width: 35% !important; animation: indet 1.6s ease-in-out infinite; }
+@keyframes indet { 0% { transform: translateX(-100%); } 100% { transform: translateX(290%); } }
 .custom-time { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 14px; font-size: 14.5px; }
 .custom-time > span:first-child { color: var(--muted); margin-right: 4px; }
 .custom-time input { width: 62px; padding: 8px 9px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); font: inherit; }
@@ -459,3 +462,10 @@ textarea.code-edit:focus { border-color: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* ---------- Tippflächen mindestens 40 px (Handy-Test, WCAG 2.5.8) */
+.btn, .tabs button, .mode-chip, .filter button, .lvl button { min-height: 40px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.turn-foot button, .conv .del { width: 40px; height: 40px; }
+.switch.mini { padding: 6px 0; }
+.wc-notes summary, .mc-tools summary { padding: 11px 0; }

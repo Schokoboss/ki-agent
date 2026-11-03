@@ -96,6 +96,14 @@
           <input type="checkbox" id="setSpeak"><i></i></label>
       </div>
 
+      <h3>Dauerbetrieb</h3>
+      <div class="group">
+        <label class="switch"><span><b>Mit Windows starten</b><small>Nova startet bei der Anmeldung am Laptop von selbst (ohne Admin-Rechte, im Autostart-Ordner).</small></span>
+          <input type="checkbox" id="setAutostart"><i></i></label>
+        <label class="switch"><span><b>Aufträge nach Neustart fortsetzen</b><small>War Nova mitten in einem Auftrag weg (Neustart, Absturz, Akku leer), macht sie beim nächsten Start dort weiter. Die Zeit läuft solange nicht.</small></span>
+          <input type="checkbox" id="setResume"><i></i></label>
+      </div>
+
       <h3>Benachrichtigungen</h3>
       <div class="group">
         <label class="switch"><span><b>Benachrichtigungen</b><small id="pushHint">Meldet sich, wenn ein Auftrag fertig ist, eine Freigabe braucht oder eine Erinnerung fällig ist – auch wenn die App zu ist.</small></span>
@@ -216,6 +224,7 @@
         <button type="button" data-m="180"><b>3 h</b><small>sehr groß</small></button>
         <button type="button" data-m="300"><b>5 h</b><small>über Nacht</small></button>
         <button type="button" data-m="480"><b>8 h</b><small>ganze Nacht</small></button>
+        <button type="button" data-m="-1" class="wide"><b>∞ Bis fertig</b><small>ohne Zeitlimit – Nova arbeitet, bis der Auftrag erledigt ist</small></button>
       </div>
       <div class="custom-time">
         <span>Eigene Zeit</span>
@@ -234,7 +243,8 @@
           <input type="checkbox" id="workFree"><i></i></label>
       </div>
       <p class="muted small">Während des Auftrags kannst du pausieren, Zeit dazugeben oder ihn vorzeitig beenden. Am Ende bekommst du einen Abschlussbericht (gespeichert unter Berichte im Arbeitsordner).</p>
-      <p class="muted small">Tipp: Laptop ans Ladekabel und Deckel offen lassen – er schläft währenddessen nicht ein. Du kannst die App schließen, der Agent arbeitet am Laptop weiter.</p>
+      <p class="muted small"><b>Läuft ohne dich weiter:</b> App zu oder Handy aus ist egal – Nova arbeitet am Laptop. Startet der Laptop neu oder stürzt Nova ab, macht sie danach automatisch weiter (Einstellungen → Allgemein → Dauerbetrieb).</p>
+      <p class="muted small">Der Laptop selbst muss an sein: Ladekabel dran, Deckel offen (oder in den Windows-Energieoptionen „Zuklappen: Nichts unternehmen“ einstellen). Einschlafen verhindert Nova während des Auftrags selbst.</p>
     </form>
   </dialog>
 
