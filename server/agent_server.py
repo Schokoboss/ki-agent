@@ -81,7 +81,10 @@ def log(msg: str, console: bool = True) -> None:
     line = f"[{time.strftime('%H:%M:%S')}] {msg}"
     with _log_lock:
         if console:
-            print(line, flush=True)
+            try:
+                print(line, flush=True)
+            except (UnicodeEncodeError, OSError, ValueError):
+                pass  # eine Logzeile darf nie einen Auftrag abbrechen
         try:
             LOGS.mkdir(parents=True, exist_ok=True)
             with open(LOGS / "agent.log", "a", encoding="utf-8") as f:
@@ -2350,6 +2353,11 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/mcp":
                 return self._json(200, {"server": MCP.uebersicht(), "konfig_pfad": str(DATA / "mcp.json"),
                                         "bearbeitbar": self._is_local()})
+            if path == "/api/mcp/config":
+                # enthält evtl. API-Schlüssel der Server (env) → nur direkt am Laptop
+                if not self._is_local():
+                    return self._json(403, {"error": "Die MCP-Konfiguration ist nur direkt am Laptop sichtbar."})
+                return self._json(200, {"mcpServers": MCP.konfig()})
             if path == "/api/models":
                 return self._json(200, {"models": models_list(), "llama": LLAMA.state, **game_info()})
             if path == "/api/remote/frame":

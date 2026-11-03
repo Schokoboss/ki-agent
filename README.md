@@ -31,7 +31,13 @@ Unten links über dem Eingabefeld ist der Knopf **„Normal“**. Tipp drauf und
   Sonst wartet er bei solchen Aktionen bis zu 10 Minuten auf dein OK in der App.
 - Du kannst die App schließen. Der Agent arbeitet am Laptop weiter, du siehst den Fortschritt beim
   nächsten Öffnen. Der Laptop schläft währenddessen **nicht** ein – trotzdem: **Ladekabel dran und Deckel offen**.
-- Mit dem ■-Knopf brichst du ab.
+- Statt einer Dauer geht auch **„Bis Uhrzeit“** (z. B. bis 7:00 – über Mitternacht klappt).
+- Während des Auftrags zeigt die Karte oben den **Plan als Checkliste** (z. B. „2 von 5 erledigt“) und hat
+  drei Knöpfe: **Pause/Weiter** (die Uhr steht in der Pause), **+15 min** und **Jetzt beenden**
+  (Nova fasst dann zusammen, was geschafft ist).
+- Am Ende gibt es einen **Abschlussbericht**: Dauer, Schritte, benutzte Werkzeuge, Plan, erstellte Dateien,
+  Ergebnis. Er steht als Karte im Chat (ansehen/herunterladen) und liegt als Markdown in `workspace\Berichte\`.
+- Mit dem ■-Knopf brichst du hart ab (ohne Zusammenfassung).
 
 ## Handy-Modus (ohne Laptop)
 
@@ -103,19 +109,54 @@ gerade kein Auftrag läuft. Eigene Spiele: in `data/config.json` unter `game_pro
 Läuft der Grafikspeicher trotzdem über, lädt Nova das Modell sparsamer neu (mehr auf die CPU) und wiederholt die
 Anfrage – die Stufe merkt er sich in `gpu_level`.
 
-## Was er kann (Werkzeuge)
+## Berechtigungen und Protokoll
 
-| Werkzeug | Fragt vorher? |
+In der App unter **Einstellungen → Sicherheit** stellst du für jeden Bereich ein, was Nova darf:
+**Erlauben** (ohne Nachfrage), **Fragen** (wartet auf deine Freigabe) oder **Verbieten** (nie).
+
+| Bereich | Standard |
 |---|---|
-| Websuche, Webseite lesen, Wikipedia, Wetter, Rechnen | nein |
-| Laptop-Status (Akku, RAM, CPU, Uhrzeit) | nein |
-| Dateien im Arbeitsordner `workspace\` lesen/schreiben | nein |
-| Dateien **außerhalb** des Arbeitsordners | **ja** |
-| Python-Code / PowerShell ausführen | **ja** |
-| Programme/Dateien am Laptop öffnen (Webseiten: nein) | **ja** |
-| Gedächtnis (merken/vergessen), Arbeitsnotizen | nein |
+| Code ausführen (Python, PowerShell, JavaScript) | Fragen |
+| Dateien im Arbeitsordner `workspace\` | Erlauben |
+| Dateien **außerhalb** des Arbeitsordners | Fragen |
+| Maus & Tastatur (Laptop bedienen) | Fragen |
+| Programme/Dateien am Laptop öffnen | Fragen |
+| Bildschirm (Foto/Aufnahme), Laptop-Infos, Internet | Erlauben |
+| Erstellen (Bilder, Videos, Dokumente) · Veröffentlichen | Erlauben |
+| MCP-Integrationen (pro Server einzeln änderbar) | Fragen |
 
-„Freie Hand“ in den Einstellungen schaltet alle Nachfragen ab – nur wenn du weißt, was du tust.
+Rechnen, Gedächtnis, Notizen und Erinnerungen laufen immer ohne Nachfrage.
+
+- In einer Freigabe-Frage gibt es neben „Einmal erlauben“ auch **„Immer erlauben“** – das stellt den
+  Bereich (bzw. den MCP-Server) dauerhaft auf Erlauben. Zurück geht es in den Einstellungen.
+- **Freie Hand** überspringt nur „Fragen“. Was auf **Verbieten** steht, bleibt immer verboten.
+- Das **Protokoll** (gleiche Seite) zeigt jede Aktion mit Zeit, Chat, Bereich und Entscheidung
+  (erlaubt, nachgefragt, abgelehnt, verboten, fehlgeschlagen) – filterbar und als **CSV** exportierbar.
+  Gespeichert in `data\audit.jsonl` (nur die letzten 5000 Einträge, Inhalte gekürzt).
+
+## Integrationen (MCP-Server)
+
+Über das **Model Context Protocol** bekommt Nova Werkzeuge aus anderen Programmen und Diensten
+(Dateien, Kalender, Datenbanken, GitHub …). Das Format ist dasselbe wie bei Claude Desktop, in
+`data\mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "dateien": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:\\Users\\DU\\Documents"] },
+    "fern":    { "url": "http://127.0.0.1:8000/mcp", "headers": { "Authorization": "Bearer …" } },
+    "aus":     { "command": "irgendwas", "enabled": false }
+  }
+}
+```
+
+- Unterstützt: lokale Programme (stdio) und Fernserver (Streamable HTTP, auch mit Event-Stream).
+- In der App unter **Einstellungen → Integrationen**: Status, Werkzeuge, Ein/Aus, Rechte pro Server,
+  „Neu verbinden“. Die Werkzeuge heißen für die KI `mcp_<server>_<werkzeug>`.
+- **Neue Server hinzufügen und die Konfiguration ansehen geht nur direkt am Laptop**
+  (http://localhost:8765 im Browser) – nie übers Handy oder den Tunnel, weil ein MCP-Server ein
+  Programm auf dem Laptop startet und die Konfiguration API-Schlüssel enthalten kann.
+- Fehler eines Servers stehen in der Karte und in `data\logs\mcp-<name>.log`.
 
 ## Gut zu wissen
 
