@@ -1084,7 +1084,7 @@ class Run:
 
     def resume(self) -> None:
         if self.paused_at:
-            dauer = time.time() - self.paused_at
+            dauer = max(0.0, time.time() - self.paused_at)  # Uhr kann springen (Zeitabgleich)
             self.deadline += dauer      # Pause zählt nicht als Arbeitszeit
             self.paused_total += dauer
             self.paused_at = None

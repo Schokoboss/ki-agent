@@ -3,6 +3,7 @@
 //   node werkzeuge/handytest.mjs                       → Handy-KI (Server: python werkzeuge/server.py, Port 5190)
 //   node werkzeuge/handytest.mjs --app nova --url http://localhost:8799/   → Nova (mit werkzeuge/ui_testserver.py)
 //   node werkzeuge/handytest.mjs --app seite --url file:///C:/.../START-HIER.html → eine einzelne Seite, ganz fotografiert
+//   node werkzeuge/handytest.mjs --app handyki-nativ    → Oberfläche wie in der echten Android-App (Brücke nachgebaut)
 //
 // Prüft je Ansicht: Seite breiter als der Bildschirm, Teile ragen über den Rand, Tippflächen zu klein (WCAG 2.5.8:
 // mind. 24 px, empfohlen 40+), Schrift sehr klein, Dialog passt nicht, JavaScript-Fehler. Ergebnis: Bericht mit
@@ -40,6 +41,8 @@ const SZENEN = {
     { name: 'Arbeitszeit', js: `$('#btnWork').click()`, nach: zu('#work') },
     ...[['allg', 'Allgemein'], ['modell', 'KI-Modell'], ['schutz', 'Datenschutz'], ['ueber', 'Über']].map(([t, n]) =>
       ({ name: `Einstellungen · ${n}`, js: `openSettings('${t}')`, warte: `!$('[data-panel="${t}"]').hidden`, nach: `els.settings.close()` })),
+    { name: 'Datenschutzerklärung', js: `zeigeText('datenschutz')`, warte: `$('#viewer').open && /Hugging Face/.test($('#viewerBody').textContent)`, nach: zu('#viewer') },
+    { name: 'Impressum', js: `zeigeText('impressum')`, warte: `$('#viewer').open && /DDG/.test($('#viewerBody').textContent)`, nach: zu('#viewer') },
     { name: 'Assistent wählen', js: `openAssistantPicker()`, nach: zu('#pickAssistant') },
     { name: 'Chats', js: `openDrawer()`, nach: `closeDrawer()` },
     { name: 'Wissenskarte', js: `newChat('erbrecht'); els.input.value = 'Wie hoch ist der Pflichtteil?'; send()`, warte: `document.querySelector('.k-card')` },
@@ -65,8 +68,20 @@ const SZENEN = {
       saveChat(c); offerResume();`, warte: `document.querySelector('.resume-card')` },
   ],
   seite: [{ name: 'Ganze Seite', warte: `document.readyState === 'complete'` }],
+  'handyki-nativ': [
+    { name: 'Einführung', warte: `$('#intro').open`, nach: `$('#introGo').click()` },
+    { name: 'Startseite (App)', warte: `document.documentElement.classList.contains('nativ') && $('#installCard').hidden && !$('#setup').hidden` },
+    { name: 'Modell lädt', js: `$('#btnSetup').click()`, warte: `/%/.test($('#btnSetup').textContent)` },
+    { name: 'Modell bereit', warte: `state.modelReady && $('#setup').hidden`, zeit: 10000 },
+    { name: 'Einstellungen · KI-Modell', js: `openSettings('modell')`, warte: `/Samsung/.test($('#deviceInfo').textContent) && document.querySelector('#phoneModels .model-row')`, nach: `els.settings.close()` },
+    { name: 'Arbeitszeit (App)', js: `$('#btnWork').click()`, warte: `getComputedStyle(document.querySelector('.nur-app')).display !== 'none' && getComputedStyle(document.querySelector('.nur-web')).display === 'none'`, nach: zu('#work') },
+    { name: 'Antwort (App)', js: `newChat('allgemein'); els.input.value = 'Hallo'; send()`, warte: `/echte App/.test([...document.querySelectorAll('.turn .md')].pop()?.textContent || '') && !state.running` },
+    { name: 'Zurück-Taste', js: `openSettings('allg'); window.postMessage('{"t":"zurueck"}', '*')`, warte: `!els.settings.open` },
+    { name: 'Datenschutz (App)', js: `openSettings('schutz')`, warte: `/direkt auf diesem Handy/.test($('#spracheInfo').textContent) && !els.mic.hidden`, nach: `els.settings.close()` },
+  ],
   nova: [
     { name: 'Startseite', warte: `state.online` },
+    { name: 'Zum Startbildschirm', warte: `!$('#installCard').hidden`, dann: `$('#installCard').scrollIntoView({ block: 'center' })` },
     { name: 'Arbeitszeit', js: `$('#btnWork').click()`, nach: zu('#work') },
     ...[['allg', 'Allgemein', '#laptopModels .model-row'], ['sicher', 'Sicherheit', '#permList .perm-row'], ['integ', 'Integrationen', '.mcp-card'],
       ['auto', 'Automatik', '#routineList > *'], ['daten', 'Daten', '#memoryList > *']].map(([t, n, w]) =>
@@ -83,6 +98,26 @@ const SZENEN = {
     { name: 'Bericht ansehen', ablauf: true, js: `document.querySelector('.rc-open').click()`, warte: `document.querySelector('#viewerBody h4')`, nach: zu('#viewer') },
   ],
 };
+
+/* ---------- Nachgebaute Android-Brücke (window.HandyKINativ) für --app handyki-nativ */
+const NATIV_ATTRAPPE = `(() => {
+  const post = o => setTimeout(() => window.postMessage(JSON.stringify(o), '*'), 10);
+  const modelle = {};
+  window.HandyKINativ = {
+    info: () => JSON.stringify({ ram: 7800, kerne: 8, android: '15', sdk: 35, geraet: 'Samsung Galaxy S24', abi: 'arm64-v8a', frei: 41000, version: '0.7' }),
+    modelle: () => JSON.stringify(modelle), akku: () => '{"level":0.8,"laedt":true}', version: () => '0.7',
+    laden(id) { let p = 0; const t = setInterval(() => { p += 0.25; if (p >= 1) { clearInterval(t); modelle[id] = { da: true }; post({ t: 'dl', id, p: 1, fertig: true }); }
+      else post({ t: 'dl', id, p, text: Math.round(p * 507) + ' von 507 MB' }); }, 250); },
+    ladenAbbrechen() {}, loeschen(id) { delete modelle[id]; post({ t: 'geloescht', id }); },
+    motor(id) { post({ t: 'motor', id, bereit: true }); }, motorStopp() {},
+    chat(req) { const text = 'Hallo! Ich laufe jetzt als **echte App** direkt auf deinem Handy.'; let i = 0;
+      const t = setInterval(() => { if (i >= text.length) { clearInterval(t); post({ t: 'ende', req }); return; }
+        post({ t: 'chunk', req, data: JSON.stringify({ choices: [{ delta: { content: text.slice(i, i + 8) } }] }) }); i += 8; }, 40); },
+    stoppen() {}, dienst() {}, melden() {}, speichern: n => 'Download/Handy-KI/' + n, teilen() {}, zurueckNichts() {},
+    spracheDa: () => 'lokal', spracheStart() { post({ t: 'sprache', ereignis: 'start' }); }, spracheStopp() { post({ t: 'sprache', ereignis: 'ende' }); },
+    spracheAbbruch() { post({ t: 'sprache', ereignis: 'ende' }); }, vorlesen(id) { post({ t: 'tts', id, ereignis: 'ende' }); }, vorlesenStopp() {},
+  };
+})();`;
 
 /* ---------- Prüfungen, laufen in der Seite */
 const PRUEFEN = `(() => {
@@ -186,6 +221,7 @@ async function main() {
       if (d.method === 'Page.javascriptDialogOpening') cdp.send('Page.handleJavaScriptDialog', { accept: true }, s);  // confirm() bestätigen
     });
     for (const m of ['Page.enable', 'Runtime.enable']) await cdp.send(m, {}, s);
+    if (APP === 'handyki-nativ') await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: NATIV_ATTRAPPE }, s);
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: g.w, height: g.h, deviceScaleFactor: g.dpr, mobile: true }, s);
     await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 }, s);
     await cdp.send('Emulation.setUserAgentOverride', { userAgent: g.ua }, s);
