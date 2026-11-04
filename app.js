@@ -2177,7 +2177,31 @@ $('#btnSettings').onclick = openSettings;
 $('#btnTitle').onclick = openSettings;
 $('#btnReconnect').onclick = async () => { state.online = false; if (await connect()) toast('Verbunden ✓'); else toast('Laptop nicht erreichbar'); };
 $('#btnUnpair').onclick = () => { if (confirm('Wirklich entkoppeln? Danach musst du den QR-Code neu scannen.')) { els.settings.close(); unpair(); } };
-$('#btnInstall').onclick = async () => { if (!state.installPrompt) return; state.installPrompt.prompt(); state.installPrompt = null; $('#btnInstall').hidden = true; };
+// Zum Startbildschirm: Karte auf der Startseite (Installieren-Knopf, wo der Browser ihn anbietet, sonst kurze Anleitung)
+const installiert = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+function renderInstall() {
+  const card = $('#installCard');
+  card.hidden = installiert() || Date.now() - LS.get('nova.installLater', 0) < 14 * 864e5;
+  if (card.hidden) return;
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  $('#btnInstall2').hidden = !state.installPrompt;
+  $('#installHow').textContent = state.installPrompt ? 'Dann startet Nova wie eine normale App – ohne Browserleiste.'
+    : ios ? 'In Safari unten auf „Teilen“ tippen und dann „Zum Home-Bildschirm“.'
+    : 'Im Browser-Menü ⋮ auf „Zum Startbildschirm hinzufügen“ oder „App installieren“ tippen.';
+}
+async function installieren() {
+  if (!state.installPrompt) return;
+  state.installPrompt.prompt();
+  const { outcome } = await state.installPrompt.userChoice.catch(() => ({}));
+  state.installPrompt = null;
+  $('#btnInstall').hidden = true;
+  if (outcome === 'accepted') toast('Wird installiert – gleich liegt Nova auf dem Startbildschirm.');
+  renderInstall();
+}
+$('#btnInstall').onclick = installieren;
+$('#btnInstall2').onclick = installieren;
+$('#installLater').onclick = () => { LS.set('nova.installLater', Date.now()); renderInstall(); };
+window.addEventListener('appinstalled', () => { toast('Installiert ✓ – Nova liegt jetzt auf dem Startbildschirm.'); renderInstall(); });
 $('#suggestions').addEventListener('click', e => {
   const b = e.target.closest('button');
   if (!b) return;
@@ -2338,7 +2362,8 @@ async function handleStartParams(online) {
   return false;
 }
 
-window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); state.installPrompt = e; });
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); state.installPrompt = e; renderInstall(); });
+renderInstall();
 window.addEventListener('online', () => connect());
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
