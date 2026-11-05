@@ -106,6 +106,14 @@ Nova kann auch **direkt auf dem Handy** laufen – ganz ohne Laptop, sogar ohne 
 - **Gesprächsmodus** (Kopfhörer oben rechts): sprechen, Nova antwortet laut, hört wieder zu.
 - **Neu erzeugen / Bearbeiten** unter der letzten Antwort, **Chat-Suche** in der Chatliste.
 
+## Nova Drive (Spiel)
+
+Open-World-Festival-Rennspiel fürs Handy in `app/spiele/nova-drive/` – mit der App auf GitHub Pages unter
+`…/ki-agent/spiele/nova-drive/` (Querformat, „Zum Startbildschirm hinzufügen“ macht eine App daraus).
+Lokal testen: `python -m http.server` im Ordner `app` und `http://localhost:8000/spiele/nova-drive/` öffnen.
+Automodelle neu bauen: `python werkstatt/autos.py -- ../models` (braucht Blender bzw. `pip install bpy`), danach
+mit `gltf-transform meshopt` komprimieren. Vorschau aller Modelle: `werkstatt/vorschau.html`.
+
 ## Laptop-Modelle
 
 Einstellungen → **Laptop-Modell** – umschalten dauert ein paar Sekunden:

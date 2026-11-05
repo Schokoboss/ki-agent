@@ -40,6 +40,7 @@ export class Skills {
       this.g.hud.skillBank(total);
       this.g.audio.play('bank');
       this.g.reward(Math.round(total / 12), Math.round(total / 6), false);
+      this.g.eco.track('skill', total);
     }
     this.points = 0; this.count = 0;
   }
@@ -54,7 +55,7 @@ export class Skills {
       this.g.hud.skillLive('Drift', this.drift);
       if (this.g.events.drift) this.g.events.drift.live = this.drift;
     } else if (this.drift > 0) {
-      if (this.driftT > 0.5 && this.drift > 120) this.add(this.drift > 2500 ? 'Riesen-Drift' : this.drift > 1000 ? 'Großer Drift' : 'Drift', this.drift);
+      if (this.driftT > 0.5 && this.drift > 120) { this.add(this.drift > 2500 ? 'Riesen-Drift' : this.drift > 1000 ? 'Großer Drift' : 'Drift', this.drift); this.g.eco.track('drift', Math.round(this.drift)); }
       else this.g.hud.skillLive(null);
       this.drift = 0; this.driftT = 0;
       if (this.g.events.drift) this.g.events.drift.live = 0;
@@ -63,6 +64,7 @@ export class Skills {
     if (car.lastAir > 0) {
       const a = car.lastAir; car.lastAir = 0;
       if (a > 0.55) this.add(a > 2.2 ? 'Riesensprung' : a > 1.2 ? 'Großer Sprung' : 'Luftsprung', a * 520);
+      if (a > 1) this.g.eco.track('air', 1);
       if (car.landing > 16) this.g.hud.toast('Harte Landung!', 'warn');
     }
     // Tempo
@@ -137,6 +139,7 @@ export class Events {
       ev._along = along;
       if (lat < ev.hw + 8 && Math.abs(along) < 30 && Math.sign(prev) !== Math.sign(along) && prev !== along) {
         this.trapCool.set(ev.id, 3);
+        this.g.eco.track('trap', 1);
         const kmh = Math.round(this.g.car.speedKmh);
         const stars = ev.stars.filter(s => kmh >= s).length;
         this.g.audio.play('trap');
@@ -374,21 +377,24 @@ export class Events {
     }
     rows.sort((a, b) => a.time - b.time);
     const pos = rows.findIndex(x => x.me) + 1;
-    const f = [1, 0.7, 0.5, 0.36, 0.27, 0.2, 0.15, 0.1][pos - 1] || 0.1;
-    const cr = Math.round(ev.reward * f / 100) * 100, fans = Math.round(ev.fans * f);
+    const pay = g.eco.racePayout(ev, pos, r.crashes, g.settings.difficulty);
+    const cr = pay.total, fans = pay.fans;
     const best = g.save.best[ev.id];
     const isBest = !best || r.finishT < best;
     if (isBest) { g.save.best[ev.id] = r.finishT; g.saveGhost(ev.id, r.ghostRec, r.finishT); }
     const stars = pos === 1 ? 3 : pos <= 3 ? 2 : 1;
-    g.save.races = (g.save.races || 0) + 1;
-    if (pos === 1) g.save.wins = (g.save.wins || 0) + 1;
+    g.save.stats.races++;
+    if (pos === 1) g.save.stats.wins++;
     const had = g.save.stars[ev.id] || 0;
     if (stars > had) g.save.stars[ev.id] = stars;
+    if (stars === 3 && had < 3) g.eco.addSpin('3 Sterne: ' + ev.name);
     g.reward(cr, fans, false);
+    g.eco.track('race', 1);
+    if (pos === 1) g.eco.track('win', 1);
     g.saveGame();
     let challenge = null;
     if (r.ghostData && r.ghostData.name) challenge = { name: r.ghostData.name, time: r.ghostData.time, won: r.finishT < r.ghostData.time };
-    g.hud.showResults({ ev, rows, pos, cr, fans, time: r.finishT, isBest, best, challenge, ghost: r.ghostRec });
+    g.hud.showResults({ ev, rows, pos, cr, fans, time: r.finishT, isBest, best, challenge, ghost: r.ghostRec, lines: pay.lines });
   }
 }
 

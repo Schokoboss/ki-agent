@@ -14,6 +14,7 @@ import { Particles, Smoke, Skids } from './effects.js';
 import { CARS, UPGRADES, carStats, rating, carClass, CLASS_COLORS, EVENTS, RADIO, TIPS } from './data.js';
 import { clamp, lerp, damp, fmtNum, fmtTime, wrapAngle } from './util.js';
 import { EVENT_COLORS } from './world.js';
+import { Economy, PRIZES } from './economy.js';
 
 const SAVE_KEY = 'novadrive-save-v1', SET_KEY = 'novadrive-settings-v1';
 const $ = id => document.getElementById(id);
@@ -93,6 +94,7 @@ class Game {
     this.skills = new Skills(this);
     this.events = new Events(this);
     this.events.init();
+    this.eco = new Economy(this);
     this.spawnAtFestival();
     this.scenery.setTime(this.settings.time === 'dyn' ? 17.2 : TIME_FIXED[this.settings.time] ?? 17.2);
     this.bindUI();
@@ -205,13 +207,15 @@ class Game {
   reward(cr, fans, toast) {
     const before = this.level().level;
     this.save.credits += cr; this.save.fans += fans;
+    if (cr > 0 && this.save.stats) this.save.stats.earned += cr;
     const after = this.level().level;
     this.hud.money(cr, fans);
     if (after > before) {
       const bonus = after * 1500;
       this.save.credits += bonus;
-      this.hud.banner('Festival-Level ' + after, `+${fmtNum(bonus)} CR`, 3, 'Die Menge jubelt!');
+      this.hud.banner('Festival-Level ' + after, `+${fmtNum(bonus)} CR`, 3, 'Die Menge jubelt! + Glücksrad-Dreh');
       this.audio.play('win');
+      if (this.eco) this.eco.addSpin('Festival-Level ' + after);
       this.hud.money();
     }
     this.saveGame();
@@ -240,6 +244,120 @@ class Game {
     if (name === 'garage') this.openGarage();
     if (name === 'map') this.openMap();
     if (name === 'settings') this.openSettings();
+    if (name === 'daily') this.openDaily();
+    if (name === 'wheel') this.openWheel();
+    if (name === 'pause' || name === 'title') this.updateSpinBadges();
+  }
+  updateSpinBadges() {
+    const n = this.save.spins || 0;
+    for (const id of ['t-wheel', 'p-wheel']) { const el = $(id); if (el) el.textContent = n ? `Glücksrad (${n})` : 'Glücksrad'; }
+    const h = $('h-spin'); if (h) { h.hidden = !n; h.textContent = `🎡 ${n}`; }
+    const d = this.save.daily, open = d ? d.tasks.filter(t => !t.done).length : 0;
+    for (const id of ['t-daily', 'p-daily']) { const el = $(id); if (el) el.textContent = open ? `Tagesaufgaben (${open} offen)` : 'Tagesaufgaben ✓'; }
+  }
+
+  // ---------------------------------------------------------------- Tagesaufgaben & Profil
+  openDaily() {
+    this.eco.ensureDaily();
+    const d = this.save.daily, box = $('d-tasks');
+    box.innerHTML = '';
+    for (const t of d.tasks) {
+      const row = document.createElement('div'); row.className = 'task' + (t.done ? ' done' : '');
+      const f = Math.min(1, t.prog / t.goal);
+      const prog = t.type === 'km' ? `${t.prog.toFixed(1)} / ${t.goal}` : t.type === 'speed' || t.type === 'skill' || t.type === 'drift' ? `${fmtNum(t.prog)} / ${fmtNum(t.goal)}` : `${Math.floor(t.prog)} / ${t.goal}`;
+      row.innerHTML = `<div class="tk-top"><span class="tk-name"></span><span class="tk-cr">${t.done ? '✓' : '+' + fmtNum(t.cr) + ' CR'}</span></div><div class="bar"><i style="width:${(f * 100).toFixed(1)}%"></i></div><div class="tk-prog">${prog}</div>`;
+      row.querySelector('.tk-name').textContent = this.eco.taskText(t);
+      box.appendChild(row);
+    }
+    $('d-bonus').textContent = d.bonus ? '🎡 Bonus-Dreh für heute abgeholt' : '🎡 Alle 3 geschafft = Glücksrad-Dreh';
+    const lg = this.save.login || { streak: 0 };
+    $('d-streak').innerHTML = [1, 2, 3, 4, 5, 6, 7].map(i => `<span class="${i <= lg.streak ? 'on' : ''}">${i}</span>`).join('');
+    const st = this.save.stats, lv = this.level();
+    const stars = Object.values(this.save.stars).reduce((a, b) => a + b, 0);
+    const rows = [
+      ['Festival-Level', lv.level], ['Fans', fmtNum(this.save.fans)], ['Credits', fmtNum(this.save.credits) + ' CR'], ['Insgesamt verdient', fmtNum(st.earned) + ' CR'],
+      ['Gefahren', st.km.toFixed(1) + ' km'], ['Rennen / Siege', `${st.races} / ${st.wins}`], ['Höchsttempo', st.top + ' km/h'], ['Beste Skill-Kette', fmtNum(st.bestChain)],
+      ['Knapp vorbei', st.near], ['Zerstört', st.smashed], ['Plakate', `${this.save.posters.length} / 20`], ['Sterne', `${stars} / ${this.events.list.length * 3}`],
+      ['Autos', `${Object.keys(this.save.owned).length} / ${CARS.length}`], ['Glücksrad gedreht', st.spins],
+    ];
+    $('d-stats').innerHTML = rows.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
+  }
+
+  // ---------------------------------------------------------------- Glücksrad
+  openWheel() {
+    $('w-left').textContent = this.save.spins ? `${this.save.spins} Dreh${this.save.spins > 1 ? 's' : ''} verfügbar` : 'Keine Drehs – verdiene welche mit Level-Aufstiegen und Tagesaufgaben';
+    $('w-spin').disabled = !this.save.spins || this.wheelBusy;
+    $('w-result').textContent = '';
+    this.wheelAngle = this.wheelAngle || 0;
+    this.drawWheel(this.wheelAngle);
+  }
+  drawWheel(rot) {
+    const c = $('w-canvas'), g = c.getContext('2d'), S = c.width, R = S / 2 - 8;
+    const total = PRIZES.reduce((a, p) => a + p.w, 0);
+    g.clearRect(0, 0, S, S);
+    g.save(); g.translate(S / 2, S / 2); g.rotate(rot);
+    let a = -Math.PI / 2;
+    for (const p of PRIZES) {
+      const da = p.w / total * Math.PI * 2;
+      g.fillStyle = p.color; g.beginPath(); g.moveTo(0, 0); g.arc(0, 0, R, a, a + da); g.closePath(); g.fill();
+      g.strokeStyle = 'rgba(255,255,255,0.8)'; g.lineWidth = 3; g.stroke();
+      g.save(); g.rotate(a + da / 2); g.fillStyle = '#fff'; g.font = `700 ${Math.round(S / 22)}px "Chakra Petch", sans-serif`; g.textAlign = 'right'; g.textBaseline = 'middle';
+      g.shadowColor = 'rgba(0,0,0,.5)'; g.shadowBlur = 4; g.fillText(p.label, R - 12, 0); g.restore();
+      a += da;
+    }
+    g.restore();
+    g.fillStyle = '#16142a'; g.beginPath(); g.arc(S / 2, S / 2, S * 0.1, 0, 7); g.fill();
+    g.strokeStyle = '#fff'; g.lineWidth = 4; g.stroke();
+    g.fillStyle = '#ffd23f'; g.font = `700 ${Math.round(S / 16)}px sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('★', S / 2, S / 2 + 2);
+    // Zeiger oben
+    g.fillStyle = '#fff'; g.beginPath(); g.moveTo(S / 2 - 14, 2); g.lineTo(S / 2 + 14, 2); g.lineTo(S / 2, 34); g.closePath(); g.fill();
+    g.strokeStyle = '#16142a'; g.lineWidth = 2; g.stroke();
+  }
+  spinWheel() {
+    if (this.wheelBusy || !this.save.spins) return;
+    this.save.spins--; this.saveGame();
+    this.wheelBusy = true; $('w-spin').disabled = true; $('w-result').textContent = '';
+    const i = this.eco.pickPrize();
+    const total = PRIZES.reduce((a, p) => a + p.w, 0);
+    let a0 = 0; for (let k = 0; k < i; k++) a0 += PRIZES[k].w / total * Math.PI * 2;
+    const da = PRIZES[i].w / total * Math.PI * 2;
+    const target = a0 + da * (0.2 + Math.random() * 0.6); // Winkel im Segment (ab oben, im Uhrzeigersinn)
+    const start = this.wheelAngle % (Math.PI * 2);
+    const end = -target + Math.PI * 2 * (6 + Math.floor(Math.random() * 2));
+    const t0 = performance.now(), dur = 4600;
+    let lastSeg = -1;
+    const step = now => {
+      const t = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - t, 4);
+      const ang = start + (end - start) * e;
+      this.wheelAngle = ang;
+      this.drawWheel(ang);
+      const seg = Math.floor(((-ang % (Math.PI * 2)) + Math.PI * 4) % (Math.PI * 2) / (Math.PI * 2) * 24);
+      if (seg !== lastSeg) { lastSeg = seg; this.audio.play('ui'); }
+      if (t < 1) requestAnimationFrame(step);
+      else {
+        const res = this.eco.givePrize(i);
+        this.audio.play(res.car || PRIZES[i].cr >= 50000 ? 'win' : 'bank');
+        $('w-result').innerHTML = `<b></b><span></span>`;
+        $('w-result').querySelector('b').textContent = res.title;
+        $('w-result').querySelector('span').textContent = res.value;
+        this.wheelBusy = false;
+        $('w-left').textContent = this.save.spins ? `${this.save.spins} Dreh${this.save.spins > 1 ? 's' : ''} verfügbar` : 'Keine Drehs mehr';
+        $('w-spin').disabled = !this.save.spins;
+        this.hud.money();
+        this.updateSpinBadges();
+      }
+    };
+    requestAnimationFrame(step);
+  }
+
+  sellCar() {
+    const id = this.garageSel, val = this.eco.sellValue(id), spec = this.carSpec(id);
+    if (!this.save.owned[id] || id === this.save.current) return;
+    if (!confirm(`${spec.maker} ${spec.name} für ${fmtNum(val)} CR verkaufen?`)) return;
+    delete this.save.owned[id];
+    this.save.credits += val;
+    this.audio.play('bank'); this.saveGame(); this.hud.money();
+    this.renderGarage();
   }
   setState(s) { this.state = s; if (s === 'free' || s === 'race') this.showScreen(null); }
 
@@ -275,6 +393,13 @@ class Game {
     click('t-garage', () => { if (!this.save.current) { this.showScreen('starter'); this.renderStarter(); return; } this.backTo = 'title'; this.showScreen('garage'); });
     click('t-map', () => { this.backTo = 'title'; this.showScreen('map'); });
     click('t-settings', () => { this.backTo = 'title'; this.showScreen('settings'); });
+    click('t-daily', () => { this.backTo = 'title'; this.showScreen('daily'); });
+    click('t-wheel', () => { this.backTo = 'title'; this.showScreen('wheel'); });
+    click('p-daily', () => { this.backTo = 'pause'; this.showScreen('daily'); });
+    click('p-wheel', () => { this.backTo = 'pause'; this.showScreen('wheel'); });
+    click('h-spin', () => { if (this.state !== 'free') return; this.prevState = 'free'; this.state = 'paused'; this.backTo = 'game'; this.showScreen('wheel'); });
+    click('w-spin', () => this.spinWheel());
+    click('g-sell', () => this.sellCar());
     // HUD
     click('h-pause', () => this.pause());
     click('h-map', () => { if (this.events.race) return; this.prevState = this.state; this.state = 'paused'; this.backTo = 'game'; this.showScreen('map'); });
@@ -305,7 +430,8 @@ class Game {
 
   back() {
     const to = this.backTo;
-    if (this.screen === 'settings' || this.screen === 'map' || this.screen === 'garage') {
+    if (this.wheelBusy) return;
+    if (['settings', 'map', 'garage', 'daily', 'wheel'].includes(this.screen)) {
       if (to === 'title') this.showScreen('title');
       else if (to === 'pause') this.showScreen('pause');
       else { this.setState(this.prevState === 'race' && this.events.race ? 'race' : 'free'); this.last = performance.now(); }
@@ -315,10 +441,11 @@ class Game {
   startDriving() {
     if (this.challenge) { this.showChallenge(); return; }
     this.setState('free');
+    this.eco.loginBonus();
     this.camYaw = this.car.yaw;
     if (!this.save.welcomed) {
       this.save.welcomed = true; this.saveGame();
-      setTimeout(() => this.hud.banner('Willkommen beim Nova Festival!', 'Sonnenküste', 0, 'Fahr zu den Lichtsäulen – dort warten Events.'), 600);
+      setTimeout(() => this.hud.banner('Willkommen beim Nova Festival!', 'Sonnenküste', null, 'Fahr zu den Lichtsäulen – dort warten Events.'), 600);
     }
   }
 
@@ -424,6 +551,9 @@ class Game {
       act.onclick = () => { this.save.current = sel; this.saveGame(); this.audio.play('ui'); this.renderGarage(); };
     } else { act.textContent = '✓ Dein aktuelles Auto'; act.disabled = true; act.onclick = null; }
     $('g-credits').textContent = fmtNum(this.save.credits) + ' CR';
+    const sell = $('g-sell');
+    sell.hidden = !own || sel === this.save.current;
+    if (!sell.hidden) sell.textContent = `Verkaufen · ${fmtNum(this.eco.sellValue(sel))} CR`;
     if (!this.previewModel || this.previewId !== sel) this.previewCar(sel);
   }
   previewCar(id) {
@@ -662,6 +792,7 @@ class Game {
       this.audio.play(o.kind === 'cone' ? 'smash' : 'wood');
       if (o.kind === 'poster') this.collectPoster(o);
       else this.skills.add('Zerstörung', o.kind === 'hay' ? 150 : 90);
+      this.eco.track('smash', 1);
       for (let i = 0; i < 8; i++) this.smoke.emit(o.x, o.y + 0.8, o.z, (Math.random() - 0.5) * 4, Math.random() * 3, (Math.random() - 0.5) * 4, 0.5, 0.85, 0.6, 1.2, 1.2, { drag: 2, grow: 2 });
     }
     // Aufpralle
@@ -682,6 +813,10 @@ class Game {
     if (car.inWater > 1.3) { this.respawn(); this.skills.crash(); }
     this.skills.update(dt, car);
     this.events.update(dt);
+    this.kmAcc = (this.kmAcc || 0) + Math.hypot(car.vel.x, car.vel.z) * dt;
+    if (this.kmAcc >= 100) { this.kmAcc -= 100; this.eco.track('km', 0.1); }
+    this.spdT = (this.spdT || 0) + dt;
+    if (this.spdT > 0.5) { this.spdT = 0; if (car.speedKmh > 60) this.eco.track('speed', Math.round(car.speedKmh)); }
     this.traffic.update(dt, car);
     this.syncCar(dt, inp);
     this.updateCamera(dt, inp);
@@ -739,7 +874,7 @@ class Game {
         const relV = Math.hypot(car.vel.x - o.vx, car.vel.z - o.vz);
         if (d < 5.2 && spd > 16 && relV > 8) st.min = Math.min(st.min, d);
         if (st.min < 5.2 && d > 9) {
-          if (!st.contact && performance.now() - st.t > 3000) { st.t = performance.now(); this.skills.add('Knapp vorbei', 350); }
+          if (!st.contact && performance.now() - st.t > 3000) { st.t = performance.now(); this.skills.add('Knapp vorbei', 350); this.eco.track('near', 1); }
           st.min = 99; st.contact = false;
         }
         if (ai) {
@@ -759,9 +894,10 @@ class Game {
     if (!this.save.posters.includes(o.poster)) {
       this.save.posters.push(o.poster);
       const n = this.save.posters.length;
-      this.hud.banner('Festival-Plakat', `${n} / 20`, n === 20 ? 3 : 0, n === 20 ? 'Alle gefunden! +50.000 CR' : '+2.500 CR');
+      this.hud.banner('Festival-Plakat', `${n} / 20`, n === 20 ? 3 : null, n === 20 ? 'Alle gefunden! +50.000 CR' : '+2.500 CR');
       this.reward(2500 + (n === 20 ? 50000 : 0), 400, true);
       this.skills.add('Plakat', 1000);
+      this.eco.track('poster', 1);
       this.updatePosters();
     }
   }

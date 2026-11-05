@@ -39,6 +39,7 @@
       <div class="lvl"><b>LV <span id="level">1</span></b><div class="lvl-track"><i id="level-bar"></i></div></div>
       <div id="credits">0 CR</div>
       <div id="posters">🎟 0/20</div>
+      <button id="h-spin" class="spin-badge" hidden>🎡 0</button>
     </div>
   </div>
   <div id="race" hidden>
@@ -91,6 +92,8 @@
     <div class="menu">
       <button id="t-drive" class="btn primary">Fahren</button>
       <button id="t-garage" class="btn">Garage</button>
+      <button id="t-daily" class="btn">Tagesaufgaben</button>
+      <button id="t-wheel" class="btn">Glücksrad</button>
       <button id="t-map" class="btn">Karte</button>
       <button id="t-settings" class="btn">Einstellungen</button>
     </div>
@@ -119,6 +122,7 @@
     <div class="g-label">Tuning</div>
     <div id="g-up"></div>
     <button id="g-action" class="btn primary"></button>
+    <button id="g-sell" class="btn ghost" hidden></button>
   </div>
   <div id="g-list"></div>
 </section>
@@ -144,6 +148,8 @@
     <button id="p-resume" class="btn primary">Weiter</button>
     <button id="p-restart" class="btn">Rennen neu starten</button>
     <button id="p-abort" class="btn">Rennen abbrechen</button>
+    <button id="p-daily" class="btn">Tagesaufgaben</button>
+    <button id="p-wheel" class="btn">Glücksrad</button>
     <button id="p-map" class="btn">Karte</button>
     <button id="p-garage" class="btn">Garage</button>
     <button id="p-settings" class="btn">Einstellungen</button>
@@ -179,17 +185,50 @@
 
 <!-- Ergebnis -->
 <section id="results" class="screen dim" hidden>
-  <div class="panel wide">
-    <div id="res-title">SIEG!</div>
-    <div id="res-event" class="muted"></div>
-    <div id="res-table"></div>
-    <div id="res-challenge" hidden></div>
-    <div id="res-reward"></div>
-    <div class="row">
-      <button id="res-continue" class="btn primary">Weiter</button>
-      <button id="res-again" class="btn">Nochmal</button>
-      <button id="res-share" class="btn share">Freund herausfordern</button>
+  <div class="panel wide res-panel">
+    <div class="res-main">
+      <div id="res-title">SIEG!</div>
+      <div id="res-event" class="muted"></div>
+      <div id="res-table"></div>
     </div>
+    <div class="res-side">
+      <div id="res-challenge" hidden></div>
+      <div id="res-breakdown"></div>
+      <div id="res-reward"></div>
+      <div class="row">
+        <button id="res-continue" class="btn primary">Weiter</button>
+        <button id="res-again" class="btn">Nochmal</button>
+        <button id="res-share" class="btn share">Freund herausfordern</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Tagesaufgaben & Profil -->
+<section id="daily" class="screen dim" hidden>
+  <div class="panel wide">
+    <div class="g-top"><button class="btn back" data-back>‹ Zurück</button><h2>Tagesaufgaben</h2></div>
+    <div id="d-tasks"></div>
+    <div id="d-bonus" class="muted"></div>
+    <div class="g-label">Tagesbonus – jeden Tag fahren, Bonus wächst</div>
+    <div id="d-streak"></div>
+    <div class="g-label">Dein Profil</div>
+    <div id="d-stats"></div>
+  </div>
+</section>
+
+<!-- Glücksrad -->
+<section id="wheel" class="screen dim" hidden>
+  <div class="wheel-wrap">
+    <div class="wheel-side">
+      <button class="btn back" data-back>‹ Zurück</button>
+      <h2>Glücksrad</h2>
+      <p id="w-left" class="muted"></p>
+      <button id="w-spin" class="btn primary big">DREHEN</button>
+      <div id="w-result"></div>
+      <p class="muted small">Drehs gibt es für Level-Aufstiege, 3 Sterne bei Rennen und alle Tagesaufgaben. Nur Spielgeld – nichts davon kostet echtes Geld.</p>
+    </div>
+    <canvas id="w-canvas" width="560" height="560"></canvas>
   </div>
 </section>
 

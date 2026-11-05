@@ -120,9 +120,9 @@ export const EVENTS = [
   { id: 'd_stadt', type: 'drift', name: 'Driftzone Altstadt', road: 'stadt', at: 0.0, to: 0.45, stars: [4000, 10000, 20000] },
   { id: 'd_wald', type: 'drift', name: 'Driftzone Waldpiste', road: 'wald', at: 0.15, to: 0.75, stars: [4000, 10000, 20000] },
 
-  { id: 'j_feld', type: 'jump', name: 'Sprungschanze Feld', x: -95, z: 330, yaw: Math.PI * 0.95, stars: [50, 85, 120] },
+  { id: 'j_feld', type: 'jump', name: 'Sprungschanze Feld', x: -95, z: 330, yaw: Math.PI * 1.05, stars: [50, 85, 120] },
   { id: 'j_strand', type: 'jump', name: 'Sprungschanze Strand', x: 560, z: 520, yaw: Math.PI * 1.75, stars: [50, 85, 120] },
-  { id: 'j_steppe', type: 'jump', name: 'Sprungschanze Steppe', x: 610, z: -400, yaw: Math.PI * 1.2, stars: [50, 85, 120] },
+  { id: 'j_steppe', type: 'jump', name: 'Sprungschanze Steppe', x: 610, z: -400, yaw: Math.PI * 0.833, stars: [50, 85, 120] },
 ];
 
 export const RADIO = ['Nova Pulse', 'Küstenwelle', 'Kiesel FM', 'Aus'];

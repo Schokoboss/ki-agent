@@ -198,7 +198,20 @@ export class HUD {
     while (this.toastEl.children.length > 3) this.toastEl.firstChild.remove();
   }
   money(cr, fans) {
-    $('credits').textContent = fmtNum(this.g.save.credits) + ' CR';
+    // Credits hochzählen
+    const target = this.g.save.credits, from = this.shownCr ?? target;
+    this.shownCr = target;
+    const el = $('credits'), t0 = performance.now();
+    cancelAnimationFrame(this._crRaf);
+    const anim = now => {
+      const t = Math.min(1, (now - t0) / 900), v = from + (target - from) * (1 - Math.pow(1 - t, 3));
+      el.textContent = fmtNum(v) + ' CR';
+      if (t < 1) this._crRaf = requestAnimationFrame(anim);
+    };
+    if (from !== target) { el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump'); this._crRaf = requestAnimationFrame(anim); }
+    else el.textContent = fmtNum(target) + ' CR';
+    const n = this.g.save.spins || 0, sp = $('h-spin');
+    if (sp) { sp.hidden = !n; sp.textContent = `🎡 ${n}`; }
     const lv = this.g.level();
     $('level').textContent = lv.level;
     $('level-bar').style.width = (lv.frac * 100).toFixed(1) + '%';
@@ -213,9 +226,12 @@ export class HUD {
     b.innerHTML = '';
     const h = document.createElement('div'); h.className = 'b-title'; h.textContent = title;
     const v = document.createElement('div'); v.className = 'b-value'; v.textContent = value;
-    const s = document.createElement('div'); s.className = 'b-stars';
-    for (let i = 0; i < 3; i++) { const e = document.createElement('span'); e.textContent = '★'; if (i < stars) e.className = 'on'; e.style.animationDelay = (0.2 + i * 0.15) + 's'; s.appendChild(e); }
-    b.append(h, v, s);
+    b.append(h, v);
+    if (stars !== null && stars !== undefined) {
+      const s = document.createElement('div'); s.className = 'b-stars';
+      for (let i = 0; i < 3; i++) { const e = document.createElement('span'); e.textContent = '★'; if (i < stars) e.className = 'on'; e.style.animationDelay = (0.2 + i * 0.15) + 's'; s.appendChild(e); }
+      b.append(s);
+    }
     if (extra) { const x = document.createElement('div'); x.className = 'b-extra'; x.textContent = extra; b.appendChild(x); }
     b.classList.remove('show'); void b.offsetWidth; b.classList.add('show');
     clearTimeout(this._bn); this._bn = setTimeout(() => b.classList.remove('show'), 3200);
@@ -267,7 +283,14 @@ export class HUD {
       tr.querySelector('.c').textContent = r.car ? `${r.car.maker} ${r.car.name}` : '';
       tb.appendChild(tr);
     });
-    $('res-reward').textContent = `+${fmtNum(res.cr)} CR · +${fmtNum(res.fans)} Fans` + (res.isBest ? ' · Neue Bestzeit!' : '');
+    const bd = $('res-breakdown'); bd.innerHTML = '';
+    for (const [k, v] of res.lines || []) {
+      const d = document.createElement('div'); d.className = v < 0 ? 'neg' : '';
+      d.innerHTML = `<span></span><b>${v < 0 ? '−' : '+'}${fmtNum(Math.abs(v))} CR</b>`;
+      d.querySelector('span').textContent = k;
+      bd.appendChild(d);
+    }
+    $('res-reward').textContent = `Gesamt +${fmtNum(res.cr)} CR · +${fmtNum(res.fans)} Fans` + (res.isBest ? ' · Neue Bestzeit!' : '');
     const ch = $('res-challenge');
     if (res.challenge) { ch.hidden = false; ch.textContent = res.challenge.won ? `Du hast ${res.challenge.name} geschlagen! 🎉` : `${res.challenge.name} war schneller (${fmtTime(res.challenge.time)}).`; ch.className = res.challenge.won ? 'win' : 'lose'; }
     else ch.hidden = true;

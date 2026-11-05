@@ -2,6 +2,14 @@
 
 Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 
+## 05.11.2026
+- **Nova Drive** (`app/spiele/nova-drive/`): Open-World-Festival-Rennspiel fürs Handy (three.js, läuft im Browser, installierbar).
+  Eigene Insel mit Küstenring, Altstadt, See, Pass, Wald und Festival; 9 Rennen gegen KI, Blitzer, Driftzonen, Schanzen,
+  20 Plakate, Skill-Ketten, Tag/Nacht, generatives Radio, Freund-Herausforderung per Link (Geist).
+- 8 eigene Automodelle aus Blender (`werkstatt/autos.py`, Meshopt-komprimiert, zusammen < 1 MB).
+- Geld & Co.: Tagesbonus, 3 Tagesaufgaben, Glücksrad (nur Spielgeld), Auszahlung nach Platz/sauber/Schwierigkeit,
+  Autos kaufen, tunen und verkaufen, Profil-Statistik.
+
 ## 04.11.2026
 - Startseite: Karte „Zum Startbildschirm hinzufügen“ (Installieren-Knopf, wo der Browser ihn anbietet).
 - Pausen im Zeit-Modus können nie negativ werden (Schutz gegen Uhr-Sprünge).
