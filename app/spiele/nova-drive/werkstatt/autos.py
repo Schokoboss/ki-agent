@@ -405,7 +405,7 @@ def details(S, style, sh, M):
             add(box((sx, S['belt'] + 0.06, zc - 0.25), (0.46, 0.12, 0.5), M['interior'], (0, 0, 0), 0.04))
             bpy.ops.mesh.primitive_torus_add(major_radius=0.22, minor_radius=0.03, major_segments=16, minor_segments=6)
             t = active()
-            place(t, (sx, S['belt'] + 0.06, zc - 0.68), (0, 0, 0))
+            place(t, (sx, S['belt'] + 0.06, zc - 0.68), (math.pi / 2, 0, 0))
             add(finish(t, M['chrome'], 0, 2, True))
         add(box((0, S['belt'] + 0.2, sh.zWs - 0.1), (W * 0.82, 0.38, 0.025), M['glass'], (-0.6, 0, 0), 0.01))
         add(box((0, S['belt'] + 0.39, sh.zWs - 0.21), (W * 0.84, 0.03, 0.04), M['trim'], (-0.6, 0, 0), 0.005))

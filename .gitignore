@@ -6,3 +6,6 @@ workspace/
 __pycache__/
 *.pyc
 werkzeuge/handytest-ergebnis/
+
+# Spiel-Modelle (Nova Drive) gehören ins Repo
+!app/spiele/nova-drive/models/
