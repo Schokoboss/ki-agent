@@ -1,5 +1,8 @@
 // Prozedurale Automodelle (eigene Designs). Vorne = +z.
 import * as THREE from '../lib/three.module.min.js';
+import { GLTFLoader } from '../lib/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from '../lib/libs/meshopt_decoder.module.js';
+import { mergeGeometries } from '../lib/utils/BufferGeometryUtils.js';
 import { part, merge } from './geo.js';
 
 // Grundform je Stil: L Länge, W Breite, clr Bodenfreiheit, belt Gürtellinie, nose/tail Höhe vorne/hinten,
@@ -37,8 +40,142 @@ function mats() {
 
 export function styleDims(style) { return STYLES[style] || STYLES.hatch; }
 
-// spec: Eintrag aus CARS (style), color: Lackfarbe, opts.lod: alles in ein Mesh (Verkehr)
+// ---------------------------------------------------------------- Blender-Modelle (models/*.glb)
+const TEMPL = {};
+const STYLE_CAR = { hatch: 'kestrel', truck: 'tundra', roadster: 'velora', rally: 'ostwind', muscle: 'brenner', gt: 'aurum', ev: 'volt', hyper: 'phantom' };
+
+export async function loadCarModels(ids, onProgress = () => {}) {
+  const loader = new GLTFLoader();
+  loader.setMeshoptDecoder(MeshoptDecoder);
+  await MeshoptDecoder.ready;
+  let done = 0;
+  const total = ids.length * 2;
+  const tick = () => onProgress(++done / total);
+  await Promise.all(ids.flatMap(id => [
+    loader.loadAsync(`models/${id}.glb`).then(g => { (TEMPL[id] ||= {}).full = g.scene; }).catch(e => console.warn('Modell fehlt', id, e)).finally(tick),
+    loader.loadAsync(`models/${id}_lod.glb`).then(g => { (TEMPL[id] ||= {}).lod = prepLod(g.scene); }).catch(e => console.warn('LOD fehlt', id, e)).finally(tick),
+  ]));
+}
+
+function wheelNode(o) { while (o) { if (o.name && o.name.startsWith('wheel_')) return o; o = o.parent; } return null; }
+function toFloat(g) {
+  const out = new THREE.BufferGeometry();
+  for (const name of ['position', 'normal']) {
+    const a = g.attributes[name]; if (!a) continue;
+    const arr = new Float32Array(a.count * 3);
+    for (let i = 0; i < a.count; i++) { arr[i * 3] = a.getX(i); arr[i * 3 + 1] = a.getY(i); arr[i * 3 + 2] = a.getZ(i); }
+    out.setAttribute(name, new THREE.BufferAttribute(arr, 3));
+  }
+  if (g.index) out.setIndex(Array.from(g.index.array));
+  return out;
+}
+function colored(g, mat) {
+  const c = mat.color.clone();
+  if (mat.emissive && mat.emissiveIntensity > 0 && mat.emissive.getHex()) c.add(mat.emissive.clone().multiplyScalar(0.8));
+  const n = g.attributes.position.count, arr = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b; }
+  g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+  return g;
+}
+const _inv = new THREE.Matrix4(), _box = new THREE.Box3(), _ctr = new THREE.Vector3();
+function wheelCenters(scene) {
+  const out = {};
+  scene.updateMatrixWorld(true);
+  for (const n of scene.children) if (n.name.startsWith('wheel_')) { _box.setFromObject(n); out[n.name] = _box.getCenter(new THREE.Vector3()); }
+  return out;
+}
+function prepLod(scene) {
+  scene.updateMatrixWorld(true);
+  const centers = wheelCenters(scene);
+  const paint = [], rest = [], wheels = {};
+  scene.traverse(o => {
+    if (!o.isMesh) return;
+    const w = wheelNode(o);
+    const g = toFloat(o.geometry).applyMatrix4(o.matrixWorld);
+    if (w) { g.translate(-centers[w.name].x, -centers[w.name].y, -centers[w.name].z); (wheels[w.name] ||= []).push(colored(g, o.material)); }
+    else if (o.material.name === 'paint') paint.push(g);
+    else rest.push(colored(g, o.material));
+  });
+  const T = { paintGeo: mergeGeometries(paint), restGeo: mergeGeometries(rest), wheels: [] };
+  const all = [...rest.map(g => g.clone())];
+  for (const name of ['wheel_fl', 'wheel_fr', 'wheel_rl', 'wheel_rr']) {
+    if (!wheels[name]) continue;
+    const geo = mergeGeometries(wheels[name]);
+    T.wheels.push({ name, geo, pos: centers[name], front: name.includes('_f') });
+    all.push(geo.clone().translate(centers[name].x, centers[name].y, centers[name].z));
+  }
+  T.trafficGeo = mergeGeometries(all);
+  for (const g of [T.paintGeo, T.restGeo, T.trafficGeo]) g.computeBoundingSphere();
+  return T;
+}
+const LOD_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.3, roughness: 0.45 });
+
+function fromTemplate(spec, color, opts) {
+  const id = TEMPL[spec.id] ? spec.id : STYLE_CAR[spec.style];
+  const T = TEMPL[id];
+  if (!T || !(opts.lod ? T.lod : T.full)) return null;
+  const S = STYLES[spec.style] || STYLES.hatch;
+  const root = new THREE.Group(), bodyG = new THREE.Group();
+  root.add(bodyG);
+  const wheels = [];
+  let paintMat, tailMat = null;
+  if (opts.lod) {
+    const L = T.lod;
+    paintMat = new THREE.MeshStandardMaterial({ color, metalness: 0.45, roughness: 0.3 });
+    const p = new THREE.Mesh(L.paintGeo, paintMat);
+    const r = new THREE.Mesh(opts.lod === 'ai' ? L.restGeo : L.trafficGeo, LOD_MAT);
+    p.castShadow = r.castShadow = true;
+    bodyG.add(p, r);
+    if (opts.lod === 'ai') {
+      for (const w of L.wheels) {
+        const pivot = new THREE.Group(); pivot.position.copy(w.pos);
+        const spin = new THREE.Group(); const m = new THREE.Mesh(w.geo, LOD_MAT); m.castShadow = true;
+        spin.add(m); pivot.add(spin); root.add(pivot);
+        wheels.push({ pivot, spin, front: w.front });
+      }
+    }
+  } else {
+    const src = T.full;
+    const centers = wheelCenters(src);
+    paintMat = null;
+    for (const n of src.children) {
+      const c = n.clone(true);
+      if (n.name.startsWith('wheel_')) {
+        const ctr = centers[n.name];
+        const pivot = new THREE.Group(); pivot.position.copy(ctr);
+        const spin = new THREE.Group();
+        c.position.sub(ctr);
+        spin.add(c); pivot.add(spin); root.add(pivot);
+        wheels.push({ pivot, spin, front: n.name.includes('_f') });
+      } else bodyG.add(c);
+    }
+    root.traverse(o => {
+      if (!o.isMesh) return;
+      o.castShadow = true;
+      if (o.material.name === 'paint') {
+        if (!paintMat) { paintMat = o.material.clone(); paintMat.color.set(color); paintMat.envMapIntensity = 1.25; }
+        o.material = paintMat;
+      } else if (o.material.name === 'tail') {
+        if (!tailMat) { tailMat = o.material.clone(); }
+        o.material = tailMat;
+      } else if (o.material.name === 'glass') { o.material.envMapIntensity = 1.6; }
+    });
+  }
+  const exh = [];
+  const exN = spec.style === 'gt' || spec.style === 'muscle' || spec.style === 'hyper' ? 2 : 1;
+  for (let i = 0; i < exN; i++) exh.push(new THREE.Vector3(exN === 2 ? (i ? 0.48 : -0.48) : 0.5, S.clr + 0.09, -S.L / 2 - 0.12));
+  root.userData = { bodyG, wheels, paintMat, tailMat, dims: S, exhaust: exh, style: spec.style, gltf: true };
+  return root;
+}
+
+// spec: Eintrag aus CARS (style), color: Lackfarbe, opts.lod: true = Verkehr (2 Draw-Calls), 'ai' = Gegner
 export function buildCar(spec, color, opts = {}) {
+  const m = fromTemplate(spec, color, opts);
+  if (m) return m;
+  return buildProcedural(spec, color, opts);
+}
+
+function buildProcedural(spec, color, opts = {}) {
   const S = STYLES[spec.style] || STYLES.hatch;
   const st = spec.style;
   const { L, W, clr, belt, nose, tail, hood, ws, roof, rear, H, wR, wb } = S;
@@ -196,4 +333,10 @@ function recolor(g, color) {
 
 export function setCarColor(car, color) {
   if (car.userData.paintMat) car.userData.paintMat.color.set(color);
+}
+export function setTailGlow(car, on, night) {
+  const m = car.userData.tailMat;
+  if (!m) return;
+  if (car.userData.gltf) { m.emissiveIntensity = on ? 3 : 0.5 + night * 1.2; }
+  else m.color.set(on ? 0xff2020 : (night > 0.4 ? 0xb01010 : 0x6a0808));
 }

@@ -318,7 +318,7 @@ export class World {
       const x = pt.x - pt.tz * side * off, z = pt.z + pt.tx * side * off;
       if (Math.hypot(x - TOWN.x, z - TOWN.z) < TOWN.r + 40) continue;
       const h0 = this.baseAt(x, z);
-      if (h0 < 3 || this.edgeAt(x, z) < 12 || !free(x, z, 14) || onCross(x, z)) continue;
+      if (h0 < 3 || this.edgeAt(x, z) < 12 || !free(x, z, 14) || onCross(x, z) || this.nearRamp(x, z, 160)) continue;
       const yaw = Math.atan2(pt.tx, pt.tz) + (rnd() < 0.5 ? 0 : Math.PI / 2);
       const w = 10 + rnd() * 6, d = 14 + rnd() * 8;
       this.buildings.push({ x, z, w, d, h: 6 + rnd() * 3, yaw, y: h0, hue: 0.05 + rnd() * 0.08, roof: true, farm: true });
@@ -329,7 +329,21 @@ export class World {
       if (ev.type !== 'jump') continue;
       const r = { x: ev.x, z: ev.z, c: Math.cos(ev.yaw), s: Math.sin(ev.yaw), len: 16, w: 9, h: 4.2, yaw: ev.yaw };
       // Rampe läuft entlang (sin yaw, cos yaw)
-      r.y = this.baseAt(ev.x, ev.z) - 0.3;
+      // Anlauf und Schanze eben machen (sonst entsteht vorne eine Kante)
+      const hR = this.baseAt(ev.x, ev.z);
+      const R = 100;
+      for (let j = Math.floor((ev.z - R + HALF) / CELL); j <= Math.ceil((ev.z + R + HALF) / CELL); j++) {
+        for (let i = Math.floor((ev.x - R + HALF) / CELL); i <= Math.ceil((ev.x + R + HALF) / CELL); i++) {
+          if (i < 0 || j < 0 || i >= N || j >= N) continue;
+          const k = j * N + i;
+          if (this.E[k] < 4) continue;
+          const dx = -HALF + i * CELL - ev.x, dz = -HALF + j * CELL - ev.z;
+          const lz = dx * r.s + dz * r.c, lx = dx * r.c - dz * r.s;
+          const w = smoothstep(18, 10, Math.abs(lx)) * smoothstep(-95, -75, lz) * smoothstep(16, 9, lz);
+          if (w > 0) this.H[k] = lerp(this.H[k], hR, w);
+        }
+      }
+      r.y = hR - 0.3;
       this.ramps.push(r);
     }
     // --- Straßenlaternen
@@ -417,7 +431,7 @@ export class World {
       const side = rnd() < 0.5 ? -1 : 1, off = 14 + rnd() * 25;
       const x = pt.x - pt.tz * side * off, z = pt.z + pt.tx * side * off;
       const h = this.baseAt(x, z);
-      if (h < 3 || this.edgeAt(x, z) < 6 || !free(x, z, 3) || onCross(x, z)) continue;
+      if (h < 3 || this.edgeAt(x, z) < 6 || !free(x, z, 3) || onCross(x, z) || this.nearRamp(x, z, 140)) continue;
       for (let k = 0; k < 3; k++) this.addSmash('hay', x + k * 2.6 * pt.tx, z + k * 2.6 * pt.tz, this.baseAt(x + k * 2.6 * pt.tx, z + k * 2.6 * pt.tz), Math.atan2(pt.tx, pt.tz), 1.1);
     }
     // --- Festival-Plakate (Sammelobjekte), gut verteilt
@@ -442,7 +456,7 @@ export class World {
     for (const r of this.ramps) {
       const dx = x - r.x, dz = z - r.z;
       const along = dx * r.s + dz * r.c, lat = dx * r.c - dz * r.s;
-      if (along > -25 && along < d && Math.abs(lat) < 22) return true;
+      if (along > -140 && along < d && Math.abs(lat) < 24) return true;
     }
     return false;
   }

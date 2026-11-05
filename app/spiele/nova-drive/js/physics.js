@@ -131,12 +131,22 @@ export class Vehicle {
 
     // Bewegen + Höhe
     const ghPrev = W.heightAt(p.x, p.z);
+    const ox = p.x, oz = p.z;
     p.x += v.x * dt; p.z += v.z * dt;
-    const gh = W.heightAt(p.x, p.z);
-    const groundVy = (gh - ghPrev) / dt;
+    let gh = W.heightAt(p.x, p.z);
+    // zu steil zum Hochfahren → wirkt wie eine Wand (statt Katapult)
+    const moved = Math.hypot(p.x - ox, p.z - oz);
+    if (gh - ghPrev > moved * 1.05 + 0.04 && gh > p.y + 0.25) {
+      W.gradAt(p.x, p.z, _g);
+      const gl = Math.hypot(_g.x, _g.z) || 1, nx = -_g.x / gl, nz = -_g.z / gl;
+      const vn = v.x * nx + v.z * nz;
+      if (vn < 0) { v.x -= nx * vn * 1.3; v.z -= nz * vn * 1.3; if (-vn > 3) this.impacts.push({ force: -vn * 0.8, x: p.x, z: p.z }); }
+      p.x = ox; p.z = oz; gh = ghPrev;
+    }
+    const groundVy = Math.min((gh - ghPrev) / dt, 18);
     if (this.grounded) {
       v.y -= 22 * dt;
-      if (groundVy < v.y - 0.8 && spd > 8) {
+      if (groundVy < v.y - 1.8 && spd > 8) {
         this.grounded = false; this.airTime = 0;
         p.y += v.y * dt;
       } else { p.y = gh; v.y = groundVy; }
@@ -148,9 +158,10 @@ export class Vehicle {
         const impact = groundVy - v.y;
         this.landing = impact;
         if (impact > 9) { v.x *= 0.95; v.z *= 0.95; }
-        p.y = gh; v.y = groundVy;
+        p.y = gh; v.y = Math.min(groundVy, 4);
         this.grounded = true;
         this.lastAir = this.airTime;
+        if (this.airTime > 0.3) { this.landCount = (this.landCount || 0) + 1; this.landAir = this.airTime; }
         this.airTime = 0;
       }
     }

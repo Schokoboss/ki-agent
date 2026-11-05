@@ -195,19 +195,21 @@ export class Events {
   }
 
   // ---------- Schanzen
-  updateJump() {
+  updateJump(dt) {
     const car = this.g.car;
     if (!this.jump) {
       if (car.grounded) return;
       for (const ev of this.list) {
         if (ev.type !== 'jump') continue;
         const ex = ev.x + Math.sin(ev.yaw) * 8, ez = ev.z + Math.cos(ev.yaw) * 8;
-        if (Math.hypot(car.pos.x - ex, car.pos.z - ez) < 9) { this.jump = { ev, x: car.pos.x, z: car.pos.z }; break; }
+        if (Math.hypot(car.pos.x - ex, car.pos.z - ez) < 9) { this.jump = { ev, x: car.pos.x, z: car.pos.z, n: car.landCount || 0, t: 0 }; break; }
       }
       return;
     }
-    if (car.grounded) {
-      const j = this.jump, ev = j.ev;
+    const j = this.jump;
+    j.t += dt;
+    if ((car.landCount || 0) !== j.n) {
+      const ev = j.ev;
       const d = Math.round(Math.hypot(car.pos.x - j.x, car.pos.z - j.z));
       const stars = ev.stars.filter(s => d >= s).length;
       const rec = this.g.save.best[ev.id] || 0;
@@ -215,7 +217,7 @@ export class Events {
       this.g.hud.banner(ev.name, `${d} m`, stars, d > rec && rec ? 'Neuer Rekord!' : '');
       this.giveStars(ev, stars);
       this.jump = null;
-    }
+    } else if (j.t > 8) this.jump = null;
   }
 
   // ---------------------------------------------------------------- Rennen

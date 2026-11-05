@@ -35,7 +35,7 @@ export function speedProfile(path, top, latAcc, brake, world, offroad) {
 export class RaceAI {
   constructor(scene, spec, color, name, skill) {
     this.spec = spec; this.name = name; this.skill = skill;
-    this.model = buildCar(spec, color);
+    this.model = buildCar(spec, color, { lod: 'ai' });
     this.dims = styleDims(spec.style);
     this.half = (this.dims.L / 2 - this.dims.W / 2) * 0.85; this.rad = this.dims.W / 2 * 0.95;
     scene.add(this.model);

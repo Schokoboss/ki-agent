@@ -3,7 +3,7 @@ import * as THREE from '../lib/three.module.min.js';
 import { World, FESTIVAL, HALF } from './terrain.js';
 import { Scenery } from './world.js';
 import { makeTextures } from './textures.js';
-import { buildCar, styleDims } from './carmodel.js';
+import { buildCar, styleDims, loadCarModels, setTailGlow } from './carmodel.js';
 import { Vehicle, carContact } from './physics.js';
 import { Traffic } from './ai.js';
 import { Events, Skills, TYPE_NAMES } from './events.js';
@@ -82,8 +82,8 @@ class Game {
     this.smoke = new Smoke(this.scene, this.T.puff, this.quality >= 1 ? 260 : 140);
     this.sparks = new Particles(this.scene, this.T.glow, 220, true);
     this.skids = new Skids(this.scene, this.quality >= 1 ? 1800 : 900);
-    prog(0.93, 'Autos tanken');
-    await frame();
+    prog(0.9, 'Autos aus der Werkstatt holen');
+    await loadCarModels(CARS.map(c => c.id), f => prog(0.9 + f * 0.08, 'Autos aus der Werkstatt holen'));
     // Spieler
     if (!this.save.current || !this.save.owned[this.save.current]) this.save.current = null;
     const spec = this.carSpec() || CARS[0];
@@ -797,7 +797,7 @@ class Game {
       w.spin.rotation.x = car.wheelRot;
       if (w.front) w.pivot.rotation.y = -car.steer * 0.45;
     }
-    if (ud.tailMat) ud.tailMat.color.set(inp.brake > 0 && car.vf > 0.5 ? 0xff2020 : (this.scenery.night > 0.4 ? 0xb01010 : 0x6a0808));
+    setTailGlow(this.carModel, inp.brake > 0 && car.vf > 0.5, this.scenery.night);
     this.headL.intensity = this.scenery.night > 0.3 ? 60 * this.scenery.night : 0;
     // Schatten-Fleck
     const gy = this.world.heightAt(car.pos.x, car.pos.z);
