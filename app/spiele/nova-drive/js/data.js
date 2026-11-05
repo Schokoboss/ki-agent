@@ -125,6 +125,13 @@ export const EVENTS = [
   { id: 'j_steppe', type: 'jump', name: 'Sprungschanze Steppe', x: 610, z: -400, yaw: Math.PI * 0.833, stars: [50, 85, 120] },
 ];
 
+// Gebäude-Modelle (Maße wie in werkstatt/welt.py: w = Breite der Vorderseite, d = Tiefe, Vorderseite = +z)
+export const HOUSES = {
+  town: [{ id: 'house_a', w: 10, d: 10 }, { id: 'house_b', w: 12, d: 11 }, { id: 'house_c', w: 9, d: 12 }, { id: 'house_e', w: 11, d: 13 }],
+  center: [{ id: 'house_b', w: 12, d: 11 }, { id: 'house_c', w: 9, d: 12 }, { id: 'house_d', w: 14, d: 12 }, { id: 'house_f', w: 16, d: 14 }],
+  farm: [{ id: 'farmhouse', w: 12, d: 10 }, { id: 'barn', w: 12, d: 18 }],
+};
+
 export const RADIO = ['Nova Pulse', 'Küstenwelle', 'Kiesel FM', 'Aus'];
 
 export const TIPS = [

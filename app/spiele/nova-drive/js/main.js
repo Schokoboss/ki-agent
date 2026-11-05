@@ -3,7 +3,8 @@ import * as THREE from '../lib/three.module.min.js';
 import { World, FESTIVAL, HALF } from './terrain.js';
 import { Scenery } from './world.js';
 import { makeTextures } from './textures.js';
-import { buildCar, styleDims, loadCarModels, setTailGlow } from './carmodel.js';
+import { buildCar, styleDims, loadCarModels, setTailGlow, setCarDetail } from './carmodel.js';
+import { loadWorldModels } from './models.js';
 import { Vehicle, carContact } from './physics.js';
 import { Traffic } from './ai.js';
 import { Events, Skills, TYPE_NAMES } from './events.js';
@@ -31,7 +32,7 @@ class Game {
     this.settings = Object.assign({ quality: 'auto', control: 'buttons', autoGas: false, sfx: 0.8, music: 0.45, station: 0, cam: 0, name: '', difficulty: 1, time: 'dyn' }, store.get(SET_KEY) || {});
     const mobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && innerWidth < 1100);
     this.mobile = mobile;
-    this.quality = this.settings.quality === 'auto' ? (mobile ? 1 : 2) : +this.settings.quality;
+    this.quality = this.settings.quality === 'auto' ? 2 : +this.settings.quality;
     this.state = 'loading';
     this.screen = null;
     this.camMode = this.settings.cam || 0;
@@ -65,7 +66,10 @@ class Game {
     this.world = new World(this.quality);
     this.world.events = EVENTS;
     await this.world.generate((p, m) => prog(p * 0.75, m));
-    prog(0.78, 'Landschaft bauen');
+    prog(0.76, 'Modelle aus der Werkstatt laden');
+    await loadWorldModels(f => prog(0.76 + f * 0.06, 'Modelle aus der Werkstatt laden'));
+    setCarDetail(this.quality);
+    prog(0.82, 'Landschaft bauen');
     await frame();
     this.scenery = new Scenery(this.scene, this.world, this.T, this.quality);
     this.scenery.build();
@@ -905,9 +909,8 @@ class Game {
     // bereits gesammelte Plakate gar nicht erst anzeigen
     for (const o of this.world.posters) if (this.save.posters.includes(o.poster) && o.alive) {
       o.alive = false;
-      const inst = this.scenery.instances.poster;
-      _m.makeScale(0, 0, 0); inst.im.setMatrixAt(o.inst, _m); inst.ib.setMatrixAt(o.inst, _m);
-      inst.im.instanceMatrix.needsUpdate = inst.ib.instanceMatrix.needsUpdate = true;
+      _m.makeScale(0, 0, 0); o.im.setMatrixAt(o.inst, _m); o.ib.setMatrixAt(o.inst, _m);
+      o.im.instanceMatrix.needsUpdate = o.ib.instanceMatrix.needsUpdate = true;
     }
     $('posters').textContent = `🎟 ${this.save.posters.length}/20`;
   }

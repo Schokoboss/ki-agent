@@ -7,6 +7,10 @@ Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
   Eigene Insel mit Küstenring, Altstadt, See, Pass, Wald und Festival; 9 Rennen gegen KI, Blitzer, Driftzonen, Schanzen,
   20 Plakate, Skill-Ketten, Tag/Nacht, generatives Radio, Freund-Herausforderung per Link (Geist).
 - 8 eigene Automodelle aus Blender (`werkstatt/autos.py`, Meshopt-komprimiert, zusammen < 1 MB).
+- Komplette Welt aus Blender-Modellen (`werkstatt/welt.py`, 31 Modelle): Bäume mit Detailstufen nach Entfernung,
+  Felsen, 8 Gebäudetypen (Fenster leuchten nachts), Laternen, Zäune, Pylonen, Heuballen, Plakatwände, Schanzen,
+  Bühne mit LED-Wand, Zirkuszelte, Riesenrad, Torbogen, Lichttürme, jubelnde Zuschauer, Segelboote, Windräder.
+  Gegner und Verkehr fahren die vollen Automodelle; Grafik-Standard „Hoch“.
 - Geld & Co.: Tagesbonus, 3 Tagesaufgaben, Glücksrad (nur Spielgeld), Auszahlung nach Platz/sauber/Schwierigkeit,
   Autos kaufen, tunen und verkaufen, Profil-Statistik.
 

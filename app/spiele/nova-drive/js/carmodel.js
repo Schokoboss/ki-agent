@@ -110,17 +110,24 @@ function prepLod(scene) {
 }
 const LOD_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.3, roughness: 0.45 });
 
+let DETAIL = 2;
+export function setCarDetail(q) { DETAIL = q; }
+
 function fromTemplate(spec, color, opts) {
   const id = TEMPL[spec.id] ? spec.id : STYLE_CAR[spec.style];
   const T = TEMPL[id];
-  if (!T || !(opts.lod ? T.lod : T.full)) return null;
+  if (!T) return null;
+  // Gegner & Verkehr: volles Blender-Modell (zusammengefasst), nur bei „Niedrig“ die Sparversion
+  if (opts.lod && DETAIL >= 1 && T.full && !T.fullMerged) T.fullMerged = prepLod(T.full);
+  const LODT = opts.lod ? (DETAIL >= 1 && T.fullMerged ? T.fullMerged : T.lod) : null;
+  if (opts.lod ? !LODT : !T.full) return null;
   const S = STYLES[spec.style] || STYLES.hatch;
   const root = new THREE.Group(), bodyG = new THREE.Group();
   root.add(bodyG);
   const wheels = [];
   let paintMat, tailMat = null;
   if (opts.lod) {
-    const L = T.lod;
+    const L = LODT;
     paintMat = new THREE.MeshStandardMaterial({ color, metalness: 0.45, roughness: 0.3 });
     const p = new THREE.Mesh(L.paintGeo, paintMat);
     const r = new THREE.Mesh(opts.lod === 'ai' ? L.restGeo : L.trafficGeo, LOD_MAT);

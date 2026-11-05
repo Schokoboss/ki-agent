@@ -4,6 +4,7 @@ import { HALF, N, CELL, FESTIVAL } from './terrain.js';
 import { part, merge, Builder } from './geo.js';
 import { clamp, lerp, smoothstep, fbm, perlin, mulberry32 } from './util.js';
 import { drawLed } from './textures.js';
+import { has, merged, clone, nodeGeometry, scene as modelScene } from './models.js';
 
 const lin = v => Math.pow(v, 2.2);
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
@@ -26,13 +27,16 @@ export class Scenery {
     this.buildTerrain();
     this.buildRoads();
     this.buildWater();
-    this.buildTrees();
-    this.buildRocks();
-    this.buildBuildings();
-    this.buildLamps();
-    this.buildFestival();
-    this.buildRamps();
-    this.buildSmashables();
+    this.buildTreesM();
+    this.buildRocksM();
+    this.buildBuildingsM();
+    this.buildLampsM();
+    this.buildFestivalM();
+    this.buildRampsM();
+    this.buildSmashablesM();
+    this.buildCrowd();
+    this.buildBoats();
+    this.buildTurbines();
     this.buildClouds();
     this.buildGlows();
     this.buildGates();
@@ -120,6 +124,7 @@ export class Scenery {
       this.waterU.night.value = this.night;
     }
     if (this.facadeMat) this.facadeMat.emissiveIntensity = this.night * 1.4;
+    if (this.winLitMat) this.winLitMat.emissiveIntensity = this.night * 1.3;
     if (this.lampHeadMat) this.lampHeadMat.color.set(this.night > 0.3 ? 0xfff0c0 : 0x9a9a9a);
     if (this.glowMat) this.glowMat.opacity = this.night * 0.9;
     if (this.cloudMat) {
@@ -612,18 +617,28 @@ export class Scenery {
     const board = new THREE.PlaneGeometry(5, 2.6);
     board.translate(0, 3.0, 0);
     this.posterBoardGeo = board;
+    this.buildSmashInstances();
+  }
+
+  buildSmashInstances() {
     const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
     this.smashMat = mat;
-    this.posterMat = new THREE.MeshBasicMaterial({ map: this.T.poster, side: THREE.DoubleSide });
-    const byKind = {};
-    for (const o of this.world.smash) (byKind[o.kind] ||= []).push(o);
-    for (const kind in byKind) {
-      const list = byKind[kind];
+    this.posterMat = new THREE.MeshBasicMaterial({ map: this.posterMap || this.T.poster, side: THREE.DoubleSide });
+    // in Blöcke (8×8) aufteilen, damit Entferntes ausgeblendet wird
+    const C = 8, size = (2 * HALF) / C, byKey = new Map();
+    for (const o of this.world.smash) {
+      const k = o.kind + ':' + (Math.floor((o.x + HALF) / size) * C + Math.floor((o.z + HALF) / size));
+      let a = byKey.get(k); if (!a) byKey.set(k, a = []);
+      a.push(o);
+    }
+    this.smashChunks = [];
+    for (const [key, list] of byKey) {
+      const kind = key.split(':')[0];
       const im = new THREE.InstancedMesh(this.smashGeo[kind], mat, list.length);
       let ib = null;
-      if (kind === 'poster') ib = new THREE.InstancedMesh(board, this.posterMat, list.length);
+      if (kind === 'poster') ib = new THREE.InstancedMesh(this.posterBoardGeo, this.posterMat, list.length);
       list.forEach((o, i) => {
-        o.inst = i;
+        o.inst = i; o.im = im; o.ib = ib;
         _m.compose(_p.set(o.x, o.y, o.z), _q.setFromEuler(_e.set(0, o.yaw, 0)), _s.set(1, 1, 1));
         im.setMatrixAt(i, _m);
         if (ib) ib.setMatrixAt(i, _m);
@@ -632,7 +647,8 @@ export class Scenery {
       im.castShadow = this.q >= 2 && kind !== 'fence';
       this.scene.add(im);
       if (ib) { ib.computeBoundingSphere(); this.scene.add(ib); }
-      this.instances[kind] = { im, ib };
+      this.smashChunks.push(im);
+      if (ib) this.smashChunks.push(ib);
     }
     // Trümmer-Pool
     this.debris = [];
@@ -646,10 +662,9 @@ export class Scenery {
 
   smashObject(o, vx, vz, speed) {
     o.alive = false;
-    const inst = this.instances[o.kind];
     _m.makeScale(0, 0, 0);
-    inst.im.setMatrixAt(o.inst, _m); inst.im.instanceMatrix.needsUpdate = true;
-    if (inst.ib) { inst.ib.setMatrixAt(o.inst, _m); inst.ib.instanceMatrix.needsUpdate = true; }
+    o.im.setMatrixAt(o.inst, _m); o.im.instanceMatrix.needsUpdate = true;
+    if (o.ib) { o.ib.setMatrixAt(o.inst, _m); o.ib.instanceMatrix.needsUpdate = true; }
     const d = this.debris.find(x => x.life <= 0) || this.debris[0];
     d.m.geometry = this.smashGeo[o.kind];
     d.m.position.set(o.x, o.y, o.z);
@@ -680,6 +695,364 @@ export class Scenery {
       if (d.life < 1) d.m.scale.setScalar(Math.max(0.01, d.life));
       if (d.life <= 0) d.m.visible = false;
     }
+  }
+
+  // ================================================================ Blender-Modelle
+  procTreeGeos() {
+    const pine = merge([
+      part(new THREE.CylinderGeometry(0.16, 0.28, 2.4, 6), '#5b4029', 0, 1.2, 0),
+      part(new THREE.ConeGeometry(2.1, 3.4, 7), '#2d5a31', 0, 3.3, 0),
+      part(new THREE.ConeGeometry(1.65, 3.0, 7), '#336636', 0, 5.0, 0, 0, 0.4),
+      part(new THREE.ConeGeometry(1.1, 2.4, 7), '#3a723c', 0, 6.6, 0, 0, 0.8),
+    ]);
+    const leaf = merge([
+      part(new THREE.CylinderGeometry(0.2, 0.32, 2.8, 6), '#5e4630', 0, 1.4, 0),
+      part(new THREE.IcosahedronGeometry(2.3, 0), '#4f8a36', 0, 4.3, 0),
+      part(new THREE.IcosahedronGeometry(1.7, 0), '#5c9a3e', 1.0, 5.3, 0.4, 0.5, 0.3),
+    ]);
+    const palm = merge([
+      part(new THREE.CylinderGeometry(0.18, 0.24, 8, 5), '#8a6a45', 0.6, 4, 0, 0, 0, -0.12),
+      part(new THREE.ConeGeometry(2.6, 1.4, 6), '#3f8f3f', 1.1, 7.8, 0, Math.PI),
+    ]);
+    return [pine, leaf, palm];
+  }
+
+  buildTreesM() {
+    if (!has('pine_a')) { this.treeLod = []; return this.buildTrees(); }
+    const hi = ['pine_a', 'pine_b', 'leaf_a', 'leaf_b', 'palm'].map(n => merged(n));
+    const lo = this.procTreeGeos();
+    const loOf = [0, 0, 1, 1, 2], loScale = [1.25, 1.62, 1.35, 1.3, 1.08];
+    const matHi = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    const matLo = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    const C = 8, size = (2 * HALF) / C;
+    const buckets = new Map(), rnd = mulberry32(5);
+    for (const t of this.world.trees) {
+      const v = t.type === 0 ? (rnd() < 0.55 ? 0 : 1) : t.type === 1 ? (rnd() < 0.7 ? 2 : 3) : 4;
+      const k = (Math.floor((t.x + HALF) / size) * C + Math.floor((t.z + HALF) / size)) * 5 + v;
+      let a = buckets.get(k); if (!a) buckets.set(k, a = []);
+      a.push(t);
+    }
+    this.treeLod = [];
+    this.treeChunks = [];
+    for (const [k, list] of buckets) {
+      const v = k % 5;
+      const imH = new THREE.InstancedMesh(hi[v], matHi, list.length);
+      const imL = new THREE.InstancedMesh(lo[loOf[v]], matLo, list.length);
+      list.forEach((t, i) => {
+        const sy = t.s * (0.9 + rnd() * 0.3);
+        _q.setFromEuler(_e.set(0, t.rot, 0));
+        _m.compose(_p.set(t.x, t.y - 0.15, t.z), _q, _s.set(t.s, sy, t.s));
+        imH.setMatrixAt(i, _m);
+        _m.compose(_p.set(t.x, t.y - 0.2, t.z), _q, _s.set(t.s * loScale[v], sy * loScale[v], t.s * loScale[v]));
+        imL.setMatrixAt(i, _m);
+        const c = 0.82 + rnd() * 0.3;
+        _c.setRGB(c * (0.95 + rnd() * 0.1), c, c * (0.9 + rnd() * 0.12));
+        imH.setColorAt(i, _c); imL.setColorAt(i, _c);
+      });
+      imH.computeBoundingSphere(); imL.computeBoundingSphere();
+      imH.castShadow = this.q >= 1;
+      imL.castShadow = false;
+      imL.visible = false;
+      this.scene.add(imH, imL);
+      this.treeLod.push({ hi: imH, lo: imL, c: imH.boundingSphere.center.clone(), r: imH.boundingSphere.radius });
+    }
+  }
+
+  buildRocksM() {
+    if (!has('rock_a')) return this.buildRocks();
+    const geos = ['rock_a', 'rock_b', 'rock_c'].map(n => merged(n));
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    const rnd = mulberry32(9);
+    for (let v = 0; v < 3; v++) {
+      const list = this.world.rocks.filter((_, i) => i % 3 === v);
+      if (!list.length) continue;
+      const im = new THREE.InstancedMesh(geos[v], mat, list.length);
+      list.forEach((r, i) => {
+        _m.compose(_p.set(r.x, r.y - r.s * 0.15, r.z), _q.setFromEuler(_e.set(r.tilt * 0.5, r.rot, 0)), _s.set(r.s * 0.95, r.s * 0.95, r.s * 0.95));
+        im.setMatrixAt(i, _m);
+        const c = 0.85 + rnd() * 0.3;
+        im.setColorAt(i, _c.setRGB(c, c * (0.97 + rnd() * 0.05), c * (0.94 + rnd() * 0.06)));
+      });
+      im.computeBoundingSphere();
+      im.castShadow = this.q >= 1; im.receiveShadow = true;
+      this.scene.add(im);
+    }
+  }
+
+  buildBuildingsM() {
+    if (!has('house_a')) return this.buildBuildings();
+    const byV = {};
+    for (const b of this.world.buildings) (byV[b.variant] ||= []).push(b);
+    const wallMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    const restMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+    this.winLitMat = new THREE.MeshLambertMaterial({ vertexColors: true, emissive: 0xffc46a, emissiveIntensity: 0 });
+    const winDark = new THREE.MeshLambertMaterial({ vertexColors: true });
+    const rnd = mulberry32(3);
+    for (const v in byV) {
+      const list = byV[v];
+      const parts = [
+        [merged(v, { mat: ['wall'] }), wallMat, list, true],
+        [merged(v, { notMat: ['wall', 'window'] }), restMat, list, false],
+        [merged(v, { mat: ['window'] }), this.winLitMat, list.filter(b => b.lit), false],
+        [merged(v, { mat: ['window'] }), winDark, list.filter(b => !b.lit), false],
+      ];
+      for (const [geo, mat, items, tint] of parts) {
+        if (!geo || !items.length) continue;
+        const im = new THREE.InstancedMesh(geo, mat, items.length);
+        items.forEach((b, i) => {
+          _m.compose(_p.set(b.x, b.y, b.z), _q.setFromEuler(_e.set(0, b.yaw, 0)), _s.set(1, 1, 1));
+          im.setMatrixAt(i, _m);
+          if (tint) { _c.setHSL(b.hue, 0.35 + rnd() * 0.25, 0.78 + rnd() * 0.1); im.setColorAt(i, _c); }
+        });
+        im.computeBoundingSphere();
+        im.castShadow = this.q >= 1 && tint; im.receiveShadow = true;
+        this.scene.add(im);
+      }
+    }
+  }
+
+  buildLampsM() {
+    if (!has('lamp')) return this.buildLamps();
+    const L = this.world.lamps;
+    if (!L.length) return;
+    const pole = merged('lamp', { notMat: ['bulb'] }), bulb = merged('lamp', { mat: ['bulb'] });
+    const im = new THREE.InstancedMesh(pole, new THREE.MeshLambertMaterial({ vertexColors: true }), L.length);
+    this.lampHeadMat = new THREE.MeshBasicMaterial({ color: 0x9a9a9a });
+    const ih = new THREE.InstancedMesh(bulb, this.lampHeadMat, L.length);
+    L.forEach((l, i) => {
+      _m.compose(_p.set(l.x, l.y, l.z), _q.setFromEuler(_e.set(0, l.yaw + Math.PI, 0)), _s.set(1, 1, 1));
+      im.setMatrixAt(i, _m); ih.setMatrixAt(i, _m);
+      this.glowPts.push([l.x + Math.sin(l.yaw) * 1.9, l.y + 8.35, l.z + Math.cos(l.yaw) * 1.9, 1.0, 0.85, 0.55, 10]);
+    });
+    im.computeBoundingSphere(); ih.computeBoundingSphere();
+    im.castShadow = this.q >= 1;
+    this.scene.add(im, ih);
+  }
+
+  buildFestivalM() {
+    if (!has('stage') || !has('ferris')) return this.buildFestival();
+    const F = this.world.festival, T = this.T, w = this.world;
+    const g = new THREE.Group();
+    // Bühne
+    const st = F.stage, y0 = w.baseAt(st.x, st.z);
+    const stage = clone('stage');
+    stage.position.set(st.x, y0, st.z);
+    stage.updateMatrixWorld(true);
+    stage.traverse(o => { if (o.isMesh && o.material.name === 'led') { this.ledMap = fixMirror(o, T.led); o.material = new THREE.MeshBasicMaterial({ map: this.ledMap }); o.castShadow = false; } });
+    this.stageLights = [];
+    for (let i = 0; i < 8; i++) {
+      const beam = new THREE.Mesh(new THREE.ConeGeometry(2.2, 40, 12, 1, true), new THREE.MeshBasicMaterial({
+        color: new THREE.Color().setHSL(i / 8, 1, 0.6), transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+      }));
+      beam.geometry.translate(0, -20, 0);
+      const holder = new THREE.Group();
+      holder.position.set(-st.w / 2 + 3 + i * (st.w - 6) / 7, st.h + 0.6, -st.d / 2 + 0.5);
+      holder.add(beam);
+      stage.add(holder);
+      this.stageLights.push(holder);
+    }
+    g.add(stage);
+    // Torbogen
+    const arch = clone('arch');
+    arch.position.set(F.arch.x, w.baseAt(F.arch.x, F.arch.z), F.arch.z);
+    arch.updateMatrixWorld(true);
+    arch.traverse(o => { if (o.isMesh && o.material.name === 'banner') { o.material = new THREE.MeshBasicMaterial({ map: fixMirror(o, T.banner) }); o.castShadow = false; } });
+    g.add(arch);
+    // Zelte (Instanzen)
+    const tg = merged('tent');
+    const tim = new THREE.InstancedMesh(tg, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }), F.tents.length);
+    F.tents.forEach((t, i) => {
+      const ty = w.baseAt(t.x, t.z);
+      _m.compose(_p.set(t.x, ty, t.z), _q.setFromEuler(_e.set(0, Math.atan2(FESTIVAL.x - t.x, FESTIVAL.z - t.z), 0)), _s.set(1, 1, 1));
+      tim.setMatrixAt(i, _m);
+      this.glowPts.push([t.x, ty + 9.6, t.z, 1, 0.4, 0.7, 6]);
+    });
+    tim.computeBoundingSphere(); tim.castShadow = true;
+    g.add(tim);
+    // Lichttürme
+    const twg = merged('tower');
+    const twm = new THREE.InstancedMesh(twg, new THREE.MeshLambertMaterial({ vertexColors: true }), F.towers.length);
+    this.towerBeams = [];
+    F.towers.forEach((t, i) => {
+      const ty = w.baseAt(t.x, t.z);
+      _m.compose(_p.set(t.x, ty, t.z), _q.setFromEuler(_e.set(0, Math.atan2(FESTIVAL.x - t.x, FESTIVAL.z - t.z), 0)), _s.set(1, 1, 1));
+      twm.setMatrixAt(i, _m);
+      const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 7, 160, 12, 1, true), new THREE.MeshBasicMaterial({
+        color: new THREE.Color().setHSL(i / 6, 0.9, 0.6), transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+      }));
+      beam.geometry.translate(0, 80, 0);
+      const holder = new THREE.Group(); holder.position.set(t.x, ty + 19, t.z); holder.add(beam);
+      g.add(holder);
+      this.towerBeams.push(holder);
+      this.glowPts.push([t.x, ty + 18.8, t.z, 1, 1, 1, 10]);
+    });
+    twm.computeBoundingSphere(); twm.castShadow = true;
+    g.add(twm);
+    // Riesenrad: Rotor dreht, Gondeln bleiben waagerecht (Drehpunkte fest: Achse y = 24, Gondel-Aufhängung)
+    const wh = F.wheel;
+    const fw = clone('ferris');
+    for (const n of ['rotor', 'gondola']) { const o = fw.getObjectByName(n); if (o) o.parent.remove(o); }
+    fw.position.set(wh.x, w.baseAt(wh.x, wh.z), wh.z);
+    fw.rotation.y = Math.PI / 2;
+    const AX = 24, R = 20;
+    const rg = merged('ferris', { node: ['rotor'] }).translate(0, -AX, 0);
+    const gg = merged('ferris', { node: ['gondola'] });
+    gg.computeBoundingBox();
+    const gb = gg.boundingBox;
+    gg.translate(-(gb.min.x + gb.max.x) / 2, -gb.max.y, -(gb.min.z + gb.max.z) / 2);
+    this.wheelMat = new THREE.MeshLambertMaterial({ vertexColors: true, emissive: 0xff3d9a, emissiveIntensity: 0 });
+    const rotor = new THREE.Mesh(rg, this.wheelMat);
+    rotor.position.y = AX; rotor.castShadow = true;
+    fw.add(rotor);
+    this.gondolas = [];
+    const cols = [0xff9ab8, 0xffe79a, 0x9ae8ff, 0xc2a8ff];
+    const gmats = cols.map(c => new THREE.MeshLambertMaterial({ vertexColors: true, color: c }));
+    for (let i = 0; i < 14; i++) {
+      const a = i / 14 * Math.PI * 2;
+      const gc = new THREE.Mesh(gg, gmats[i % 4]);
+      gc.position.set(Math.cos(a) * R, Math.sin(a) * R, 0);
+      gc.castShadow = true;
+      rotor.add(gc);
+      this.gondolas.push(gc);
+    }
+    this.wheelRot = rotor;
+    g.add(fw);
+    // Wimpelketten zwischen den Türmen
+    const flagCols = ['#ff3d7f', '#ffd23f', '#1fd1ff', '#7a3dff', '#36e27a'];
+    const flags = [];
+    for (let i = 0; i < F.towers.length; i++) {
+      const a = F.towers[i], b = F.towers[(i + 1) % F.towers.length];
+      const ya = w.baseAt(a.x, a.z) + 13, yb = w.baseAt(b.x, b.z) + 13;
+      const L = Math.hypot(b.x - a.x, b.z - a.z), cnt = Math.floor(L / 2.2);
+      for (let k = 1; k < cnt; k++) {
+        const t = k / cnt, x = lerp(a.x, b.x, t), z = lerp(a.z, b.z, t), y = lerp(ya, yb, t) - Math.sin(t * Math.PI) * 3.5;
+        flags.push(part(new THREE.ConeGeometry(0.45, 1.1, 3), flagCols[k % 5], x, y - 0.55, z, Math.PI, Math.atan2(b.x - a.x, b.z - a.z), 0));
+      }
+    }
+    if (flags.length) g.add(new THREE.Mesh(merge(flags), new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide })));
+    // Absperrung vor den Zuschauern
+    const cr = F.crowd;
+    if (cr && has('fence')) {
+      const fg = merged('fence'), n = Math.ceil(cr.hx * 2 / 4);
+      const fm = new THREE.InstancedMesh(fg, new THREE.MeshLambertMaterial({ vertexColors: true }), n);
+      for (let i = 0; i < n; i++) {
+        const x = cr.x - cr.hx + 2 + i * 4, z = cr.z - cr.hz - 0.2;
+        _m.compose(_p.set(x, w.baseAt(x, z), z), _q.identity(), _s.set(1, 1, 1));
+        fm.setMatrixAt(i, _m);
+      }
+      fm.computeBoundingSphere();
+      g.add(fm);
+    }
+    this.scene.add(g);
+  }
+
+  buildRampsM() {
+    if (!has('ramp')) return this.buildRamps();
+    const geo = merged('ramp');
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+    for (const r of this.world.ramps) {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(r.x, r.y + 0.3, r.z);
+      m.rotation.y = r.yaw;
+      m.castShadow = true; m.receiveShadow = true;
+      this.scene.add(m);
+    }
+  }
+
+  buildSmashablesM() {
+    if (!has('fence') || !has('poster')) return this.buildSmashables();
+    this.smashGeo = { fence: merged('fence'), cone: merged('cone'), hay: merged('hay'), poster: merged('poster', { notNode: ['board'] }) };
+    this.posterBoardGeo = nodeGeometry('poster', 'board') || new THREE.PlaneGeometry(5, 2.6).translate(0, 3, 0);
+    this.posterMap = fixMirror(new THREE.Mesh(this.posterBoardGeo), this.T.poster);
+    this.buildSmashInstances();
+  }
+
+  // ---------- Zuschauer, Boote, Windräder
+  buildCrowd() {
+    const C = this.world.festival.crowd;
+    if (!C || !has('person_a')) return;
+    const rnd = mulberry32(21), items = [[], []];
+    for (let z = C.z - C.hz + 1; z < C.z + C.hz - 0.5; z += 1.25) {
+      for (let x = C.x - C.hx + 1; x < C.x + C.hx - 0.5; x += 1.05) {
+        if (rnd() > 0.5) continue;
+        const v = rnd() < 0.45 ? 1 : 0;
+        items[v].push({ x: x + (rnd() - 0.5) * 0.5, z: z + (rnd() - 0.5) * 0.5, yaw: (rnd() - 0.5) * 0.6, ph: rnd() * 6.28, s: 0.9 + rnd() * 0.2, hue: rnd() });
+      }
+    }
+    this.crowd = [];
+    const clothMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    const restMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    ['person_a', 'person_b'].forEach((n, v) => {
+      const list = items[v];
+      if (!list.length) return;
+      const cloth = new THREE.InstancedMesh(merged(n, { mat: ['cloth'] }), clothMat, list.length);
+      const rest = new THREE.InstancedMesh(merged(n, { notMat: ['cloth'] }), restMat, list.length);
+      list.forEach((p, i) => {
+        p.y = this.world.baseAt(p.x, p.z);
+        cloth.setColorAt(i, _c.setHSL(p.hue, 0.75, 0.55));
+        const skin = [0.95, 0.8, 0.62, 0.45][Math.floor(p.hue * 97) % 4];
+        rest.setColorAt(i, _c.setRGB(skin + 0.05, skin, skin));
+      });
+      cloth.castShadow = rest.castShadow = this.q >= 2;
+      this.scene.add(cloth, rest);
+      this.crowd.push({ list, meshes: [cloth, rest] });
+    });
+    this.animCrowd(0, 0);
+    for (const c of this.crowd) for (const m of c.meshes) { m.computeBoundingSphere(); m.boundingSphere.radius += 2; }
+  }
+  animCrowd(t, beat) {
+    for (const c of this.crowd || []) {
+      c.list.forEach((p, i) => {
+        const j = Math.max(0, Math.sin(t * 6.5 + p.ph)) * (0.12 + beat * 0.25);
+        _m.compose(_p.set(p.x, p.y + j, p.z), _q.setFromEuler(_e.set(0, p.yaw + Math.sin(t * 1.3 + p.ph) * 0.15, 0)), _s.set(p.s, p.s, p.s));
+        for (const m of c.meshes) m.setMatrixAt(i, _m);
+      });
+      for (const m of c.meshes) m.instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  buildBoats() {
+    const B = this.world.boats;
+    if (!B || !B.length || !has('boat')) return;
+    this.boatIM = new THREE.InstancedMesh(merged('boat'), new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }), B.length);
+    this.boatIM.castShadow = true;
+    this.boatIM.frustumCulled = false;
+    this.scene.add(this.boatIM);
+    this.animBoats(0);
+  }
+  animBoats(t) {
+    if (!this.boatIM) return;
+    this.world.boats.forEach((b, i) => {
+      const a = t * 0.01 * b.speed + b.phase, rr = b.lake ? 18 : 60;
+      const x = b.x + Math.cos(a) * rr, z = b.z + Math.sin(a) * rr;
+      _m.compose(_p.set(x, Math.sin(t * 0.9 + b.phase) * 0.25 - 0.15, z),
+        _q.setFromEuler(_e.set(Math.sin(t * 0.7 + b.phase) * 0.05, a + Math.PI, Math.sin(t * 1.1 + b.phase) * 0.07 + 0.08)), _s.set(1, 1, 1));
+      this.boatIM.setMatrixAt(i, _m);
+    });
+    this.boatIM.instanceMatrix.needsUpdate = true;
+  }
+
+  buildTurbines() {
+    const T = this.world.turbines;
+    if (!T || !T.length || !has('turbine')) return;
+    const base = merged('turbine', { notNode: ['rotor'] });
+    const pivot = new THREE.Vector3(0, 63.2, 3.4); // wie in werkstatt/welt.py
+    const rot = merged('turbine', { node: ['rotor'] }).translate(-pivot.x, -pivot.y, -pivot.z);
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+    const im = new THREE.InstancedMesh(base, mat, T.length);
+    this.rotors = [];
+    T.forEach((t, i) => {
+      _m.compose(_p.set(t.x, t.y - 0.3, t.z), _q.setFromEuler(_e.set(0, t.yaw, 0)), _s.set(1, 1, 1));
+      im.setMatrixAt(i, _m);
+      const holder = new THREE.Group();
+      holder.position.set(t.x, t.y - 0.3, t.z); holder.rotation.y = t.yaw;
+      const r = new THREE.Mesh(rot, mat); r.position.copy(pivot); r.rotation.z = t.phase; r.castShadow = true;
+      holder.add(r); this.scene.add(holder);
+      this.rotors.push(r);
+      this.glowPts.push([t.x + Math.sin(t.yaw) * -0.5, t.y + 64.5, t.z + Math.cos(t.yaw) * -0.5, 1, 0.1, 0.1, 6]);
+    });
+    im.computeBoundingSphere(); im.castShadow = true;
+    this.scene.add(im);
   }
 
   // ---------------------------------------------------------------- Wolken, Leuchtpunkte
@@ -776,12 +1149,24 @@ export class Scenery {
     this.sun.target.position.copy(playerPos);
     this.waterU.fogNear.value = this.scene.fog.near; this.waterU.fogFar.value = this.scene.fog.far;
     for (const c of this.clouds) { c.position.x += dt * 4; if (c.position.x > 2200) c.position.x = -2200; }
-    // Baum-Blöcke hinter dem Nebel ausblenden
+    // Baum-Blöcke: nah = Blender-Modell, fern = einfache Form, hinter dem Nebel aus
     const fogFar = this.scene.fog.far;
-    for (const im of this.treeChunks) {
+    for (const im of this.treeChunks || []) {
       const bs = im.boundingSphere;
       im.visible = Math.hypot(bs.center.x - camPos.x, bs.center.z - camPos.z) < fogFar + bs.radius;
     }
+    for (const im of this.smashChunks || []) {
+      const bs = im.boundingSphere;
+      im.visible = Math.hypot(bs.center.x - camPos.x, bs.center.z - camPos.z) < Math.min(fogFar, 700) + bs.radius;
+    }
+    const lodD = this.q >= 2 ? 420 : this.q >= 1 ? 300 : 180;
+    for (const L of this.treeLod || []) {
+      const d = Math.hypot(L.c.x - camPos.x, L.c.z - camPos.z) - L.r;
+      L.hi.visible = d < lodD;
+      L.lo.visible = !L.hi.visible && d < fogFar;
+    }
+    if (this.rotors) for (const r of this.rotors) r.rotation.z -= dt * 0.9;
+    this.animBoats(t);
     // Festival
     const nearFest = Math.hypot(camPos.x - FESTIVAL.x, camPos.z - FESTIVAL.z) < 700;
     if (this.wheelRot) {
@@ -790,8 +1175,10 @@ export class Scenery {
       this.wheelMat.emissiveIntensity = this.night * 0.9;
     }
     if (nearFest) {
+      this._crT = (this._crT || 0) + dt;
+      if (this._crT > 1 / 30) { this._crT = 0; this.animCrowd(t, beat); }
       this._ledT = (this._ledT || 0) + dt;
-      if (this._ledT > 0.1) { this._ledT = 0; drawLed(this.T, t, beat); }
+      if (this._ledT > 0.1) { this._ledT = 0; drawLed(this.T, t, beat); if (this.ledMap) this.ledMap.needsUpdate = true; }
       this.stageLights.forEach((h, i) => { h.rotation.z = Math.sin(t * 1.3 + i) * 0.6; h.rotation.x = -0.5 + Math.cos(t * 0.9 + i * 0.7) * 0.35; });
       this.towerBeams.forEach((h, i) => { h.rotation.z = Math.sin(t * 0.4 + i * 1.3) * 0.45; h.rotation.x = Math.cos(t * 0.33 + i) * 0.45; h.children[0].material.opacity = 0.05 + this.night * 0.2; });
     }
@@ -809,6 +1196,34 @@ export class Scenery {
 }
 
 // Punkte-Material mit Größe pro Punkt (Leuchten, Partikel)
+// Canvas-Textur auf einer Blender-Fläche lesbar ausrichten (glTF: Bildzeilen von oben → flipY aus;
+// dann prüfen, ob Bild-oben nach oben zeigt und ob es gespiegelt ist)
+export function fixMirror(mesh, map) {
+  const g = mesh.geometry, P = g.attributes.position, U = g.attributes.uv;
+  const m = map.clone();
+  m.flipY = false;
+  m.wrapS = m.wrapT = THREE.RepeatWrapping;
+  m.needsUpdate = true;
+  if (!U) return m;
+  mesh.updateMatrixWorld(true);
+  const ix = g.index ? [g.index.getX(0), g.index.getX(1), g.index.getX(2)] : [0, 1, 2];
+  const p = ix.map(i => new THREE.Vector3().fromBufferAttribute(P, i).applyMatrix4(mesh.matrixWorld));
+  const u = ix.map(i => new THREE.Vector2().fromBufferAttribute(U, i));
+  const e1 = p[1].clone().sub(p[0]), e2 = p[2].clone().sub(p[0]);
+  const du1 = u[1].x - u[0].x, dv1 = u[1].y - u[0].y, du2 = u[2].x - u[0].x, dv2 = u[2].y - u[0].y;
+  const r = 1 / ((du1 * dv2 - du2 * dv1) || 1e-6);
+  const T = e1.clone().multiplyScalar(dv2).sub(e2.clone().multiplyScalar(dv1)).multiplyScalar(r); // Richtung +u
+  const Bv = e2.clone().multiplyScalar(du1).sub(e1.clone().multiplyScalar(du2)).multiplyScalar(r); // Richtung +v
+  const N = e1.clone().cross(e2).normalize();
+  let up = Bv.clone().negate(); // flipY aus: Bild-oben = −v
+  let flipV = false, flipU = false;
+  if (up.y < 0) { flipV = true; up.negate(); }
+  if (T.clone().cross(up).dot(N) < 0) flipU = true;
+  m.repeat.set(flipU ? -1 : 1, flipV ? -1 : 1);
+  m.offset.set(flipU ? 1 : 0, flipV ? 1 : 0);
+  return m;
+}
+
 export function makePointMaterial(map, additive) {
   return new THREE.ShaderMaterial({
     uniforms: { map: { value: map }, opacity: { value: 1 }, scale: { value: 600 } },

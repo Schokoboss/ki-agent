@@ -352,11 +352,10 @@ def fence():
     wood2 = M('wood2', (0.4, 0.28, 0.17), 0, 0.85)
     parts = []
     for x in (-1.95, 0, 1.95):
-        parts.append(box((x, 0.6, 0), (0.14, 1.25, 0.14), wood, (0, 0, (x * 0.01)), 0.015))
-        parts.append(cone((x, 1.27, 0), 0.1, 0.0, 0.1, wood, 4, (0, 0.78, 0)))
+        parts.append(box((x, 0.6, 0), (0.14, 1.25, 0.14), wood, (0, 0, (x * 0.01)), 0.0))
     for y in (0.45, 0.9):
-        parts.append(box((0, y, 0.09), (4.0, 0.13, 0.05), wood2, bevel=0.01))
-    parts.append(box((-0.97, 0.68, 0.12), (2.1, 0.1, 0.04), wood2, (0, 0, 0.22), 0.01))
+        parts.append(box((0, y, 0.09), (4.0, 0.13, 0.05), wood2, bevel=0.0))
+    parts.append(box((-0.97, 0.68, 0.12), (2.1, 0.1, 0.04), wood2, (0, 0, 0.22), 0.0))
     export([join(parts, 'fence')], 'fence')
 
 
@@ -365,9 +364,9 @@ def cone_model():
     org = M('orange', (0.9, 0.18, 0.01), 0, 0.5)
     white = M('reflect', (0.95, 0.95, 0.95), 0.2, 0.3)
     blk = M('rubber', (0.03, 0.03, 0.03), 0, 0.9)
-    parts = [box((0, 0.03, 0), (0.62, 0.06, 0.62), blk, bevel=0.03), cone((0, 0.42, 0), 0.27, 0.05, 0.74, org, 16)]
-    parts.append(cyl((0, 0.47, 0), 0.172, 0.12, white, verts=16))
-    parts.append(cyl((0, 0.29, 0), 0.22, 0.08, white, verts=16))
+    parts = [box((0, 0.03, 0), (0.62, 0.06, 0.62), blk, bevel=0.0), cone((0, 0.42, 0), 0.27, 0.05, 0.74, org, 10)]
+    parts.append(cyl((0, 0.47, 0), 0.172, 0.12, white, verts=10))
+    parts.append(cyl((0, 0.29, 0), 0.22, 0.08, white, verts=10))
     export([join(parts, 'cone')], 'cone')
 
 
@@ -375,13 +374,13 @@ def hay():
     reset()
     h = M('hay', (0.55, 0.42, 0.14), 0, 0.95)
     h2 = M('hay2', (0.45, 0.33, 0.1), 0, 0.95)
-    o = cyl((0, 0.85, 0), 0.85, 1.5, h, (0, 0, math.pi / 2), 20)
+    o = cyl((0, 0.85, 0), 0.85, 1.5, h, (0, 0, math.pi / 2), 14)
     bv = o.modifiers.new('b', 'BEVEL')
-    bv.width = 0.18
-    bv.segments = 3
+    bv.width = 0.16
+    bv.segments = 1
     parts = [o]
-    for x in (-0.45, 0.0, 0.45):
-        parts.append(cyl((x, 0.85, 0), 0.865, 0.05, h2, (0, 0, math.pi / 2), 20))
+    for x in (-0.4, 0.4):
+        parts.append(cyl((x, 0.85, 0), 0.865, 0.05, h2, (0, 0, math.pi / 2), 14))
     export([join(parts, 'hay')], 'hay')
 
 

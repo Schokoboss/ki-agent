@@ -1,6 +1,6 @@
 // Weltdaten ohne Grafik: Höhenkarte, Straßen, Untergrund, Hindernisse und Deko-Positionen.
 import { clamp, lerp, smoothstep, perlin, fbm, ridged, mulberry32, Path } from './util.js';
-import { ROADS, CROSS } from './data.js';
+import { ROADS, CROSS, HOUSES } from './data.js';
 
 export const HALF = 1300, CELL = 4, N = (HALF * 2) / CELL + 1;
 export const SURF = { GRASS: 0, ASPHALT: 1, DIRT: 2, SAND: 3, ROCK: 4, SNOW: 5, WATER: 6, GRAVEL: 7 };
@@ -282,47 +282,75 @@ export class World {
       this.festival.towers.push({ x, z });
       this.addCollider({ t: 0, x, z, r: 0.9 });
     }
-    // --- Häuser in der Stadt entlang der Straßen
+    // Zuschauerbereich vor der Bühne (abgesperrt)
+    this.festival.crowd = { x: F.x, z: F.z + 91, hx: 23, hz: 8.5 };
+    this.addCollider({ t: 1, x: F.x, z: F.z + 91, hx: 23, hz: 8.5, c: 1, s: 0 });
+    // --- Häuser (Blender-Modelle) entlang der Stadtstraßen, Vorderseite zur Straße
+    const placeHouse = (V, pt, side, hw, gap, farm) => {
+      const nx = -pt.tz * side, nz = pt.tx * side; // von der Straße weg
+      const off = hw + gap + V.d / 2;
+      const x = pt.x + nx * off, z = pt.z + nz * off;
+      const yaw = Math.atan2(-nx, -nz); // Modell-Vorderseite (+z) schaut zur Straße
+      const c = Math.cos(yaw), sn = Math.sin(yaw);
+      for (const [a, b] of [[0, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+        const px = x + (a * V.w / 2) * c + (b * V.d / 2) * sn, pz = z - (a * V.w / 2) * sn + (b * V.d / 2) * c;
+        if (this.edgeAt(px, pz) < 2.5) return false;
+      }
+      if (!free(x, z, Math.max(V.w, V.d) * 0.5)) return false;
+      if (farm && (this.baseAt(x, z) < 3 || onCross(x, z) || this.nearRamp(x, z, 160))) return false;
+      this.buildings.push({ x, z, w: V.w, d: V.d, yaw, y: this.baseAt(x, z), hue: rnd(), variant: V.id, farm, lit: rnd() < 0.6 });
+      this.addCollider({ t: 1, x, z, hx: V.w / 2, hz: V.d / 2, c, s: sn });
+      return true;
+    };
     const town = ['stadt', 'markt', 'see'].map(id => this.roadById[id]);
     for (const r of town) {
       const p = r.path, hw = r.def.hw;
-      for (let s = 6; s < p.length; s += 13 + rnd() * 6) {
+      for (let s = 6; s < p.length; s += 15 + rnd() * 5) {
         const pt = p.at(s, {});
-        if (Math.hypot(pt.x - TOWN.x, pt.z - TOWN.z) > TOWN.r - 30) continue;
+        const dc = Math.hypot(pt.x - TOWN.x, pt.z - TOWN.z);
+        if (dc > TOWN.r - 30) continue;
         for (const side of [-1, 1]) {
-          if (rnd() < 0.12) continue;
-          const w = 9 + rnd() * 8, d = 10 + rnd() * 9;
-          const off = hw + 5 + d / 2;
-          const nx = -pt.tz * side, nz = pt.tx * side;
-          const x = pt.x + nx * off, z = pt.z + nz * off;
-          const yaw = Math.atan2(pt.tx, pt.tz);
-          const c = Math.cos(yaw), sn = Math.sin(yaw);
-          let ok = true;
-          for (const [a, b] of [[0, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-            const px = x + (a * w / 2) * c + (b * d / 2) * sn, pz = z - (a * w / 2) * sn + (b * d / 2) * c;
-            if (this.edgeAt(px, pz) < 2.5) { ok = false; break; }
-          }
-          if (!ok || !free(x, z, Math.max(w, d) * 0.45)) continue;
-          const h = 7 + rnd() * 5 + (Math.hypot(x - TOWN.x, z - TOWN.z) < 150 ? rnd() * 14 : 0);
-          const b = { x, z, w, d, h, yaw, y: this.baseAt(x, z), hue: rnd(), roof: rnd() < 0.55 };
-          this.buildings.push(b);
-          this.addCollider({ t: 1, x, z, hx: w / 2, hz: d / 2, c, s: sn });
+          if (rnd() < 0.1) continue;
+          const list = dc < 140 ? HOUSES.center : HOUSES.town;
+          placeHouse(list[Math.floor(rnd() * list.length)], pt, side, hw, 4.5, false);
         }
       }
     }
-    // --- Bauernhöfe an der Küstenstraße
+    // --- Bauernhöfe an der Küstenstraße (Haus + Scheune)
     const ring = this.roadById.kueste.path;
-    for (let n = 0; n < 26; n++) {
+    for (let n = 0; n < 30; n++) {
       const s = rnd() * ring.length, pt = ring.at(s, {});
-      const side = rnd() < 0.5 ? -1 : 1, off = 22 + rnd() * 30;
-      const x = pt.x - pt.tz * side * off, z = pt.z + pt.tx * side * off;
-      if (Math.hypot(x - TOWN.x, z - TOWN.z) < TOWN.r + 40) continue;
-      const h0 = this.baseAt(x, z);
-      if (h0 < 3 || this.edgeAt(x, z) < 12 || !free(x, z, 14) || onCross(x, z) || this.nearRamp(x, z, 160)) continue;
-      const yaw = Math.atan2(pt.tx, pt.tz) + (rnd() < 0.5 ? 0 : Math.PI / 2);
-      const w = 10 + rnd() * 6, d = 14 + rnd() * 8;
-      this.buildings.push({ x, z, w, d, h: 6 + rnd() * 3, yaw, y: h0, hue: 0.05 + rnd() * 0.08, roof: true, farm: true });
-      this.addCollider({ t: 1, x, z, hx: w / 2, hz: d / 2, c: Math.cos(yaw), s: Math.sin(yaw) });
+      const side = rnd() < 0.5 ? -1 : 1;
+      if (Math.hypot(pt.x - TOWN.x, pt.z - TOWN.z) < TOWN.r + 60) continue;
+      if (placeHouse(HOUSES.farm[0], pt, side, 7, 16 + rnd() * 10, true)) {
+        const pt2 = ring.at(s + 24, {});
+        placeHouse(HOUSES.farm[1], pt2, side, 7, 22 + rnd() * 8, true);
+      }
+    }
+    // --- Windräder auf Hügeln
+    this.turbines = [];
+    for (let t = 0; t < 500 && this.turbines.length < 7; t++) {
+      const a = rnd() * Math.PI * 2, rr = 380 + rnd() * 560;
+      const x = Math.cos(a) * rr, z = Math.sin(a) * rr;
+      const h = this.baseAt(x, z);
+      if (h < 16 || h > 90 || this.edgeAt(x, z) < 45 || onCross(x, z) || this.nearRamp(x, z, 200)) continue;
+      if (Math.hypot(x - FESTIVAL.x, z - FESTIVAL.z) < 300 || Math.hypot(x - TOWN.x, z - TOWN.z) < TOWN.r + 60) continue;
+      if (this.turbines.some(o => Math.hypot(o.x - x, o.z - z) < 170) || !free(x, z, 20)) continue;
+      this.turbines.push({ x, z, y: h, yaw: 2.3 + rnd() * 0.3, phase: rnd() * 6 });
+      this.addCollider({ t: 0, x, z, r: 2.6 });
+    }
+    // --- Boote auf dem Meer und dem See
+    this.boats = [];
+    for (let k = 0; k < 9; k++) {
+      const a = k / 9 * Math.PI * 2 + rnd() * 0.4;
+      let rr = 950;
+      while (rr < 1250 && this.baseAt(Math.cos(a) * rr, Math.sin(a) * rr) > -7) rr += 10;
+      rr += 30 + rnd() * 80;
+      this.boats.push({ x: Math.cos(a) * rr, z: Math.sin(a) * rr, yaw: a + Math.PI / 2 + (rnd() - 0.5), phase: rnd() * 6, speed: 1 + rnd() * 2 });
+    }
+    for (const [dx, dz] of [[-45, 10], [40, -25]]) {
+      const x = LAKE.x + dx, z = LAKE.z + dz;
+      if (this.baseAt(x, z) < -3) this.boats.push({ x, z, yaw: rnd() * 6, phase: rnd() * 6, speed: 0.6, lake: true });
     }
     // --- Schanzen
     for (const ev of this.events || []) {
@@ -379,7 +407,7 @@ export class World {
         if (h < 5) dens = 0.25; // Strand: einzelne Palmen
         if (rnd() > dens * 0.9) continue;
         if (this.surfaceAt(x, z) === SURF.ROCK && rnd() < 0.7) continue;
-        if (this.nearRamp(x, z, 140) || onCross(x, z)) continue;
+        if (this.nearRamp(x, z, 140) || onCross(x, z) || !free(x, z, 1.2)) continue;
         const type = h < 5 ? 2 : (h > 45 || z < -250 || rnd() < 0.3) ? 0 : 1; // 0 Tanne, 1 Laubbaum, 2 Palme
         const sc = 0.75 + rnd() * 0.6;
         this.trees.push({ x, z, y: h, s: sc, type, rot: rnd() * 6.28 });
