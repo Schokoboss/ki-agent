@@ -29,7 +29,8 @@ const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _m = new THREE.Matrix
 class Game {
   constructor() {
     this.save = Object.assign({ credits: 25000, fans: 0, owned: {}, current: null, best: {}, stars: {}, posters: [], races: 0, wins: 0 }, store.get(SAVE_KEY) || {});
-    this.settings = Object.assign({ quality: 'auto', control: 'buttons', autoGas: false, sfx: 0.8, music: 0.45, station: 0, cam: 0, name: '', difficulty: 1, time: 'dyn' }, store.get(SET_KEY) || {});
+    this.settings = Object.assign({ quality: 'auto', control: 'buttons', autoGas: false, sfx: 0.8, music: 0.45, station: 0, cam: 0, name: '', difficulty: 1, time: 'dyn',
+      sens: 1, tiltInvert: false, ctl: 1, haptic: true, weather: 'dyn' }, store.get(SET_KEY) || {});
     const mobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && innerWidth < 1100);
     this.mobile = mobile;
     this.quality = this.settings.quality === 'auto' ? 2 : +this.settings.quality;
@@ -93,6 +94,7 @@ class Game {
     if (!this.save.current || !this.save.owned[this.save.current]) this.save.current = null;
     const spec = this.carSpec() || CARS[0];
     this.car = new Vehicle(this.world, carStats(spec, {}), styleDims(spec.style));
+    this.car.sens = this.settings.sens;
     this.setPlayerCar(spec.id);
     this.traffic = new Traffic(this.scene, this.world, this.quality >= 2 ? 16 : this.quality >= 1 ? 12 : 7);
     this.skills = new Skills(this);
@@ -696,6 +698,32 @@ class Game {
     seg('s-diff', s.difficulty, v => { s.difficulty = +v; });
     seg('s-time', s.time, v => { s.time = v; if (v !== 'dyn') this.scenery.setTime(TIME_FIXED[v]); });
     seg('s-station', s.station, v => { s.station = +v; this.audio.setStation(s.station); });
+    seg('s-tiltinv', s.tiltInvert ? '1' : '0', v => { s.tiltInvert = v === '1'; this.applyControlMode(); });
+    seg('s-ctl', s.ctl, v => { s.ctl = +v; this.resize(); });
+    seg('s-haptic', s.haptic ? '1' : '0', v => { s.haptic = v === '1'; this.applyControlMode(); });
+    $('s-calib').onclick = () => { this.input.calibrate(); this.audio.play('ui'); this.hud.toast(this.input.tiltOk ? 'Neigung: aktuelle Haltung ist jetzt geradeaus' : 'Erst „Lenkung: Neigen“ wählen', 'info'); };
+    const sens = $('s-sens');
+    sens.value = s.sens;
+    sens.oninput = () => { s.sens = +sens.value; this.applyControlMode(); this.saveSettings(); };
+    $('s-export').onclick = () => {
+      const code = btoa(unescape(encodeURIComponent(JSON.stringify({ v: 1, save: this.save, settings: this.settings }))));
+      $('s-codebox').hidden = false; $('s-code').value = code; $('s-apply').hidden = true; $('s-copy').hidden = false;
+      $('s-codehint').textContent = 'Dein Spielstand als Code – kopieren und gut aufheben (z. B. in Notizen).';
+    };
+    $('s-import').onclick = () => {
+      $('s-codebox').hidden = false; $('s-code').value = ''; $('s-apply').hidden = false; $('s-copy').hidden = true;
+      $('s-codehint').textContent = 'Gesicherten Code hier einfügen und „Spielstand laden“ tippen.';
+      $('s-code').focus();
+    };
+    $('s-copy').onclick = () => { const t = $('s-code'); t.select(); (navigator.clipboard ? navigator.clipboard.writeText(t.value) : Promise.reject()).then(() => this.hud.toast('Code kopiert', 'info'), () => document.execCommand && document.execCommand('copy')); };
+    $('s-apply').onclick = () => {
+      try {
+        const d = JSON.parse(decodeURIComponent(escape(atob($('s-code').value.trim()))));
+        if (!d || !d.save || typeof d.save.credits !== 'number') throw new Error('kaputt');
+        store.set(SAVE_KEY, d.save); if (d.settings) store.set(SET_KEY, d.settings);
+        location.reload();
+      } catch { this.hud.toast('Der Code passt nicht – bitte vollständig einfügen', 'warn'); }
+    };
     const sfx = $('s-sfx'), mus = $('s-music'), nm = $('s-name');
     sfx.value = s.sfx; mus.value = s.music; nm.value = s.name;
     sfx.oninput = () => { s.sfx = +sfx.value; this.audio.setVolumes(s.sfx, s.music); this.saveSettings(); };
@@ -710,10 +738,13 @@ class Game {
   applyControlMode() {
     const s = this.settings;
     this.input.mode = s.control; this.input.autoGas = s.autoGas;
+    this.input.sens = s.sens; this.input.tiltInvert = s.tiltInvert; this.input.haptic = s.haptic;
+    if (this.car) this.car.sens = s.sens;
     document.body.dataset.control = s.control;
     document.body.dataset.autogas = s.autoGas ? '1' : '0';
     document.body.dataset.touch = this.mobile || matchMedia('(pointer: coarse)').matches ? '1' : '0';
   }
+  buzz(ms) { if (this.settings.haptic && navigator.vibrate) try { navigator.vibrate(ms); } catch {} }
   cycleCam() { this.camMode = (this.camMode + 1) % 3; this.settings.cam = this.camMode; this.saveSettings(); this.hud.toast(['Kamera: Nah', 'Kamera: Weit', 'Kamera: Motorhaube'][this.camMode], 'info'); }
   nextStation() {
     this.settings.station = (this.settings.station + 1) % RADIO.length;
@@ -817,11 +848,11 @@ class Game {
         this.audio.play(im.force > 8 ? 'crash' : 'bump', clamp(im.force / 20, 0.2, 1));
         this.shake = Math.max(this.shake, clamp(im.force / 25, 0, 0.8));
         for (let i = 0; i < Math.min(30, im.force * 2); i++) this.sparks.emit(im.x, car.pos.y + 0.5, im.z, (Math.random() - 0.5) * 9, Math.random() * 6, (Math.random() - 0.5) * 9, 1, 0.75, 0.3, 0.35, 0.5, { grav: 12, drag: 1, grow: -0.5 });
-        if (im.force > 7) { this.skills.crash(); if (race) race.crashes++; if (navigator.vibrate) navigator.vibrate(40); }
+        if (im.force > 7) { this.skills.crash(); if (race) race.crashes++; this.buzz(Math.min(120, 25 + im.force * 3)); }
       }
     }
     car.impacts.length = 0;
-    if (car.landing > 7) { this.audio.play('land', car.landing); this.shake = Math.max(this.shake, clamp(car.landing / 40, 0, 0.6)); for (let i = 0; i < 12; i++) this.smoke.emit(car.pos.x, car.pos.y + 0.2, car.pos.z, (Math.random() - 0.5) * 8, Math.random() * 2, (Math.random() - 0.5) * 8, 0.6, 0.75, 0.55, 1.5, 1.4, { drag: 2.5, grow: 2.5 }); }
+    if (car.landing > 7) { this.buzz(Math.min(80, car.landing * 3)); this.audio.play('land', car.landing); this.shake = Math.max(this.shake, clamp(car.landing / 40, 0, 0.6)); for (let i = 0; i < 12; i++) this.smoke.emit(car.pos.x, car.pos.y + 0.2, car.pos.z, (Math.random() - 0.5) * 8, Math.random() * 2, (Math.random() - 0.5) * 8, 0.6, 0.75, 0.55, 1.5, 1.4, { drag: 2.5, grow: 2.5 }); }
     car.landing = 0;
     // Wasser → zurücksetzen
     if (car.inWater > 0 && !this.splashed) { this.splashed = true; this.audio.play('splash'); for (let i = 0; i < 40; i++) this.sparks.emit(car.pos.x, 0.3, car.pos.z, (Math.random() - 0.5) * 8, 4 + Math.random() * 6, (Math.random() - 0.5) * 8, 0.6, 0.8, 1, 0.6, 1, { grav: 12, drag: 0.5, grow: 0 }); }
@@ -1097,6 +1128,7 @@ class Game {
     const s = Math.min(1.25, Math.max(0.75, Math.min(w, h) / 400));
     for (const id of ['minimap', 'speedo']) { const c = $(id); const sz = Math.round(c.clientWidth * Math.min(2, devicePixelRatio || 1)); if (sz > 0) { c.width = sz; c.height = sz; } }
     document.documentElement.style.setProperty('--ui', s.toFixed(3));
+    document.documentElement.style.setProperty('--uic', (s * (this.settings.ctl || 1)).toFixed(3));
     if (this.screen === 'map' && this.drawMap) this.drawMap();
   }
 }

@@ -43,9 +43,11 @@ export class Vehicle {
   step(dt, inp) {
     const W = this.world, st = this.stats, p = this.pos, v = this.vel;
     // Lenkung glätten (zurück zur Mitte schneller)
-    const tgt = clamp(inp.steer, -1, 1);
+    const sens = this.sens || 1;
+    const tgt = clamp(inp.steer, -1, 1) * (sens < 1 ? 0.7 + 0.3 * sens : 1);
     const back = Math.abs(tgt) < Math.abs(this.steer) || tgt * this.steer < 0;
-    this.steer += clamp(tgt - this.steer, -(back ? 7 : 4.2) * dt, (back ? 7 : 4.2) * dt);
+    const rate = (back ? 7 : 4.2) * (0.6 + 0.4 * sens);
+    this.steer += clamp(tgt - this.steer, -rate * dt, rate * dt);
 
     const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
     let vf = v.x * sy + v.z * cy;
@@ -55,7 +57,8 @@ export class Vehicle {
     this.surface = sId;
     const sp = SURF_PROPS[sId];
     const paved = sId === SURF.ASPHALT;
-    const gripMul = paved ? (1 - st.offroad * 0.06) : lerp(sp.grip, 0.96, st.offroad);
+    const wet = W.rain > 0.4 ? (W.rain - 0.4) / 0.6 : 0;
+    const gripMul = (paved ? (1 - st.offroad * 0.06) : lerp(sp.grip, 0.96, st.offroad)) * (1 - (paved ? 0.16 : 0.1) * wet);
     const dragAdd = paved ? 0 : sp.drag * (1 - st.offroad * 0.8);
     const top = st.top / 3.6 * (this.nitroOn ? 1.12 : 1);
 

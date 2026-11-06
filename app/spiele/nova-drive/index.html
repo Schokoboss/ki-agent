@@ -165,6 +165,13 @@
     <div class="set">
       <label>Lenkung</label>
       <div class="seg" id="s-control"><button data-v="buttons">Tasten ◀ ▶</button><button data-v="slider">Wischen</button><button data-v="tilt">Neigen</button></div>
+      <label>Lenkgefühl</label><div class="rangebox"><span>sanft</span><input id="s-sens" type="range" min="0.5" max="1.5" step="0.05"><span>direkt</span></div>
+      <label>Neigen</label>
+      <div class="seg" id="s-tiltinv"><button data-v="0">Normal</button><button data-v="1">Umgekehrt</button><button id="s-calib" type="button">Mitte setzen</button></div>
+      <label>Tasten</label>
+      <div class="seg" id="s-ctl"><button data-v="0.85">Klein</button><button data-v="1">Normal</button><button data-v="1.2">Groß</button></div>
+      <label>Vibration</label>
+      <div class="seg" id="s-haptic"><button data-v="1">An</button><button data-v="0">Aus</button></div>
       <label>Auto-Gas</label>
       <div class="seg" id="s-autogas"><button data-v="0">Aus</button><button data-v="1">An</button></div>
       <label>Gegner</label>
@@ -178,6 +185,13 @@
       <label>Effekte</label><input id="s-sfx" type="range" min="0" max="1" step="0.05">
       <label>Musik</label><input id="s-music" type="range" min="0" max="1" step="0.05">
       <label>Dein Name</label><input id="s-name" type="text" maxlength="16" placeholder="für Herausforderungen">
+      <label>Spielstand</label>
+      <div class="seg"><button id="s-export" type="button">Sichern (Code)</button><button id="s-import" type="button">Laden (Code)</button></div>
+    </div>
+    <div id="s-codebox" hidden>
+      <p class="muted small" id="s-codehint"></p>
+      <textarea id="s-code" rows="4" spellcheck="false"></textarea>
+      <div class="row"><button id="s-copy" class="btn" type="button">Kopieren</button><button id="s-apply" class="btn primary" type="button">Spielstand laden</button></div>
     </div>
     <p class="muted keys">Tastatur: ←→/AD lenken · ↑/W Gas · ↓/S Bremse · Leertaste Handbremse · Shift Nitro · C Kamera · F Vollbild · R Zurücksetzen · M Karte · T Radio · Esc Pause. Gamepad geht auch.</p>
     <button id="s-reset" class="btn ghost">Spielstand löschen</button>

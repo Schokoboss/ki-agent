@@ -8,7 +8,8 @@ export class Input {
     this.btn = { left: false, right: false, gas: false, brake: false, hand: false, nitro: false };
     this.mode = 'buttons'; // buttons | slider | tilt
     this.autoGas = false;
-    this.tilt = 0; this.tiltOk = false;
+    this.tilt = 0; this.tiltOk = false; this.tiltRaw = 0; this.tiltZero = 0; this.tiltInvert = false;
+    this.sens = 1;
     this.slider = null; this.sliderVal = 0;
     this.pressed = new Set();
     window.addEventListener('keydown', e => {
@@ -28,7 +29,7 @@ export class Input {
       if (!el) continue;
       const ids = new Set();
       const upd = () => { this.btn[key] = ids.size > 0; el.classList.toggle('on', ids.size > 0); };
-      el.addEventListener('pointerdown', e => { e.preventDefault(); ids.add(e.pointerId); try { el.setPointerCapture(e.pointerId); } catch {} upd(); if (navigator.vibrate && key !== 'gas') navigator.vibrate(8); });
+      el.addEventListener('pointerdown', e => { e.preventDefault(); ids.add(e.pointerId); try { el.setPointerCapture(e.pointerId); } catch {} upd(); if (navigator.vibrate && key !== 'gas' && this.haptic !== false) navigator.vibrate(8); });
       const up = e => { ids.delete(e.pointerId); upd(); };
       el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up); el.addEventListener('lostpointercapture', up);
     }
@@ -59,7 +60,9 @@ export class Input {
         const ang = (screen.orientation && screen.orientation.angle) ?? window.orientation ?? 90;
         const sgn = ang === 90 ? 1 : ang === 270 || ang === -90 ? -1 : 0;
         let v = (sgn ? a.y * sgn : a.x) / 9.81;
-        this.tilt = clamp(Math.abs(v) < 0.04 ? 0 : v * 2.4, -1, 1);
+        this.tiltRaw = v;
+        v = (v - this.tiltZero) * (this.tiltInvert ? -1 : 1);
+        this.tilt = clamp(Math.abs(v) < 0.035 ? 0 : v * 2.4 * this.sens, -1, 1);
         this.tiltOk = true;
       });
     }
@@ -73,7 +76,7 @@ export class Input {
     if (k.has('ArrowRight') || k.has('KeyD')) steer += 1;
     if (b.left) steer -= 1;
     if (b.right) steer += 1;
-    if (this.mode === 'slider') steer += this.sliderVal;
+    if (this.mode === 'slider') steer += this.sliderVal * this.sens;
     if (this.mode === 'tilt' && this.tiltOk) steer += this.tilt;
     let gas = (k.has('ArrowUp') || k.has('KeyW') || b.gas) ? 1 : 0;
     let brake = (k.has('ArrowDown') || k.has('KeyS') || b.brake) ? 1 : 0;
@@ -97,6 +100,7 @@ export class Input {
     s.throttle = gas; s.brake = brake; s.handbrake = hand; s.nitro = nitro;
     return s;
   }
+  calibrate() { this.tiltZero = this.tiltRaw || 0; }
   took(code) { const h = this.pressed.has(code); this.pressed.delete(code); return h; }
   clearPressed() { this.pressed.clear(); }
 }
