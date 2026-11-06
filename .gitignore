@@ -9,3 +9,6 @@ werkzeuge/handytest-ergebnis/
 
 # Spiel-Modelle (Nova Drive) gehören ins Repo
 !app/spiele/nova-drive/models/
+
+# gebaute Handy-Einzeldatei nicht einchecken
+app/spiele/nova-drive/NovaDrive-Handy.html

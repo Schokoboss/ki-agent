@@ -4,6 +4,7 @@ import { GLTFLoader } from '../lib/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from '../lib/libs/meshopt_decoder.module.js';
 import { mergeGeometries } from '../lib/utils/BufferGeometryUtils.js';
 import { part, merge } from './geo.js';
+import { modelUrl } from './models.js';
 
 // Grundform je Stil: L Länge, W Breite, clr Bodenfreiheit, belt Gürtellinie, nose/tail Höhe vorne/hinten,
 // hood/ws/roof/rear horizontale Längen (Motorhaube, Frontscheibe, Dach, Heckscheibe), H Dachhöhe, wR Radius, wb Radstand
@@ -52,8 +53,8 @@ export async function loadCarModels(ids, onProgress = () => {}) {
   const total = ids.length * 2;
   const tick = () => onProgress(++done / total);
   await Promise.all(ids.flatMap(id => [
-    loader.loadAsync(`models/${id}.glb`).then(g => { (TEMPL[id] ||= {}).full = g.scene; }).catch(e => console.warn('Modell fehlt', id, e)).finally(tick),
-    loader.loadAsync(`models/${id}_lod.glb`).then(g => { (TEMPL[id] ||= {}).lod = prepLod(g.scene); }).catch(e => console.warn('LOD fehlt', id, e)).finally(tick),
+    loader.loadAsync(modelUrl(`models/${id}.glb`)).then(g => { (TEMPL[id] ||= {}).full = g.scene; }).catch(e => console.warn('Modell fehlt', id, e)).finally(tick),
+    loader.loadAsync(modelUrl(`models/${id}_lod.glb`)).then(g => { (TEMPL[id] ||= {}).lod = prepLod(g.scene); }).catch(e => console.warn('LOD fehlt', id, e)).finally(tick),
   ]));
 }
 

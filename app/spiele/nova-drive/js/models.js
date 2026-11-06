@@ -10,13 +10,15 @@ export const WORLD_MODELS = ['pine_a', 'pine_b', 'leaf_a', 'leaf_b', 'palm', 'ro
   'person_a', 'person_b', 'boat', 'turbine'];
 
 const LIB = {};
+// In der Handy-Einzeldatei stecken die Modelle eingebettet in window.__NOVA_MODELS (sonst normale Dateien)
+export const modelUrl = p => (globalThis.__NOVA_MODELS && globalThis.__NOVA_MODELS[p]) || p;
 
 export async function loadWorldModels(onProgress = () => {}) {
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
   await MeshoptDecoder.ready;
   let done = 0;
-  await Promise.all(WORLD_MODELS.map(n => loader.loadAsync(`models/welt/${n}.glb`)
+  await Promise.all(WORLD_MODELS.map(n => loader.loadAsync(modelUrl(`models/welt/${n}.glb`))
     .then(g => { LIB[n] = g.scene; g.scene.updateMatrixWorld(true); })
     .catch(e => console.warn('Weltmodell fehlt', n, e))
     .finally(() => onProgress(++done / WORLD_MODELS.length))));
