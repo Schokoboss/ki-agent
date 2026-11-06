@@ -230,7 +230,8 @@ export class Events {
     const path = ev.path, st = g.car.stats;
     const sprint = !!ev.sprint;
     const total = sprint ? (ev.to - ev.at) * path.length - 12 : ev.laps * path.length;
-    const latAcc = 9.81 * st.grip * 1.16;
+    const wet = W.rain > 0.4 ? (W.rain - 0.4) / 0.6 : 0;
+    const latAcc = 9.81 * st.grip * 1.16 * (1 - 0.15 * wet);
     const top = st.top / 3.6;
     const prof = speedProfile(path, top * 0.99, latAcc, 12.5, W, st.offroad);
     const race = {

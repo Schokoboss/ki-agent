@@ -117,3 +117,46 @@ export class Skids {
   }
   cut() { this.last = [null, null, null, null]; }
 }
+
+// Regen: Striche rund um die Kamera
+export class Rain {
+  constructor(scene, n = 1600) {
+    this.n = n;
+    this.p = new Float32Array(n * 3);
+    this.pos = new Float32Array(n * 6);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
+    this.geo = g;
+    this.mat = new THREE.LineBasicMaterial({ color: 0xb8c4d8, transparent: true, opacity: 0, depthWrite: false, fog: false });
+    this.lines = new THREE.LineSegments(g, this.mat);
+    this.lines.frustumCulled = false;
+    this.lines.renderOrder = 40;
+    this.lines.visible = false;
+    scene.add(this.lines);
+    this.init = false;
+  }
+  update(dt, cam, amount, vx = 0, vz = 0) {
+    this.lines.visible = amount > 0.02;
+    if (!this.lines.visible) return;
+    this.mat.opacity = 0.42 * amount;
+    const P = this.p, Q = this.pos, n = Math.floor(this.n * amount), R = 34, H = 22;
+    if (!this.init) {
+      this.init = true;
+      for (let i = 0; i < this.n; i++) { P[i * 3] = cam.x + (Math.random() * 2 - 1) * R; P[i * 3 + 1] = cam.y + (Math.random() * 2 - 1) * H; P[i * 3 + 2] = cam.z + (Math.random() * 2 - 1) * R; }
+    }
+    const fall = 26, sx = -vx * 0.03, sz = -vz * 0.03;
+    for (let i = 0; i < this.n; i++) {
+      let x = P[i * 3], y = P[i * 3 + 1] - fall * dt, z = P[i * 3 + 2];
+      if (y < cam.y - H) { y += 2 * H; x = cam.x + (Math.random() * 2 - 1) * R; z = cam.z + (Math.random() * 2 - 1) * R; }
+      if (x < cam.x - R) x += 2 * R; else if (x > cam.x + R) x -= 2 * R;
+      if (z < cam.z - R) z += 2 * R; else if (z > cam.z + R) z -= 2 * R;
+      P[i * 3] = x; P[i * 3 + 1] = y; P[i * 3 + 2] = z;
+      const o = i * 6;
+      if (i < n) {
+        Q[o] = x; Q[o + 1] = y; Q[o + 2] = z;
+        Q[o + 3] = x + sx; Q[o + 4] = y + 0.9; Q[o + 5] = z + sz;
+      } else { Q[o] = Q[o + 3] = x; Q[o + 1] = Q[o + 4] = -999; Q[o + 2] = Q[o + 5] = z; }
+    }
+    this.geo.attributes.position.needsUpdate = true;
+  }
+}

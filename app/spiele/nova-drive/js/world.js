@@ -131,6 +131,42 @@ export class Scenery {
       this.cloudMat.color.copy(u.horizon.value).lerp(new THREE.Color(0xffffff), 0.6 * (1 - this.night));
       this.cloudMat.opacity = 0.85 - this.night * 0.6;
     }
+    this.applyWeather();
+  }
+
+  // Regen (0…1) und Blitz (0…1) auf Himmel, Licht, Nebel, Wasser und Straßen anwenden
+  applyWeather() {
+    const r = this.rain || 0, f = this.flash || 0, u = this.skyU;
+    if (this.fogFarBase === undefined) this.fogFarBase = this.scene.fog.far;
+    if (r > 0.001 || f > 0.001) {
+      const grey = new THREE.Color(0x76808d).multiplyScalar(0.18 + 0.82 * (1 - this.night));
+      u.zenith.value.lerp(grey, r * 0.8);
+      u.horizon.value.lerp(grey, r * 0.72);
+      u.sunCol.value.multiplyScalar(1 - r * 0.92);
+      this.sun.intensity *= 1 - r * 0.72;
+      this.hemi.intensity *= 1 - r * 0.15;
+      if (f > 0) {
+        const w = new THREE.Color(0xdfe6ff);
+        this.hemi.intensity += f * 2.6;
+        u.zenith.value.lerp(w, f * 0.55); u.horizon.value.lerp(w, f * 0.4);
+      }
+      this.scene.fog.color.copy(u.horizon.value);
+      if (this.waterU) {
+        this.waterU.fogColor.value.copy(u.horizon.value);
+        this.waterU.skyCol.value.copy(u.zenith.value).lerp(u.horizon.value, 0.5);
+        this.waterU.sunCol.value.multiplyScalar(1 - r * 0.9);
+      }
+      if (this.cloudMat) { this.cloudMat.color.lerp(grey, r * 0.85); this.cloudMat.opacity = Math.min(1, this.cloudMat.opacity + r * 0.35); }
+    }
+    u.night.value = this.night * (1 - r); // keine Sterne bei Regen
+    this.scene.fog.far = this.fogFarBase * (1 - 0.5 * r);
+    this.scene.fog.near = 250 * (1 - 0.75 * r);
+    const wet = smoothstep(0.3, 0.85, r);
+    for (const m of this.roadMats || []) {
+      m.roughness = lerp(m.userData.dirt ? 1 : 0.93, m.userData.dirt ? 0.75 : 0.26, wet);
+      m.color.setScalar(lerp(1, m.userData.dirt ? 0.7 : 0.55, wet));
+      m.envMapIntensity = lerp(m.userData.dirt ? 0.4 : 0.6, 0.85, wet) * (1 - 0.75 * this.night);
+    }
   }
 
   // ---------------------------------------------------------------- Gelände
@@ -183,10 +219,12 @@ export class Scenery {
   // ---------------------------------------------------------------- Straßen
   buildRoads() {
     const T = this.T;
+    // Standard-Material, damit nasse Straßen den Himmel spiegeln können (Rauheit sinkt bei Regen)
     const mats = {
-      asphalt: new THREE.MeshLambertMaterial({ map: T.asphalt }),
-      dirt: new THREE.MeshLambertMaterial({ map: T.dirt }),
+      asphalt: new THREE.MeshStandardMaterial({ map: T.asphalt, roughness: 0.93, metalness: 0, envMapIntensity: 0.6 }),
+      dirt: new THREE.MeshStandardMaterial({ map: T.dirt, roughness: 1, metalness: 0, envMapIntensity: 0.4 }),
     };
+    this.roadMats = [];
     let order = 0;
     for (const r of this.world.roads) {
       const p = r.path, hw = r.def.hw, b = new Builder();
@@ -206,6 +244,8 @@ export class Scenery {
         }
       }
       const mat = mats[r.def.type].clone();
+      mat.userData.dirt = r.def.type === 'dirt';
+      this.roadMats.push(mat);
       mat.polygonOffset = true; mat.polygonOffsetFactor = -1; mat.polygonOffsetUnits = -2 - order * 2;
       const m = new THREE.Mesh(b.build(), mat);
       m.receiveShadow = true;

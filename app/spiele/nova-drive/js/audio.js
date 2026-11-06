@@ -47,6 +47,7 @@ export class Audio {
     this.wind = this.loopNoise('lowpass', 500, 0.5);
     this.nitroS = this.loopNoise('bandpass', 2400, 0.6);
     this.gravel = this.loopNoise('lowpass', 260, 0.8);
+    this.rainS = this.loopNoise('highpass', 2600, 0.4);
     this.ok = true;
     this.startRadio();
   }
@@ -132,6 +133,8 @@ export class Audio {
       case 'trap': tone('sine', 1500, 1500, 0.06, 0.2); noise(5000, 1, 0.06, 0.15); break;
       case 'nitro': noise(1500, 0.5, 0.4, 0.3); break;
       case 'splash': noise(800, 0.5, 0.8, 0.6, 'lowpass'); break;
+      case 'shutter': noise(5000, 1, 0.05, 0.35); noise(1800, 1, 0.08, 0.25); break;
+      case 'thunder': noise(90, 0.6, 2.8 * amt + 1, 0.9 * amt, 'lowpass'); noise(400, 0.5, 0.6, 0.3 * amt, 'lowpass'); tone('sine', 55, 30, 2.2, 0.35 * amt); break;
       case 'firework': noise(300, 0.5, 0.8, 0.3 * amt, 'lowpass'); noise(4000, 0.7, 0.5, 0.06 * amt); break;
     }
   }
@@ -267,6 +270,7 @@ export class Audio {
     }
   }
   tick(dt) { this.beat = Math.max(0, this.beat - dt * 3); }
+  setRain(a) { if (this.ok) this.rainS.g.gain.setTargetAtTime(a * 0.13, this.ctx.currentTime, 0.3); }
   suspend() { if (this.ctx && this.ctx.state === 'running') this.ctx.suspend(); }
   resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); }
 }

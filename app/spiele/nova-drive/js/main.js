@@ -11,7 +11,7 @@ import { Events, Skills, TYPE_NAMES } from './events.js';
 import { HUD, makeMapImage } from './hud.js';
 import { Audio } from './audio.js';
 import { Input } from './input.js';
-import { Particles, Smoke, Skids } from './effects.js';
+import { Particles, Smoke, Skids, Rain } from './effects.js';
 import { CARS, UPGRADES, carStats, rating, carClass, CLASS_COLORS, EVENTS, RADIO, TIPS } from './data.js';
 import { clamp, lerp, damp, fmtNum, fmtTime, wrapAngle } from './util.js';
 import { EVENT_COLORS } from './world.js';
@@ -88,6 +88,8 @@ class Game {
     this.smoke = new Smoke(this.scene, this.T.puff, this.quality >= 1 ? 260 : 140);
     this.sparks = new Particles(this.scene, this.T.glow, 220, true);
     this.skids = new Skids(this.scene, this.quality >= 1 ? 1800 : 900);
+    this.rainFx = new Rain(this.scene, this.quality >= 2 ? 1800 : this.quality >= 1 ? 1200 : 600);
+    this.weather = { rain: this.settings.weather === 'rain' ? 1 : 0, target: 0, t: 200, thunder: 15 };
     prog(0.9, 'Autos aus der Werkstatt holen');
     await loadCarModels(CARS.map(c => c.id), f => prog(0.9 + f * 0.08, 'Autos aus der Werkstatt holen'));
     // Spieler
@@ -426,6 +428,10 @@ class Game {
     click('prompt-go', () => { const ev = this.events.byId($('prompt').dataset.id); if (ev) this.events.startRace(ev); });
     // Pause
     click('p-resume', () => this.resume());
+    click('p-photo', () => this.openPhoto());
+    click('ph-back', () => this.closePhoto());
+    click('ph-filter', () => { this.photo.filter = (this.photo.filter + 1) % PHOTO_FILTERS.length; this.applyPhotoFilter(); });
+    $('ph-shot').addEventListener('click', e => { e.preventDefault(); this.takePhoto(); });
     click('p-garage', () => { if (this.events.race) this.events.endRace(true); this.backTo = 'game'; this.showScreen('garage'); });
     click('p-map', () => { this.backTo = 'pause'; this.showScreen('map'); });
     click('p-settings', () => { this.backTo = 'pause'; this.showScreen('settings'); });
@@ -697,6 +703,7 @@ class Game {
     seg('s-autogas', s.autoGas ? '1' : '0', v => { s.autoGas = v === '1'; this.applyControlMode(); });
     seg('s-diff', s.difficulty, v => { s.difficulty = +v; });
     seg('s-time', s.time, v => { s.time = v; if (v !== 'dyn') this.scenery.setTime(TIME_FIXED[v]); });
+    seg('s-weather', s.weather, v => { s.weather = v; this.weather.t = 0; });
     seg('s-station', s.station, v => { s.station = +v; this.audio.setStation(s.station); });
     seg('s-tiltinv', s.tiltInvert ? '1' : '0', v => { s.tiltInvert = v === '1'; this.applyControlMode(); });
     seg('s-ctl', s.ctl, v => { s.ctl = +v; this.resize(); });
@@ -744,6 +751,143 @@ class Game {
     document.body.dataset.autogas = s.autoGas ? '1' : '0';
     document.body.dataset.touch = this.mobile || matchMedia('(pointer: coarse)').matches ? '1' : '0';
   }
+  // ---------------------------------------------------------------- Fotomodus
+  openPhoto() {
+    const car = this.car;
+    this.photo = this.photo || { filter: 0 };
+    Object.assign(this.photo, { yaw: car.yaw + Math.PI + 0.7, pitch: 0.22, dist: 7.5 });
+    this.state = 'photo';
+    this.showScreen('photo');
+    this.audio.updateCar(car, { throttle: 0 }, false, this.carStyle);
+    const z = $('ph-zoom'), h = $('ph-height'), t = $('ph-time');
+    z.value = this.photo.dist; h.value = this.photo.pitch; t.value = this.scenery.time.toFixed(1);
+    z.oninput = () => { this.photo.dist = +z.value; };
+    h.oninput = () => { this.photo.pitch = +h.value; };
+    t.oninput = () => { this.scenery.time = +t.value; if (this.settings.time === 'dyn') this.hud.toast('Tipp: In den Einstellungen „Tageszeit“ fest einstellen, sonst läuft die Zeit weiter', 'info'); };
+    this.applyPhotoFilter();
+    const sec = $('photo');
+    if (!sec._bound) {
+      sec._bound = true;
+      const pts = new Map();
+      let pinch0 = 0, dist0 = 0;
+      sec.addEventListener('pointerdown', e => {
+        if (e.target.closest('button, input, label')) return;
+        pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        try { sec.setPointerCapture(e.pointerId); } catch {}
+        if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch0 = Math.hypot(a.x - b.x, a.y - b.y); dist0 = this.photo.dist; }
+      });
+      sec.addEventListener('pointermove', e => {
+        const p = pts.get(e.pointerId);
+        if (!p) return;
+        if (pts.size === 1) {
+          this.photo.yaw -= (e.clientX - p.x) * 0.008;
+          this.photo.pitch = clamp(this.photo.pitch + (e.clientY - p.y) * 0.005, -0.08, 1.25);
+          $('ph-height').value = this.photo.pitch;
+        }
+        p.x = e.clientX; p.y = e.clientY;
+        if (pts.size === 2 && pinch0) {
+          const [a, b] = [...pts.values()];
+          this.photo.dist = clamp(dist0 * pinch0 / Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)), 2.8, 26);
+          $('ph-zoom').value = this.photo.dist;
+        }
+      });
+      const up = e => { pts.delete(e.pointerId); if (pts.size < 2) pinch0 = 0; };
+      sec.addEventListener('pointerup', up); sec.addEventListener('pointercancel', up);
+      sec.addEventListener('wheel', e => { this.photo.dist = clamp(this.photo.dist * (1 + e.deltaY * 0.001), 2.8, 26); $('ph-zoom').value = this.photo.dist; }, { passive: true });
+    }
+  }
+  closePhoto() {
+    $('c').style.filter = '';
+    $('ph-vig').hidden = true;
+    this.state = 'paused';
+    this.showScreen('pause');
+  }
+  applyPhotoFilter() {
+    const f = PHOTO_FILTERS[this.photo.filter];
+    $('c').style.filter = f.css;
+    $('ph-vig').hidden = !f.vig;
+    $('ph-filter').textContent = 'Filter: ' + f.name;
+  }
+  updatePhotoCam() {
+    const P = this.photo, c = this.car.pos, cam = this.camera;
+    const tx = c.x, ty = c.y + 0.8, tz = c.z;
+    let x = tx + Math.sin(P.yaw) * Math.cos(P.pitch) * P.dist, z = tz + Math.cos(P.yaw) * Math.cos(P.pitch) * P.dist;
+    let y = ty + Math.sin(P.pitch) * P.dist;
+    y = Math.max(y, this.world.heightAt(x, z) + 0.35);
+    cam.position.set(x, y, z);
+    cam.lookAt(tx, ty, tz);
+    cam.fov = 50; cam.updateProjectionMatrix();
+    this.syncCar(0.016);
+  }
+  takePhoto() {
+    const f = PHOTO_FILTERS[this.photo.filter];
+    this.renderer.render(this.scene, this.camera);
+    const src = this.renderer.domElement;
+    const cv = document.createElement('canvas');
+    cv.width = src.width; cv.height = src.height;
+    const g = cv.getContext('2d');
+    g.filter = f.css || 'none';
+    g.drawImage(src, 0, 0);
+    g.filter = 'none';
+    if (f.vig) {
+      const gr = g.createRadialGradient(cv.width / 2, cv.height / 2, Math.min(cv.width, cv.height) * 0.35, cv.width / 2, cv.height / 2, Math.max(cv.width, cv.height) * 0.7);
+      gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.6)');
+      g.fillStyle = gr; g.fillRect(0, 0, cv.width, cv.height);
+    }
+    const fs = Math.round(cv.height * 0.045);
+    g.font = `italic 700 ${fs}px "Chakra Petch", system-ui, sans-serif`;
+    g.textAlign = 'right'; g.shadowColor = 'rgba(0,0,0,.6)'; g.shadowBlur = fs * 0.3;
+    g.fillStyle = '#ff3d7f'; g.fillText('NOVA', cv.width - fs * 0.6 - g.measureText(' DRIVE').width, cv.height - fs * 0.7);
+    g.fillStyle = '#1fd1ff'; g.fillText(' DRIVE', cv.width - fs * 0.6, cv.height - fs * 0.7);
+    this.audio.play('shutter');
+    const fl = $('ph-flash'); fl.classList.remove('on'); void fl.offsetWidth; fl.classList.add('on');
+    cv.toBlob(blob => {
+      if (!blob) { this.hud.toast('Foto ging nicht', 'warn'); return; }
+      const file = new File([blob], `nova-drive-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.jpg`, { type: 'image/jpeg' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({ files: [file], title: 'Nova Drive' }).catch(() => {});
+      } else {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = file.name;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+        this.hud.toast('📸 Foto gespeichert', 'info');
+      }
+    }, 'image/jpeg', 0.92);
+  }
+
+  // Wetter: wechselnd (Sonne/Wolken/Regen mit Gewitter) oder fest
+  updateWeather(dt) {
+    const w = this.weather, set = this.settings.weather;
+    if (set === 'sun') w.target = 0;
+    else if (set === 'rain') w.target = 1;
+    else if ((w.t -= dt) <= 0) {
+      const r = Math.random();
+      const nt = r < 0.55 ? 0 : r < 0.75 ? 0.35 : 1;
+      if (nt === 1 && w.target < 1 && this.state === 'free') this.hud.toast('🌧 Regen zieht auf – die Straßen werden rutschig', 'warn');
+      if (nt === 0 && w.target === 1 && this.state === 'free') this.hud.toast('☀ Es klart auf', 'info');
+      w.target = nt; w.t = 160 + Math.random() * 220;
+    }
+    const speed = set === 'dyn' ? 0.022 : 0.2;
+    w.rain += Math.max(-speed * dt, Math.min(speed * dt, w.target - w.rain));
+    this.world.rain = w.rain;
+    this.scenery.rain = w.rain;
+    // Gewitter
+    if (w.rain > 0.75 && this.state !== 'paused') {
+      if ((w.thunder -= dt) <= 0) {
+        w.thunder = 12 + Math.random() * 25;
+        this.flashT = 0.6;
+        const d = 0.4 + Math.random() * 2.2;
+        setTimeout(() => this.audio.play('thunder', 0.5 + Math.random() * 0.5), d * 1000);
+      }
+    }
+    if (this.flashT > 0) { this.flashT -= dt; this.scenery.flash = this.flashT > 0.45 ? 1 : this.flashT > 0.3 ? 0.2 : this.flashT > 0.18 ? 0.8 : Math.max(0, this.flashT * 2); }
+    else this.scenery.flash = 0;
+    const amt = smooth(0.4, 0.9, w.rain);
+    this.rainFx.update(dt, this.camera.position, amt, this.car ? this.car.vel.x : 0, this.car ? this.car.vel.z : 0);
+    this.audio.setRain(this.state === 'free' || this.state === 'race' || this.state === 'title' ? amt : 0);
+  }
+
   buzz(ms) { if (this.settings.haptic && navigator.vibrate) try { navigator.vibrate(ms); } catch {} }
   cycleCam() { this.camMode = (this.camMode + 1) % 3; this.settings.cam = this.camMode; this.saveSettings(); this.hud.toast(['Kamera: Nah', 'Kamera: Weit', 'Kamera: Motorhaube'][this.camMode], 'info'); }
   nextStation() {
@@ -801,9 +945,11 @@ class Game {
     if (this.input.took('KeyT')) this.nextStation();
     if (this.input.took('KeyF')) this.toggleFull();
     // Tageszeit
-    if (this.settings.time === 'dyn' && this.state !== 'paused') this.scenery.setTime(this.scenery.time + dt / 40);
+    this.updateWeather(dt);
+    this.scenery.setTime(this.scenery.time + (this.settings.time === 'dyn' && this.state !== 'paused' ? dt / 40 : 0));
     if (this.state === 'free' || this.state === 'race') this.updateDrive(dt, inp);
     else if (this.state === 'title' || this.state === 'garage') this.updateShowroom(dt);
+    else if (this.state === 'photo') this.updatePhotoCam();
     if (this.screen === 'garage' && this.state !== 'garage') this.state = 'garage';
     if (this.screen !== 'garage' && this.previewModel) this.closeGarage();
     this.audio.tick(dt);
@@ -1020,6 +1166,12 @@ class Game {
         for (const p of rear) S.emit(p.x, p.y + 0.3, p.z, -car.vel.x * 0.2 + (Math.random() - 0.5) * 2, 0.8 + Math.random() * 1.5, -car.vel.z * 0.2 + (Math.random() - 0.5) * 2, a, br[0], br[1], 1.4, 1.5, { drag: 1.6, grow: 2.6 });
       }
     }
+    // Gischt bei nasser Straße
+    const wetFx = smooth(0.45, 0.9, this.weather ? this.weather.rain : 0);
+    if (wetFx > 0 && car.grounded && paved && spd > 7 && this.smokeT === 0) {
+      for (const p of rear) S.emit(p.x, p.y + 0.25, p.z, -car.vel.x * 0.25 + (Math.random() - 0.5) * 1.5, 0.5 + Math.random(), -car.vel.z * 0.25 + (Math.random() - 0.5) * 1.5,
+        0.32 * wetFx * Math.min(1, spd / 30), 0.9, 0.95, 1.3, 0.9, { drag: 2.2, grow: 3.2 });
+    }
     // Nitro-Flammen
     if (car.nitroOn) {
       const ex = ud.exhaust;
@@ -1134,6 +1286,15 @@ class Game {
 }
 
 const TIME_FIXED = { day: 12.5, sunset: 19.3, night: 23 };
+const PHOTO_FILTERS = [
+  { name: 'Normal', css: '' },
+  { name: 'Warm', css: 'sepia(0.28) saturate(1.25) brightness(1.03)' },
+  { name: 'Kühl', css: 'hue-rotate(-12deg) saturate(0.85) brightness(1.05)' },
+  { name: 'Kino', css: 'contrast(1.18) saturate(1.3)', vig: true },
+  { name: 'Schwarzweiß', css: 'grayscale(1) contrast(1.2)', vig: true },
+  { name: 'Retro', css: 'sepia(0.55) contrast(1.1) saturate(0.9) brightness(1.05)', vig: true },
+];
+const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 function frame() { return new Promise(r => requestAnimationFrame(() => r())); }
 

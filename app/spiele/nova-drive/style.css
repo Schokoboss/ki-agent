@@ -276,6 +276,20 @@ body.nitro #speedo { filter: drop-shadow(0 0 14px #1fd1ff); }
   #res-reward { font-size: 14px; }
 }
 
+/* Fotomodus */
+#photo { padding: 0; justify-content: space-between; align-items: stretch; touch-action: none; }
+.ph-top, .ph-bottom { position: relative; z-index: 2; display: flex; align-items: center; gap: 10px; padding: calc(10px + var(--st)) calc(12px + var(--sr)) 10px calc(12px + var(--sl)); }
+.ph-top { justify-content: space-between; background: linear-gradient(rgba(0,0,0,.45), transparent); }
+.ph-hint { font-size: 12px; color: rgba(255,255,255,.8); text-shadow: 0 1px 4px #000; }
+.ph-bottom { padding-bottom: calc(12px + var(--sb)); background: linear-gradient(transparent, rgba(0,0,0,.5)); justify-content: center; flex-wrap: wrap; }
+.ph-bottom label { display: flex; flex-direction: column; font-size: 11px; color: rgba(255,255,255,.85); width: min(180px, 24vw); gap: 2px; }
+#ph-shot { width: 64px; height: 64px; border-radius: 50%; border: 5px solid #fff; background: rgba(255,255,255,.25); flex: none; margin-left: 8px; }
+#ph-shot:active { background: #fff; transform: scale(.94); }
+#ph-vig { position: absolute; inset: 0; pointer-events: none; z-index: 1; background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.6) 100%); }
+#ph-flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 3; }
+#ph-flash.on { animation: phf .45s ease-out; }
+@keyframes phf { 0% { opacity: .9; } 100% { opacity: 0; } }
+
 /* Hochformat */
 #rotate { position: fixed; inset: 0; z-index: 60; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: var(--bg); text-align: center; padding: 24px; font-size: 20px; font-weight: 700; }
 #rotate small { font-size: 13px; color: var(--muted); font-weight: 500; }

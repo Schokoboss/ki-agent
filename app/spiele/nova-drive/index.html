@@ -147,6 +147,7 @@
   <div class="panel">
     <h2>Pause</h2>
     <button id="p-resume" class="btn primary">Weiter</button>
+    <button id="p-photo" class="btn">📸 Fotomodus</button>
     <button id="p-restart" class="btn">Rennen neu starten</button>
     <button id="p-abort" class="btn">Rennen abbrechen</button>
     <button id="p-daily" class="btn">Tagesaufgaben</button>
@@ -180,6 +181,8 @@
       <div class="seg" id="s-quality"><button data-v="auto">Auto</button><button data-v="0">Niedrig</button><button data-v="1">Mittel</button><button data-v="2">Hoch</button></div>
       <label>Tageszeit</label>
       <div class="seg" id="s-time"><button data-v="dyn">Wechselnd</button><button data-v="day">Tag</button><button data-v="sunset">Abend</button><button data-v="night">Nacht</button></div>
+      <label>Wetter</label>
+      <div class="seg" id="s-weather"><button data-v="dyn">Wechselnd</button><button data-v="sun">Sonne</button><button data-v="rain">Regen</button></div>
       <label>Radio</label>
       <div class="seg" id="s-station"><button data-v="0">Nova Pulse</button><button data-v="1">Küstenwelle</button><button data-v="2">Kiesel FM</button><button data-v="3">Aus</button></div>
       <label>Effekte</label><input id="s-sfx" type="range" min="0" max="1" step="0.05">
@@ -217,6 +220,23 @@
       </div>
     </div>
   </div>
+</section>
+
+<!-- Fotomodus -->
+<section id="photo" class="screen" hidden>
+  <div id="ph-vig" hidden></div>
+  <div class="ph-top">
+    <button class="btn back" id="ph-back">‹ Zurück</button>
+    <span class="ph-hint">Ziehen = Kamera drehen</span>
+    <button class="btn" id="ph-filter">Filter: Normal</button>
+  </div>
+  <div class="ph-bottom">
+    <label>Zoom<input id="ph-zoom" type="range" min="2.8" max="26" step="0.1"></label>
+    <label>Höhe<input id="ph-height" type="range" min="-0.08" max="1.25" step="0.01"></label>
+    <label>Uhrzeit<input id="ph-time" type="range" min="0" max="24" step="0.1"></label>
+    <button id="ph-shot" aria-label="Foto aufnehmen"></button>
+  </div>
+  <div id="ph-flash"></div>
 </section>
 
 <!-- Tagesaufgaben & Profil -->

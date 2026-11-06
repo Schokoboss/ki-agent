@@ -11,6 +11,10 @@ Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
   Felsen, 8 Gebäudetypen (Fenster leuchten nachts), Laternen, Zäune, Pylonen, Heuballen, Plakatwände, Schanzen,
   Bühne mit LED-Wand, Zirkuszelte, Riesenrad, Torbogen, Lichttürme, jubelnde Zuschauer, Segelboote, Windräder.
   Gegner und Verkehr fahren die vollen Automodelle; Grafik-Standard „Hoch“.
+- Wetter: wechselnd/Sonne/Regen – nasse, spiegelnde Straßen, Gischt, weniger Grip (auch für die KI), Gewitter mit Blitz & Donner.
+- Fotomodus (Pause → 📸): Kamera frei drehen/zoomen, Uhrzeit, 6 Filter, Foto teilen oder speichern (mit Logo).
+- Handy: Lenkgefühl, Tastengröße, Neigung kalibrieren/umkehren, Vibration, Spielstand als Code sichern/laden,
+  lokaler Start mit QR-Code (`Nova Drive starten.cmd`) und Einzeldatei fürs Handy (`werkstatt/handy-datei.mjs`).
 - Geld & Co.: Tagesbonus, 3 Tagesaufgaben, Glücksrad (nur Spielgeld), Auszahlung nach Platz/sauber/Schwierigkeit,
   Autos kaufen, tunen und verkaufen, Profil-Statistik.
 
