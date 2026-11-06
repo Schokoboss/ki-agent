@@ -112,7 +112,8 @@ Open-World-Festival-Rennspiel fürs Handy in `app/spiele/nova-drive/` – mit de
 `…/ki-agent/spiele/nova-drive/` (Querformat, „Zum Startbildschirm hinzufügen“ macht eine App daraus).
 Lokal testen: `python -m http.server` im Ordner `app` und `http://localhost:8000/spiele/nova-drive/` öffnen.
 Automodelle neu bauen: `python werkstatt/autos.py -- ../models` (braucht Blender bzw. `pip install bpy`), danach
-mit `gltf-transform meshopt` komprimieren. Vorschau aller Modelle: `werkstatt/vorschau.html`.
+mit `gltf-transform meshopt` komprimieren (je Auto `<id>.glb` voll, `<id>_mid.glb` für Gegner, `<id>_lod.glb`).
+Vorschau aller Modelle: `werkstatt/vorschau.html?cars=sundog,atlas` (16 Autos, Navigation über die Karte).
 Ohne Server am Handy spielen: `node werkstatt/handy-datei.mjs` (braucht esbuild) baut `NovaDrive-Handy.html` – eine einzige
 Datei mit allem drin; aufs Handy laden und in Chrome öffnen. Lokal mit Handy-QR-Code: `Nova Drive starten.cmd`.
 

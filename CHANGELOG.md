@@ -2,11 +2,23 @@
 
 Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 
+## 06.11.2026
+- **Nova Drive – 16 Autos**: 8 neue eigene Blender-Modelle – Camper-Bus (Dachträger, Surfbrett), Kleinwagen, Buggy
+  (Überrollkäfig), Geländewagen, Oldtimer (Speichenräder, Weißwandreifen), Kombi, Keil-Supersportler (Klappscheinwerfer),
+  80er-Rallye (Kastenkotflügel, Zusatzscheinwerfer). Gegner und Verkehr fahren sie auch.
+- Alle Autos in Blender neu gebaut: ausgestellte Kotflügel, Türfugen, Projektor-Scheinwerfer, Türgriffe, Embleme,
+  Innenraum mit Sitzen und Lenkrad hinter durchsichtigen Scheiben (eigenes Auto), saubere A-/B-/C-Säulen,
+  Grill und Kennzeichen exakt auf die Karosserie gesetzt. Drei Detailstufen (voll · mittel für Gegner · LOD).
+- Garage nach Preis sortiert. Motorsound je nach Autotyp.
+- Navigation: Route zu jedem Ziel über das Straßennetz (Karte → „🧭 Navi starten“, Pause → Navi), Pfeile auf der Straße,
+  Abbiegehinweise mit Entfernung, Sprachansagen, Neuberechnung beim Verfahren; Rennstrecke wird vorab angezeigt.
+- Grafik Ultra, Ladebildschirm mit Fortschritt, vorberechnetes Licht (siehe frühere Commits).
+
 ## 05.11.2026
 - **Nova Drive** (`app/spiele/nova-drive/`): Open-World-Festival-Rennspiel fürs Handy (three.js, läuft im Browser, installierbar).
   Eigene Insel mit Küstenring, Altstadt, See, Pass, Wald und Festival; 9 Rennen gegen KI, Blitzer, Driftzonen, Schanzen,
   20 Plakate, Skill-Ketten, Tag/Nacht, generatives Radio, Freund-Herausforderung per Link (Geist).
-- 8 eigene Automodelle aus Blender (`werkstatt/autos.py`, Meshopt-komprimiert, zusammen < 1 MB).
+- 8 eigene Automodelle aus Blender (`werkstatt/autos.py`, Meshopt-komprimiert).
 - Komplette Welt aus Blender-Modellen (`werkstatt/welt.py`, 31 Modelle): Bäume mit Detailstufen nach Entfernung,
   Felsen, 8 Gebäudetypen (Fenster leuchten nachts), Laternen, Zäune, Pylonen, Heuballen, Plakatwände, Schanzen,
   Bühne mit LED-Wand, Zirkuszelte, Riesenrad, Torbogen, Lichttürme, jubelnde Zuschauer, Segelboote, Windräder.

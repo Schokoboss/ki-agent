@@ -255,7 +255,7 @@ class Game {
     const spec = this.carSpec(id) || CARS[0];
     const own = this.save.owned[spec.id] || { up: {}, color: spec.colors[0] };
     if (this.carModel) this.scene.remove(this.carModel);
-    this.carModel = buildCar(spec, own.color);
+    this.carModel = buildCar(spec, own.color || spec.colors[0]);
     this.carModel.userData.carId = spec.id;
     this.scene.add(this.carModel);
     // Bodenschatten
@@ -631,7 +631,7 @@ class Game {
     const sel = this.garageSel, spec = this.carSpec(sel), own = this.save.owned[sel];
     // Liste
     const list = $('g-list'); list.innerHTML = '';
-    for (const c of CARS) {
+    for (const c of [...CARS].sort((a, b) => a.price - b.price)) {
       const o = this.save.owned[c.id];
       const r = rating(carStats(c, o ? o.up : {})), cl = carClass(r);
       const b = document.createElement('button');
@@ -641,6 +641,7 @@ class Game {
       b.querySelector('.pr').textContent = o ? (c.id === this.save.current ? '✓ Aktiv' : 'Im Besitz') : fmtNum(c.price) + ' CR';
       b.addEventListener('click', () => { this.audio.play('ui'); this.garageSel = c.id; this.previewCar(c.id); this.renderGarage(); });
       list.appendChild(b);
+      if (c.id === sel) requestAnimationFrame(() => b.scrollIntoView({ block: 'nearest', inline: 'center' }));
     }
     // Werte
     const st = carStats(spec, own ? own.up : {}), r = rating(st), cl = carClass(r);
@@ -706,7 +707,7 @@ class Game {
   previewCar(id) {
     const spec = this.carSpec(id), own = this.save.owned[id];
     if (this.previewModel) this.scene.remove(this.previewModel);
-    this.previewColor = own ? own.color : spec.colors[0];
+    this.previewColor = (own && own.color) || spec.colors[0];
     this.previewModel = buildCar(spec, this.previewColor);
     this.previewId = id;
     const p = this.garagePos();

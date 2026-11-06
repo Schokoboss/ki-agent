@@ -132,6 +132,11 @@ const TRAFFIC_STYLES = [
   { style: 'truck', colors: ['#34495e', '#d35400', '#ecf0f1', '#16a085'] },
   { style: 'ev', colors: ['#ecf0f1', '#2c3e50', '#8e44ad'] },
   { style: 'muscle', colors: ['#c0392b', '#2c3e50', '#f39c12'] },
+  { style: 'van', colors: ['#e67e22', '#5fa8d3', '#7bc47f', '#f2c14e'] },
+  { style: 'suv', colors: ['#22232a', '#8d99ae', '#ecf0f1', '#1d3557'] },
+  { style: 'mini', colors: ['#d7263d', '#2a9d8f', '#e9c46a', '#264653'] },
+  { style: 'wagon', colors: ['#3d405b', '#ecf0f1', '#81b29a', '#7f8c8d'] },
+  { style: 'classic', colors: ['#9b1d20', '#1b3a5c', '#f1e3c8', '#3d6b3a'] },
 ];
 
 export class Traffic {

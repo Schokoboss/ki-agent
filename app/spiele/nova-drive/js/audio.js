@@ -71,7 +71,8 @@ export class Audio {
     if (!this.ok) return;
     const t = this.ctx.currentTime, K = 0.04;
     const rpm = active ? car.rpm : 0;
-    const base = style === 'ev' ? 0 : (style === 'muscle' ? 34 : style === 'hyper' ? 48 : style === 'truck' ? 30 : 40);
+    const BASE = { muscle: 34, hyper: 48, truck: 30, van: 28, suv: 31, classic: 33, buggy: 37, mini: 44, wedge: 46, rally80: 43, wagon: 38 };
+    const base = style === 'ev' ? 0 : (BASE[style] || 40);
     if (style === 'ev') {
       const f = 120 + Math.abs(car.vf) * 18;
       this.o1.frequency.setTargetAtTime(f, t, K); this.o2.frequency.setTargetAtTime(f * 1.5, t, K); this.o3.frequency.setTargetAtTime(f * 0.5, t, K);

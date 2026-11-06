@@ -17,6 +17,15 @@ const STYLES = {
   gt: { L: 4.6, W: 1.96, clr: 0.26, belt: 0.9, nose: 0.66, tail: 0.92, hood: 1.65, ws: 0.85, roof: 0.7, rear: 1.15, H: 1.25, wR: 0.36, wb: 2.7 },
   ev: { L: 4.7, W: 2.0, clr: 0.27, belt: 0.92, nose: 0.68, tail: 0.94, hood: 1.35, ws: 1.1, roof: 0.95, rear: 1.0, H: 1.3, wR: 0.36, wb: 2.8 },
   hyper: { L: 4.72, W: 2.06, clr: 0.22, belt: 0.82, nose: 0.52, tail: 0.98, hood: 1.15, ws: 1.0, roof: 0.62, rear: 1.45, H: 1.12, wR: 0.36, wb: 2.75 },
+  // neue Stile (Maße wie in werkstatt/autos.py)
+  van: { L: 4.6, W: 1.95, clr: 0.34, belt: 1.12, nose: 1.02, tail: 1.15, hood: 0.62, ws: 0.62, roof: 2.95, rear: 0.06, H: 1.98, wR: 0.34, wb: 2.85 },
+  suv: { L: 4.6, W: 1.96, clr: 0.46, belt: 1.24, nose: 1.05, tail: 1.2, hood: 1.2, ws: 0.72, roof: 1.78, rear: 0.32, H: 1.86, wR: 0.42, wb: 2.75 },
+  mini: { L: 3.35, W: 1.66, clr: 0.26, belt: 0.92, nose: 0.76, tail: 0.92, hood: 0.78, ws: 0.58, roof: 1.32, rear: 0.24, H: 1.44, wR: 0.29, wb: 2.18 },
+  wagon: { L: 4.75, W: 1.86, clr: 0.27, belt: 0.95, nose: 0.74, tail: 0.96, hood: 1.4, ws: 0.75, roof: 2.05, rear: 0.24, H: 1.45, wR: 0.35, wb: 2.82 },
+  classic: { L: 4.4, W: 1.76, clr: 0.3, belt: 0.86, nose: 0.76, tail: 0.82, hood: 1.6, ws: 0.55, roof: 0.88, rear: 0.86, H: 1.3, wR: 0.33, wb: 2.5 },
+  buggy: { L: 3.6, W: 1.86, clr: 0.46, belt: 0.96, nose: 0.8, tail: 0.96, hood: 1.0, ws: 0.38, roof: 0, rear: 0, H: 1.3, wR: 0.42, wb: 2.3 },
+  wedge: { L: 4.42, W: 1.96, clr: 0.22, belt: 0.78, nose: 0.48, tail: 0.95, hood: 1.25, ws: 1.1, roof: 0.55, rear: 1.2, H: 1.08, wR: 0.35, wb: 2.55 },
+  rally80: { L: 4.05, W: 1.86, clr: 0.38, belt: 1.0, nose: 0.88, tail: 0.98, hood: 1.12, ws: 0.6, roof: 1.45, rear: 0.55, H: 1.48, wR: 0.35, wb: 2.45 },
 };
 
 function extrude(pts, width, bevel = 0.06) {
@@ -43,17 +52,22 @@ export function styleDims(style) { return STYLES[style] || STYLES.hatch; }
 
 // ---------------------------------------------------------------- Blender-Modelle (models/*.glb)
 const TEMPL = {};
-const STYLE_CAR = { hatch: 'kestrel', truck: 'tundra', roadster: 'velora', rally: 'ostwind', muscle: 'brenner', gt: 'aurum', ev: 'volt', hyper: 'phantom' };
+const STYLE_CAR = {
+  hatch: 'kestrel', truck: 'tundra', roadster: 'velora', rally: 'ostwind', muscle: 'brenner', gt: 'aurum', ev: 'volt', hyper: 'phantom',
+  van: 'sundog', suv: 'atlas', mini: 'pixie', wagon: 'nordwind', classic: 'vira', buggy: 'dune', wedge: 'strato', rally80: 'gruppo',
+};
 
 export async function loadCarModels(ids, onProgress = () => {}) {
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
   await MeshoptDecoder.ready;
   let done = 0;
-  const total = ids.length * 2;
+  const total = ids.length * 3;
   const tick = () => onProgress(++done / total);
+  // drei Stufen aus Blender: voll (Innenraum, Glas durchsichtig) · mittel (Gegner/Verkehr) · LOD (Sparmodus)
   await Promise.all(ids.flatMap(id => [
     loader.loadAsync(modelUrl(`models/${id}.glb`)).then(g => { (TEMPL[id] ||= {}).full = g.scene; }).catch(e => console.warn('Modell fehlt', id, e)).finally(tick),
+    loader.loadAsync(modelUrl(`models/${id}_mid.glb`)).then(g => { (TEMPL[id] ||= {}).midScene = g.scene; }).catch(e => console.warn('Mittel-Modell fehlt', id, e)).finally(tick),
     loader.loadAsync(modelUrl(`models/${id}_lod.glb`)).then(g => { (TEMPL[id] ||= {}).lod = prepLod(g.scene); }).catch(e => console.warn('LOD fehlt', id, e)).finally(tick),
   ]));
 }
@@ -118,9 +132,10 @@ function fromTemplate(spec, color, opts) {
   const id = TEMPL[spec.id] ? spec.id : STYLE_CAR[spec.style];
   const T = TEMPL[id];
   if (!T) return null;
-  // Gegner & Verkehr: volles Blender-Modell (zusammengefasst), nur bei „Niedrig“ die Sparversion
-  if (opts.lod && DETAIL >= 1 && T.full && !T.fullMerged) T.fullMerged = prepLod(T.full);
-  const LODT = opts.lod ? (DETAIL >= 1 && T.fullMerged ? T.fullMerged : T.lod) : null;
+  // Gegner: mittleres Blender-Modell (zusammengefasst, 3 Draw-Calls). Verkehr: mittel ab „Hoch“, sonst LOD.
+  const wantMid = opts.lod && (opts.lod === 'ai' ? DETAIL >= 1 : DETAIL >= 2);
+  if (wantMid && !T.mid && (T.midScene || T.full)) T.mid = prepLod(T.midScene || T.full);
+  const LODT = opts.lod ? (wantMid && T.mid ? T.mid : T.lod || T.mid) : null;
   if (opts.lod ? !LODT : !T.full) return null;
   const S = STYLES[spec.style] || STYLES.hatch;
   const root = new THREE.Group(), bodyG = new THREE.Group();

@@ -70,6 +70,23 @@ export const CARS = [
     price: 210000, style: 'ev', colors: ['#f1f1f1', '#00b4d8', '#7209b7', '#111111', '#80ed99', '#ff006e'] },
   { id: 'phantom', maker: 'Nova', name: 'Phantom', drive: 'RWD', top: 346, accel: 16.6, grip: 1.32, handling: 1.2, offroad: 0.05,
     price: 350000, style: 'hyper', colors: ['#6d5dfc', '#0a0a0a', '#ff3d00', '#e0e0e0', '#00e5ff', '#ffd400'] },
+  // neue Blender-Autos (hinten angehängt, damit Herausforderungs-Links gültig bleiben)
+  { id: 'sundog', maker: 'Sundog', name: 'Camper 2.0', drive: 'RWD', top: 158, accel: 6.6, grip: 0.9, handling: 0.86, offroad: 0.4,
+    price: 9000, style: 'van', colors: ['#e8432e', '#f2c14e', '#5fa8d3', '#7bc47f', '#2a9d8f', '#ff8fab'] },
+  { id: 'pixie', maker: 'Pixie', name: 'City 1.3', drive: 'FWD', top: 178, accel: 8.0, grip: 1.04, handling: 1.22, offroad: 0.2,
+    price: 12000, style: 'mini', colors: ['#d7263d', '#2a9d8f', '#f4a261', '#264653', '#e9c46a', '#1b98e0'] },
+  { id: 'dune', maker: 'Dune', name: 'Sandfloh', drive: 'RWD', top: 175, accel: 10.2, grip: 0.95, handling: 1.18, offroad: 1.0,
+    price: 28000, style: 'buggy', colors: ['#c9a227', '#ff6b00', '#2ec4b6', '#e63946', '#f2f2f2', '#3d6b3a'] },
+  { id: 'atlas', maker: 'Atlas', name: 'Terra 4x4', drive: 'AWD', top: 205, accel: 9.4, grip: 1.0, handling: 0.98, offroad: 0.9,
+    price: 34000, style: 'suv', colors: ['#3d6b3a', '#22232a', '#f2f2f2', '#8d99ae', '#b5651d', '#1d3557'] },
+  { id: 'vira', maker: 'Vira', name: 'Classica 64', drive: 'RWD', top: 205, accel: 8.8, grip: 0.98, handling: 1.0, offroad: 0.1,
+    price: 38000, style: 'classic', colors: ['#2d6a4f', '#9b1d20', '#f1e3c8', '#1b3a5c', '#c9a227', '#111111'] },
+  { id: 'nordwind', maker: 'Nordwind', name: 'Kombi R', drive: 'AWD', top: 248, accel: 11.8, grip: 1.1, handling: 1.08, offroad: 0.4,
+    price: 68000, style: 'wagon', colors: ['#1f4e9c', '#3d405b', '#f2f2f2', '#81b29a', '#e07a5f', '#111111'] },
+  { id: 'gruppo', maker: 'Gruppo', name: 'Rallye 86', drive: 'AWD', top: 232, accel: 12.4, grip: 1.12, handling: 1.18, offroad: 0.9,
+    price: 95000, style: 'rally80', colors: ['#f2f2f2', '#6d5dfc', '#e63946', '#1f4e9c', '#ffb703', '#111111'] },
+  { id: 'strato', maker: 'Strato', name: 'Keil V12', drive: 'RWD', top: 305, accel: 14.2, grip: 1.22, handling: 1.12, offroad: 0.05,
+    price: 180000, style: 'wedge', colors: ['#f1f1f1', '#ff3d00', '#111111', '#ffd400', '#00b4d8', '#d7263d'] },
 ];
 
 export const UPGRADES = [
