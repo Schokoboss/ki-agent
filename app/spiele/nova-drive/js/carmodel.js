@@ -161,7 +161,10 @@ function fromTemplate(spec, color, opts) {
       if (!o.isMesh) return;
       o.castShadow = true;
       if (o.material.name === 'paint') {
-        if (!paintMat) { paintMat = o.material.clone(); paintMat.color.set(color); paintMat.envMapIntensity = 1.25; }
+        if (!paintMat) {
+          if (DETAIL >= 3) paintMat = new THREE.MeshPhysicalMaterial({ color, metalness: 0.55, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 1.35 });
+          else { paintMat = o.material.clone(); paintMat.color.set(color); paintMat.envMapIntensity = 1.25; }
+        }
         o.material = paintMat;
       } else if (o.material.name === 'tail') {
         if (!tailMat) { tailMat = o.material.clone(); }

@@ -162,7 +162,89 @@ export function makeTextures(aniso) {
     T.ledCanvas = c; T.ledCtx = g;
     T.led = tex(c, false, 1);
   }
+  // ---- Ultra-Texturen: Wolkenrauschen + Bodendetails (nahtlos kachelbar)
+  T.noise = noiseTexture(256, rnd);
+  T.dGrass = detailGrass(512, rnd, aniso);
+  T.dRock = detailRock(512, rnd, aniso);
+  T.dSand = detailSand(512, rnd, aniso);
   return T;
+}
+
+// kachelbares Wertrauschen (mehrere Oktaven) als Float-Feld 0…1
+function tileNoise(size, octaves, rnd) {
+  const out = new Float32Array(size * size);
+  let amp = 1, total = 0;
+  for (const cells of octaves) {
+    const lat = Array.from({ length: cells * cells }, () => rnd());
+    const v = (i, j) => lat[((j % cells + cells) % cells) * cells + ((i % cells + cells) % cells)];
+    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+      const fx = x / size * cells, fy = y / size * cells, i = Math.floor(fx), j = Math.floor(fy);
+      let u = fx - i, w = fy - j; u = u * u * (3 - 2 * u); w = w * w * (3 - 2 * w);
+      const a = v(i, j) + (v(i + 1, j) - v(i, j)) * u, b = v(i, j + 1) + (v(i + 1, j + 1) - v(i, j + 1)) * u;
+      out[y * size + x] += (a + (b - a) * w) * amp;
+    }
+    total += amp; amp *= 0.5;
+  }
+  for (let k = 0; k < out.length; k++) out[k] /= total;
+  return out;
+}
+function noiseTexture(size, rnd) {
+  const n = tileNoise(size, [8, 16, 32], rnd), d = new Uint8Array(size * size * 4);
+  for (let k = 0; k < n.length; k++) { const v = Math.round(n[k] * 255); d[k * 4] = d[k * 4 + 1] = d[k * 4 + 2] = v; d[k * 4 + 3] = 255; }
+  const t = new THREE.DataTexture(d, size, size, THREE.RGBAFormat);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.generateMipmaps = true; t.needsUpdate = true;
+  return t;
+}
+function fieldCanvas(size, field, lo, hi, tint) {
+  const [c, g] = canvas(size, size), img = g.createImageData(size, size);
+  for (let k = 0; k < size * size; k++) {
+    const v = lo + (hi - lo) * field[k];
+    img.data[k * 4] = Math.min(255, v * tint[0]); img.data[k * 4 + 1] = Math.min(255, v * tint[1]); img.data[k * 4 + 2] = Math.min(255, v * tint[2]); img.data[k * 4 + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  return [c, g];
+}
+// zeichnet mit Umbruch an den Rändern (für nahtlose Kacheln)
+function wrapDraw(g, size, x, y, fn) { for (const ox of [-size, 0, size]) for (const oy of [-size, 0, size]) fn(x + ox, y + oy); }
+function detailGrass(size, rnd, aniso) {
+  const [c, g] = fieldCanvas(size, tileNoise(size, [4, 16, 64], rnd), 95, 160, [1, 1.04, 0.92]);
+  g.lineCap = 'round';
+  for (let i = 0; i < 9000; i++) {
+    const x = rnd() * size, y = rnd() * size, a = -Math.PI / 2 + (rnd() - 0.5) * 1.4, L = 3 + rnd() * 9;
+    const v = rnd() < 0.5 ? 70 + rnd() * 50 : 160 + rnd() * 70;
+    g.strokeStyle = `rgba(${v * 0.95},${v},${v * 0.85},${0.35 + rnd() * 0.4})`; g.lineWidth = 0.8 + rnd() * 1.2;
+    wrapDraw(g, size, x, y, (px, py) => { if (px < -12 || py < -12 || px > size + 12 || py > size + 12) return; g.beginPath(); g.moveTo(px, py); g.lineTo(px + Math.cos(a) * L, py + Math.sin(a) * L); g.stroke(); });
+  }
+  for (let i = 0; i < 260; i++) {
+    const x = rnd() * size, y = rnd() * size, r = 4 + rnd() * 14;
+    g.fillStyle = `rgba(60,55,40,${0.06 + rnd() * 0.08})`;
+    wrapDraw(g, size, x, y, (px, py) => { g.beginPath(); g.arc(px, py, r, 0, 7); g.fill(); });
+  }
+  return tex(c, true, aniso);
+}
+function detailRock(size, rnd, aniso) {
+  const [c, g] = fieldCanvas(size, tileNoise(size, [4, 8, 32, 128], rnd), 70, 185, [1, 0.98, 0.95]);
+  for (let i = 0; i < 70; i++) {
+    let x = rnd() * size, y = rnd() * size, a = rnd() * 6.28;
+    g.strokeStyle = `rgba(25,22,20,${0.25 + rnd() * 0.35})`; g.lineWidth = 0.8 + rnd() * 1.6;
+    const pts = [[x, y]];
+    for (let k = 0; k < 14; k++) { a += (rnd() - 0.5) * 0.9; x += Math.cos(a) * (6 + rnd() * 10); y += Math.sin(a) * (6 + rnd() * 10); pts.push([x, y]); }
+    for (const [ox, oy] of [[-size, 0], [0, 0], [size, 0], [0, -size], [0, size], [-size, -size], [size, size], [size, -size], [-size, size]]) {
+      g.beginPath(); pts.forEach(([px, py], k) => k ? g.lineTo(px + ox, py + oy) : g.moveTo(px + ox, py + oy)); g.stroke();
+    }
+  }
+  return tex(c, true, aniso);
+}
+function detailSand(size, rnd, aniso) {
+  const n = tileNoise(size, [4, 8], rnd), grain = tileNoise(size, [128, 256], rnd), f = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const k = y * size + x;
+    const r = Math.sin((y / size * 18 + n[k] * 3.2) * Math.PI * 2) * 0.5 + 0.5;
+    f[k] = r * 0.45 + grain[k] * 0.4 + n[k] * 0.15;
+  }
+  const [c] = fieldCanvas(size, f, 105, 175, [1.02, 1, 0.94]);
+  return tex(c, true, aniso);
 }
 
 function radial(s, stops) {

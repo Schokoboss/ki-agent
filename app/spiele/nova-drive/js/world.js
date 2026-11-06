@@ -50,24 +50,42 @@ export class Scenery {
     this.skyU = {
       zenith: { value: new THREE.Color() }, horizon: { value: new THREE.Color() }, sunCol: { value: new THREE.Color() },
       sunDir: { value: this.sunDir }, night: { value: 0 },
+      time: { value: 0 }, cover: { value: 0.35 }, noiseTex: { value: this.T.noise },
     };
     const sky = new THREE.Mesh(new THREE.SphereGeometry(2600, 32, 16), new THREE.ShaderMaterial({
       uniforms: this.skyU, side: THREE.BackSide, depthWrite: false, fog: false,
       vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); vec4 p = modelViewMatrix*vec4(position,1.); gl_Position = projectionMatrix*p; gl_Position.z = gl_Position.w*0.99999; }`,
-      fragmentShader: `uniform vec3 zenith, horizon, sunCol, sunDir; uniform float night; varying vec3 vDir;
+      fragmentShader: `uniform vec3 zenith, horizon, sunCol, sunDir; uniform float night, time, cover; uniform sampler2D noiseTex; varying vec3 vDir;
         float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
+        float fbm(vec2 p){ float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++) { s += a * texture2D(noiseTex, p).r; p = p * 2.07 + vec2(0.13, 0.37); a *= 0.5; } return s / 0.97; }
         void main(){
           vec3 d = normalize(vDir);
           float y = max(d.y, 0.0);
-          vec3 col = mix(horizon, zenith, pow(y, 0.55));
-          if (d.y < 0.0) col = horizon * (1.0 + d.y * 0.6);
           float sd = max(dot(d, sunDir), 0.0);
-          col += sunCol * (pow(sd, 6.0) * 0.35 + pow(sd, 64.0) * 0.6);
-          col += sunCol * smoothstep(0.9993, 0.9997, sd) * 4.0;
+          vec3 col = mix(horizon, zenith, pow(y, 0.5));
+          col = mix(col, horizon * 1.08, pow(1.0 - y, 8.0) * 0.6);
+          col += sunCol * (pow(sd, 5.0) * 0.32 + pow(sd, 48.0) * 0.55) * (1.0 - night * 0.7);
+          col += sunCol * smoothstep(0.99935, 0.99975, sd) * 6.0;
+          if (d.y < 0.0) col = horizon * (1.0 + d.y * 0.5);
           // Sterne
+          float cloud = 0.0;
+          if (d.y > 0.005) {
+            vec2 uv = d.xz / (d.y + 0.07) * 0.09 + vec2(time * 0.0016, time * 0.0007);
+            float n = fbm(uv);
+            float n2 = fbm(uv * 2.3 + 0.5);
+            float base = clamp((n * 0.72 + n2 * 0.28 - 0.5) * 2.6 + 0.5, 0.0, 1.0);
+            cloud = smoothstep(1.0 - cover, 1.0 - cover + 0.26, base) * smoothstep(0.0, 0.16, d.y);
+            float thick = smoothstep(0.45, 0.95, base);
+            vec3 lit = mix(horizon, vec3(1.0), 0.55) * (1.0 - night * 0.86);
+            vec3 shade = mix(horizon, zenith, 0.4) * 0.55 * (1.0 - night * 0.8);
+            vec3 cc = mix(lit, shade, thick * 0.85);
+            cc += sunCol * pow(sd, 7.0) * (1.0 - thick) * 1.6;
+            cc += sunCol * 0.25 * (1.0 - thick) * (1.0 - night);
+            col = mix(col, cc, cloud * 0.96);
+          }
           if (night > 0.01 && d.y > 0.0) {
             vec2 g = floor(d.xz / (d.y + 0.35) * 220.0);
-            float st = step(0.996, h21(g)) * night * smoothstep(0.0, 0.3, d.y);
+            float st = step(0.996, h21(g)) * night * smoothstep(0.0, 0.3, d.y) * (1.0 - cloud);
             col += vec3(st);
           }
           gl_FragColor = vec4(col, 1.0);
@@ -162,9 +180,11 @@ export class Scenery {
       if (this.cloudMat) { this.cloudMat.color.lerp(grey, r * 0.85); this.cloudMat.opacity = Math.min(1, this.cloudMat.opacity + r * 0.35); }
     }
     u.night.value = this.night * (1 - r); // keine Sterne bei Regen
+    u.cover.value = 0.36 + r * 0.6;
     this.scene.fog.far = this.fogFarBase * (1 - 0.5 * r);
     this.scene.fog.near = 250 * (1 - 0.75 * r);
     const wet = smoothstep(0.3, 0.85, r);
+    if (this.splatU) this.splatU.uWet.value = wet;
     for (const m of this.roadMats || []) {
       m.roughness = lerp(m.userData.dirt ? 1 : 0.93, m.userData.dirt ? 0.75 : 0.26, wet);
       m.color.setScalar(lerp(1, m.userData.dirt ? 0.7 : 0.55, wet));
@@ -179,7 +199,7 @@ export class Scenery {
     const M = Math.round((2 * HALF) / step);
     const st = (2 * HALF) / M;
     const C = 4, per = Math.ceil(M / C);
-    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: this.T.ground });
+    const mat = this.q >= 2 ? this.terrainSplat() : new THREE.MeshLambertMaterial({ vertexColors: true, map: this.T.ground });
     this.terrainMat = mat;
     const col = [0, 0, 0];
     for (let cj = 0; cj < C; cj++) for (let ci = 0; ci < C; ci++) {
@@ -217,6 +237,36 @@ export class Scenery {
       m.receiveShadow = true;
       this.scene.add(m);
     }
+  }
+
+  // Boden mit echten Oberflächen: Gras, Fels (Hänge, dreiseitig projiziert), Sand – gemischt nach Neigung & Höhe
+  terrainSplat() {
+    const T = this.T;
+    this.splatU = { tGrass: { value: T.dGrass }, tRock: { value: T.dRock }, tSand: { value: T.dSand }, uWet: { value: 0 } };
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0, envMapIntensity: 0.35 });
+    mat.onBeforeCompile = sh => {
+      Object.assign(sh.uniforms, this.splatU);
+      sh.vertexShader = 'varying vec3 vTW; varying vec3 vTN;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+        vTW = (modelMatrix * vec4(transformed, 1.0)).xyz; vTN = normalize(mat3(modelMatrix) * objectNormal);`);
+      sh.fragmentShader = 'uniform sampler2D tGrass, tRock, tSand; uniform float uWet; varying vec3 vTW; varying vec3 vTN;\n' + sh.fragmentShader
+        .replace('#include <map_fragment>', `
+          float dist = length(vTW - cameraPosition);
+          float far = smoothstep(60.0, 380.0, dist);
+          vec3 g1 = texture2D(tGrass, vTW.xz * 0.21).rgb, g2 = texture2D(tGrass, vTW.xz * 0.037).rgb;
+          vec3 grass = mix(mix(g1, g2, 0.35), g2, far);
+          vec3 an = abs(normalize(vTN)); an /= (an.x + an.y + an.z);
+          vec3 rk = texture2D(tRock, vTW.zy * 0.09).rgb * an.x + texture2D(tRock, vTW.xz * 0.09).rgb * an.y + texture2D(tRock, vTW.xy * 0.09).rgb * an.z;
+          vec3 sand = mix(texture2D(tSand, vTW.xz * 0.16).rgb, texture2D(tSand, vTW.xz * 0.03).rgb, far);
+          float slope = 1.0 - clamp(normalize(vTN).y, 0.0, 1.0);
+          float wRock = smoothstep(0.3, 0.52, slope);
+          float wSand = smoothstep(3.4, 1.7, vTW.y) * (1.0 - wRock);
+          vec3 det = mix(grass, sand, wSand);
+          det = mix(det, rk, wRock);
+          diffuseColor.rgb *= det * 1.85 * (1.0 - uWet * 0.22);`)
+        .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+          roughnessFactor = mix(roughnessFactor, 0.82, wRock * 0.6) * (1.0 - uWet * 0.3);`);
+    };
+    return mat;
   }
 
   // ---------------------------------------------------------------- Straßen
@@ -767,6 +817,19 @@ export class Scenery {
     const loOf = [0, 0, 1, 1, 2], loScale = [1.25, 1.62, 1.35, 1.3, 1.08];
     const matHi = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
     const matLo = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    this.windU = { uTime: { value: 0 }, uAmp: { value: 1 } };
+    for (const m of [matHi, matLo]) {
+      m.onBeforeCompile = sh => {
+        Object.assign(sh.uniforms, this.windU);
+        sh.vertexShader = 'uniform float uTime, uAmp;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+          #ifdef USE_INSTANCING
+          float ph = instanceMatrix[3].x * 0.043 + instanceMatrix[3].z * 0.061;
+          float sw = max(position.y - 1.5, 0.0) * 0.016 * uAmp;
+          transformed.x += (sin(uTime * 1.25 + ph) + 0.35 * sin(uTime * 3.1 + ph * 2.0)) * sw;
+          transformed.z += cos(uTime * 1.05 + ph) * sw * 0.7;
+          #endif`);
+      };
+    }
     const C = 8, size = (2 * HALF) / C;
     const buckets = new Map(), rnd = mulberry32(5);
     for (const t of this.world.trees) {
@@ -1255,7 +1318,7 @@ export class Scenery {
     this.sun.position.set(playerPos.x + ld.x * 300, playerPos.y + ld.y * 300, playerPos.z + ld.z * 300);
     this.sun.target.position.copy(playerPos);
     this.waterU.fogNear.value = this.scene.fog.near; this.waterU.fogFar.value = this.scene.fog.far;
-    for (const c of this.clouds) { c.position.x += dt * 4; if (c.position.x > 2200) c.position.x = -2200; }
+    for (const c of this.clouds) c.visible = false; // Wolken sind jetzt Teil des Himmels
     // Baum-Blöcke: nah = Blender-Modell, fern = einfache Form, hinter dem Nebel aus
     const fogFar = this.scene.fog.far;
     for (const im of this.treeChunks || []) {
@@ -1268,6 +1331,8 @@ export class Scenery {
     }
     const lodD = this.q >= 3 ? 700 : this.q >= 2 ? 420 : this.q >= 1 ? 300 : 180;
     this.updateGrass(camPos, t);
+    this.skyU.time.value = t;
+    if (this.windU) { this.windU.uTime.value = t; this.windU.uAmp.value = 1 + (this.rain || 0) * 1.6; }
     for (const L of this.treeLod || []) {
       const d = Math.hypot(L.c.x - camPos.x, L.c.z - camPos.z) - L.r;
       L.hi.visible = d < lodD;

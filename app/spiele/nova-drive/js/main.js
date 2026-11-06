@@ -177,19 +177,49 @@ class Game {
     this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.42, 0.55, 1.0);
     c.addPass(this.bloom);
     c.addPass(new OutputPass());
-    c.addPass(new ShaderPass({
-      uniforms: { tDiffuse: { value: null }, vig: { value: 0.24 }, sat: { value: 1.1 } },
+    this.grade = new ShaderPass({
+      uniforms: { tDiffuse: { value: null }, vig: { value: 0.24 }, sat: { value: 1.1 }, sunPos: { value: new THREE.Vector2(0.5, 0.5) },
+        sunVis: { value: 0 }, sunCol: { value: new THREE.Color(1, 0.9, 0.7) }, speed: { value: 0 } },
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-      fragmentShader: `uniform sampler2D tDiffuse; uniform float vig, sat; varying vec2 vUv;
-        void main(){ vec4 c = texture2D(tDiffuse, vUv); float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+      fragmentShader: `uniform sampler2D tDiffuse; uniform float vig, sat, sunVis, speed; uniform vec2 sunPos; uniform vec3 sunCol; varying vec2 vUv;
+        void main(){
+          vec4 c = texture2D(tDiffuse, vUv);
+          if (speed > 0.01) {
+            vec2 dir = vUv - 0.5; float k = speed * 0.03 * smoothstep(0.12, 0.62, length(dir));
+            vec3 acc = c.rgb;
+            for (int i = 1; i <= 5; i++) acc += texture2D(tDiffuse, vUv - dir * k * float(i)).rgb;
+            c.rgb = acc / 6.0;
+          }
+          if (sunVis > 0.01) {
+            vec2 delta = (vUv - sunPos) * (0.9 / 16.0);
+            vec2 p = vUv; float illum = 0.0, decay = 1.0;
+            for (int i = 0; i < 16; i++) { p -= delta; vec3 s = texture2D(tDiffuse, p).rgb; illum += max(dot(s, vec3(0.3333)) - 0.7, 0.0) * decay; decay *= 0.92; }
+            c.rgb += sunCol * illum * 0.26 * sunVis;
+          }
+          float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
           c.rgb = mix(vec3(l), c.rgb, sat); vec2 d = (vUv - 0.5) * vec2(1.25, 1.0);
           c.rgb *= 1.0 - vig * smoothstep(0.32, 0.85, length(d)); gl_FragColor = c; }`,
-    }));
+    });
+    c.addPass(this.grade);
     c.setPixelRatio(this.pr);
     c.setSize(innerWidth, innerHeight);
   }
   draw() {
-    if (this.composer) this.composer.render(); else this.renderer.render(this.scene, this.camera);
+    if (this.composer) {
+      // Sonnenstrahlen: Sonne auf dem Bildschirm? Tempo-Unschärfe ab 130 km/h
+      const G = this.grade.uniforms, S = this.scenery, cam = this.camera;
+      const sp = _v.copy(S.sunDir).multiplyScalar(1500).add(cam.position).project(cam);
+      const fwd = _v2.set(0, 0, -1).applyQuaternion(cam.quaternion);
+      let vis = fwd.dot(S.sunDir) > 0 && S.sunDir.y > -0.02 ? 1 : 0;
+      vis *= smooth(-1.3, -0.9, sp.x) * smooth(1.3, 0.9, sp.x) * smooth(-1.3, -0.9, sp.y) * smooth(1.3, 0.9, sp.y);
+      vis *= (1 - S.night) * (1 - (S.rain || 0)) * smooth(-0.02, 0.06, S.sunDir.y);
+      G.sunPos.value.set(sp.x * 0.5 + 0.5, sp.y * 0.5 + 0.5);
+      G.sunVis.value = vis;
+      G.sunCol.value.copy(S.skyU.sunCol.value);
+      const drive = this.state === 'free' || this.state === 'race';
+      G.speed.value = drive ? clamp((this.car.speedKmh - 130) / 170, 0, 1) * (this.car.nitroOn ? 1.4 : 1) : 0;
+      this.composer.render();
+    } else this.renderer.render(this.scene, this.camera);
   }
 
   // ---------------------------------------------------------------- Auto
@@ -213,6 +243,22 @@ class Game {
       this.headL.target = this.headT;
     }
     this.carModel.add(this.headL, this.headT);
+    // sichtbare Lichtkegel bei Nacht (Hoch/Ultra)
+    if (this.quality >= 2) {
+      if (!this.beamMat) this.beamMat = new THREE.ShaderMaterial({
+        uniforms: { op: { value: 0 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+        vertexShader: 'varying float vY; void main(){ vY = uv.y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+        fragmentShader: 'uniform float op; varying float vY; void main(){ gl_FragColor = vec4(vec3(1.0, 0.95, 0.82) * op * pow(vY, 2.2), 1.0); }',
+      });
+      const d0 = styleDims(spec.style);
+      for (const sx of [-1, 1]) {
+        const cone = new THREE.Mesh(new THREE.ConeGeometry(2.4, 15, 18, 1, true), this.beamMat);
+        cone.rotation.x = -Math.PI / 2;
+        cone.position.set(sx * (d0.W / 2 - 0.32), d0.nose - 0.12, d0.L / 2 + 7.5);
+        cone.renderOrder = 35;
+        this.carModel.add(cone);
+      }
+    }
     this.blob.scale.set(d.W * 1.6, d.L * 1.35, 1);
     this.car.setDims(d);
     this.car.setStats(carStats(spec, own.up));
@@ -1177,6 +1223,7 @@ class Game {
     }
     setTailGlow(this.carModel, inp.brake > 0 && car.vf > 0.5, this.scenery.night);
     if (ud.headMat) ud.headMat.emissiveIntensity = 0.8 + this.scenery.night * (this.quality >= 3 ? 4.5 : 1.5);
+    if (this.beamMat) this.beamMat.uniforms.op.value = Math.max(0, this.scenery.night - 0.25) * 0.16 * (1 + (this.scenery.rain || 0));
     this.headL.intensity = this.scenery.night > 0.3 ? 60 * this.scenery.night : 0;
     // Schatten-Fleck
     const gy = this.world.heightAt(car.pos.x, car.pos.z);
@@ -1222,7 +1269,7 @@ class Game {
     const wetFx = smooth(0.45, 0.9, this.weather ? this.weather.rain : 0);
     if (wetFx > 0 && car.grounded && paved && spd > 7 && this.smokeT === 0) {
       for (const p of rear) S.emit(p.x, p.y + 0.25, p.z, -car.vel.x * 0.25 + (Math.random() - 0.5) * 1.5, 0.5 + Math.random(), -car.vel.z * 0.25 + (Math.random() - 0.5) * 1.5,
-        0.22 * wetFx * Math.min(1, spd / 30), 0.9 * lit, 0.95 * lit, 1.1, 0.8, { drag: 2.2, grow: 3 });
+        0.1 * wetFx * Math.min(1, spd / 30), 0.85 * lit, 0.9 * lit, 0.7, 0.55, { drag: 2.6, grow: 2.2 });
     }
     // Nitro-Flammen
     if (car.nitroOn) {
