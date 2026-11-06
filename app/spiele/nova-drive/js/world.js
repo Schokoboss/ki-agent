@@ -37,6 +37,7 @@ export class Scenery {
     this.buildCrowd();
     this.buildBoats();
     this.buildTurbines();
+    this.buildGrass();
     this.buildClouds();
     this.buildGlows();
     this.buildGates();
@@ -83,15 +84,16 @@ export class Scenery {
     this.sun = new THREE.DirectionalLight(0xffffff, 2.2);
     if (this.q >= 1) {
       this.sun.castShadow = true;
-      const ms = this.q >= 2 ? 2048 : 1024;
+      const ms = this.q >= 3 ? 4096 : this.q >= 2 ? 2048 : 1024;
       this.sun.shadow.mapSize.set(ms, ms);
       const c = this.sun.shadow.camera;
-      c.left = -55; c.right = 55; c.top = 55; c.bottom = -55; c.near = 5; c.far = 600;
+      const ext = this.q >= 3 ? 85 : 55;
+      c.left = -ext; c.right = ext; c.top = ext; c.bottom = -ext; c.near = 5; c.far = 600;
       this.sun.shadow.bias = -0.0006;
       this.sun.shadow.normalBias = 0.04;
     }
     s.add(this.sun); s.add(this.sun.target);
-    s.fog = new THREE.Fog(0xb8dcf5, 250, this.q >= 2 ? 1700 : this.q >= 1 ? 1300 : 850);
+    s.fog = new THREE.Fog(0xb8dcf5, 250, this.q >= 3 ? 2300 : this.q >= 2 ? 1700 : this.q >= 1 ? 1300 : 850);
   }
 
   setTime(h) {
@@ -125,8 +127,9 @@ export class Scenery {
     }
     if (this.facadeMat) this.facadeMat.emissiveIntensity = this.night * 1.4;
     if (this.winLitMat) this.winLitMat.emissiveIntensity = this.night * 1.3;
-    if (this.lampHeadMat) this.lampHeadMat.color.set(this.night > 0.3 ? 0xfff0c0 : 0x9a9a9a);
-    if (this.glowMat) this.glowMat.opacity = this.night * 0.9;
+    if (this.lampHeadMat) { this.lampHeadMat.color.set(this.night > 0.3 ? 0xfff0c0 : 0x9a9a9a); if (this.q >= 3 && this.night > 0.3) this.lampHeadMat.color.multiplyScalar(2.4); }
+    if (this.ledMat && this.q >= 3) this.ledMat.color.setScalar(1.25 + this.night * 0.9);
+    if (this.glowMat) this.glowMat.opacity = this.night * (this.q >= 3 ? 0.5 : 0.9);
     if (this.cloudMat) {
       this.cloudMat.color.copy(u.horizon.value).lerp(new THREE.Color(0xffffff), 0.6 * (1 - this.night));
       this.cloudMat.opacity = 0.85 - this.night * 0.6;
@@ -172,7 +175,7 @@ export class Scenery {
   // ---------------------------------------------------------------- Gelände
   buildTerrain() {
     const w = this.world;
-    const step = this.q >= 2 ? 6.5 : this.q >= 1 ? 8 : 11;
+    const step = this.q >= 3 ? 5 : this.q >= 2 ? 6.5 : this.q >= 1 ? 8 : 11;
     const M = Math.round((2 * HALF) / step);
     const st = (2 * HALF) / M;
     const C = 4, per = Math.ceil(M / C);
@@ -878,7 +881,7 @@ export class Scenery {
     const stage = clone('stage');
     stage.position.set(st.x, y0, st.z);
     stage.updateMatrixWorld(true);
-    stage.traverse(o => { if (o.isMesh && o.material.name === 'led') { this.ledMap = fixMirror(o, T.led); o.material = new THREE.MeshBasicMaterial({ map: this.ledMap }); o.castShadow = false; } });
+    stage.traverse(o => { if (o.isMesh && o.material.name === 'led') { this.ledMap = fixMirror(o, T.led); o.material = this.ledMat = new THREE.MeshBasicMaterial({ map: this.ledMap }); o.castShadow = false; } });
     this.stageLights = [];
     for (let i = 0; i < 8; i++) {
       const beam = new THREE.Mesh(new THREE.ConeGeometry(2.2, 40, 12, 1, true), new THREE.MeshBasicMaterial({
@@ -1005,6 +1008,70 @@ export class Scenery {
     this.posterBoardGeo = nodeGeometry('poster', 'board') || new THREE.PlaneGeometry(5, 2.6).translate(0, 3, 0);
     this.posterMap = fixMirror(new THREE.Mesh(this.posterBoardGeo), this.T.poster);
     this.buildSmashInstances();
+  }
+
+  // ---------- Gras rund um die Kamera (Hoch/Ultra)
+  buildGrass() {
+    if (this.q < 2) return;
+    const max = this.q >= 3 ? 11000 : 5000;
+    const pos = [], col = [];
+    const base = new THREE.Color(0.16, 0.32, 0.07), tip = new THREE.Color(0.5, 0.68, 0.22);
+    for (let k = 0; k < 7; k++) {
+      const a = k / 7 * Math.PI * 2 + Math.random() * 0.4, r = 0.12 + Math.random() * 0.2;
+      const bx = Math.cos(a) * r, bz = Math.sin(a) * r, h = 0.35 + Math.random() * 0.35, w = 0.05;
+      const lx = Math.cos(a + 1.57) * w, lz = Math.sin(a + 1.57) * w, lean = 0.12 + Math.random() * 0.1;
+      pos.push(bx - lx, 0, bz - lz, bx + lx, 0, bz + lz, bx + Math.cos(a) * lean, h, bz + Math.sin(a) * lean);
+      col.push(base.r, base.g, base.b, base.r, base.g, base.b, tip.r, tip.g, tip.b);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    g.computeVertexNormals();
+    for (let i = 0; i < g.attributes.normal.count; i++) g.attributes.normal.setXYZ(i, 0, 1, 0);
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+    this.grassU = { uTime: { value: 0 } };
+    mat.onBeforeCompile = sh => {
+      sh.uniforms.uTime = this.grassU.uTime;
+      sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+        #ifdef USE_INSTANCING
+        float ph = instanceMatrix[3].x * 0.21 + instanceMatrix[3].z * 0.17;
+        transformed.x += sin(uTime * 2.1 + ph) * 0.09 * position.y;
+        transformed.z += cos(uTime * 1.7 + ph) * 0.07 * position.y;
+        #endif`);
+    };
+    const im = new THREE.InstancedMesh(g, mat, max);
+    im.count = 0; im.frustumCulled = false; im.receiveShadow = true;
+    this.scene.add(im);
+    this.grass = { im, max, cx: 1e9, cz: 1e9, R: this.q >= 3 ? 78 : 55, step: this.q >= 3 ? 1.35 : 1.6 };
+  }
+  updateGrass(cam, t) {
+    const G = this.grass;
+    if (!G) return;
+    this.grassU.uTime.value = t;
+    if (Math.hypot(cam.x - G.cx, cam.z - G.cz) < 14) return;
+    G.cx = cam.x; G.cz = cam.z;
+    const W = this.world, R = G.R, st = G.step, im = G.im;
+    let n = 0;
+    const i0 = Math.floor((cam.x - R) / st), i1 = Math.ceil((cam.x + R) / st), j0 = Math.floor((cam.z - R) / st), j1 = Math.ceil((cam.z + R) / st);
+    for (let j = j0; j <= j1 && n < G.max; j++) for (let i = i0; i <= i1 && n < G.max; i++) {
+      let h = (Math.imul(i, 73856093) ^ Math.imul(j, 19349663)) >>> 0;
+      const rnd = () => { h ^= h << 13; h ^= h >>> 17; h ^= h << 5; return (h >>> 0) / 4294967296; };
+      const x = (i + rnd()) * st, z = (j + rnd()) * st;
+      const d = Math.hypot(x - cam.x, z - cam.z);
+      if (d > R || rnd() < d / R * 0.75) continue;
+      if (W.surfaceAt(x, z) !== 0 || W.edgeAt(x, z) < 1.5) continue;
+      const y = W.baseAt(x, z);
+      if (y < 2.6 || y > 120) continue;
+      const sc = (0.7 + rnd() * 0.8) * (1 - d / R * 0.35);
+      _m.compose(_p.set(x, y - 0.03, z), _q.setFromEuler(_e.set(0, rnd() * 6.28, 0)), _s.set(sc, sc * (0.8 + rnd() * 0.6), sc));
+      im.setMatrixAt(n, _m);
+      const v = 0.75 + rnd() * 0.45, dry = rnd() < 0.15 ? 0.25 : 0;
+      im.setColorAt(n, _c.setRGB(v + dry, v + dry * 0.6, v * (1 - dry)));
+      n++;
+    }
+    im.count = n;
+    im.instanceMatrix.needsUpdate = true;
+    if (im.instanceColor) im.instanceColor.needsUpdate = true;
   }
 
   // ---------- Zuschauer, Boote, Windräder
@@ -1199,7 +1266,8 @@ export class Scenery {
       const bs = im.boundingSphere;
       im.visible = Math.hypot(bs.center.x - camPos.x, bs.center.z - camPos.z) < Math.min(fogFar, 700) + bs.radius;
     }
-    const lodD = this.q >= 2 ? 420 : this.q >= 1 ? 300 : 180;
+    const lodD = this.q >= 3 ? 700 : this.q >= 2 ? 420 : this.q >= 1 ? 300 : 180;
+    this.updateGrass(camPos, t);
     for (const L of this.treeLod || []) {
       const d = Math.hypot(L.c.x - camPos.x, L.c.z - camPos.z) - L.r;
       L.hi.visible = d < lodD;

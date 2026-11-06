@@ -166,13 +166,16 @@ function fromTemplate(spec, color, opts) {
       } else if (o.material.name === 'tail') {
         if (!tailMat) { tailMat = o.material.clone(); }
         o.material = tailMat;
+      } else if (o.material.name === 'head') {
+        if (!root.userData.headMat) root.userData.headMat = o.material.clone();
+        o.material = root.userData.headMat;
       } else if (o.material.name === 'glass') { o.material.envMapIntensity = 1.6; }
     });
   }
   const exh = [];
   const exN = spec.style === 'gt' || spec.style === 'muscle' || spec.style === 'hyper' ? 2 : 1;
   for (let i = 0; i < exN; i++) exh.push(new THREE.Vector3(exN === 2 ? (i ? 0.48 : -0.48) : 0.5, S.clr + 0.09, -S.L / 2 - 0.12));
-  root.userData = { bodyG, wheels, paintMat, tailMat, dims: S, exhaust: exh, style: spec.style, gltf: true };
+  root.userData = { bodyG, wheels, paintMat, tailMat, headMat: root.userData.headMat, dims: S, exhaust: exh, style: spec.style, gltf: true };
   return root;
 }
 
@@ -345,6 +348,6 @@ export function setCarColor(car, color) {
 export function setTailGlow(car, on, night) {
   const m = car.userData.tailMat;
   if (!m) return;
-  if (car.userData.gltf) { m.emissiveIntensity = on ? 3 : 0.5 + night * 1.2; }
+  if (car.userData.gltf) { m.emissiveIntensity = on ? 4 : 0.6 + night * 1.6; }
   else m.color.set(on ? 0xff2020 : (night > 0.4 ? 0xb01010 : 0x6a0808));
 }

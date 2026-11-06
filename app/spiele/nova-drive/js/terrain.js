@@ -389,7 +389,7 @@ export class World {
       }
     }
     // --- Bäume
-    const treeStep = q >= 2 ? 6.5 : q >= 1 ? 7.5 : 9.5;
+    const treeStep = q >= 3 ? 5.6 : q >= 2 ? 6.5 : q >= 1 ? 7.5 : 9.5;
     for (let gz = -HALF + 10; gz < HALF - 10; gz += treeStep) {
       for (let gx = -HALF + 10; gx < HALF - 10; gx += treeStep) {
         const x = gx + (rnd() - 0.5) * treeStep, z = gz + (rnd() - 0.5) * treeStep;

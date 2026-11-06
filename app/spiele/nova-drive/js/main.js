@@ -16,6 +16,11 @@ import { CARS, UPGRADES, carStats, rating, carClass, CLASS_COLORS, EVENTS, RADIO
 import { clamp, lerp, damp, fmtNum, fmtTime, wrapAngle } from './util.js';
 import { EVENT_COLORS } from './world.js';
 import { Economy, PRIZES } from './economy.js';
+import { EffectComposer } from '../lib/postprocessing/EffectComposer.js';
+import { RenderPass } from '../lib/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from '../lib/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from '../lib/postprocessing/OutputPass.js';
+import { ShaderPass } from '../lib/postprocessing/ShaderPass.js';
 
 const SAVE_KEY = 'novadrive-save-v1', SET_KEY = 'novadrive-settings-v1';
 const $ = id => document.getElementById(id);
@@ -33,7 +38,7 @@ class Game {
       sens: 1, tiltInvert: false, ctl: 1, haptic: true, weather: 'dyn' }, store.get(SET_KEY) || {});
     const mobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && innerWidth < 1100);
     this.mobile = mobile;
-    this.quality = this.settings.quality === 'auto' ? 2 : +this.settings.quality;
+    this.quality = this.settings.quality === 'auto' ? 3 : +this.settings.quality;
     this.state = 'loading';
     this.screen = null;
     this.camMode = this.settings.cam || 0;
@@ -50,8 +55,8 @@ class Game {
     const prog = (p, m) => { bar.style.width = (p * 100).toFixed(0) + '%'; if (m) msg.textContent = m + ' …'; };
     $('load-tip').textContent = TIPS[Math.floor(Math.random() * TIPS.length)];
     await frame();
-    const R = this.renderer = new THREE.WebGLRenderer({ canvas: $('c'), antialias: this.quality >= 2, powerPreference: 'high-performance' });
-    this.maxPR = Math.min(window.devicePixelRatio || 1, this.quality >= 2 ? 2 : this.quality >= 1 ? 1.5 : 1);
+    const R = this.renderer = new THREE.WebGLRenderer({ canvas: $('c'), antialias: this.quality === 2, powerPreference: 'high-performance' });
+    this.maxPR = Math.min(window.devicePixelRatio || 1, this.quality >= 3 ? 3 : this.quality >= 2 ? 2 : this.quality >= 1 ? 1.5 : 1);
     this.pr = this.maxPR;
     R.setPixelRatio(this.pr);
     R.setSize(innerWidth, innerHeight);
@@ -59,7 +64,7 @@ class Game {
     R.toneMappingExposure = 1.05;
     R.outputColorSpace = THREE.SRGBColorSpace;
     R.shadowMap.enabled = this.quality >= 1;
-    R.shadowMap.type = THREE.PCFShadowMap;
+    R.shadowMap.type = this.quality >= 3 ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.3, 3000);
     this.T = makeTextures(Math.min(8, R.capabilities.getMaxAnisotropy()));
@@ -75,6 +80,7 @@ class Game {
     this.scenery = new Scenery(this.scene, this.world, this.T, this.quality);
     this.scenery.build();
     this.makeEnv();
+    if (this.quality >= 3) this.setupComposer();
     prog(0.88, 'Karte zeichnen');
     await frame();
     this.mapImg = makeMapImage(this.world, this.quality >= 1 ? 1024 : 768);
@@ -105,6 +111,7 @@ class Game {
     this.eco = new Economy(this);
     this.spawnAtFestival();
     this.scenery.setTime(this.settings.time === 'dyn' ? 17.2 : TIME_FIXED[this.settings.time] ?? 17.2);
+    this.updateEnv(true);
     this.bindUI();
     this.hud.money();
     this.updatePosters();
@@ -124,24 +131,65 @@ class Game {
     this.resize();
   }
 
+  // Spiegel-Umgebung (Lack, Glas, nasse Straße) aus dem aktuellen Himmel – wird laufend nachgeführt
   makeEnv() {
-    const pm = new THREE.PMREMGenerator(this.renderer);
-    const s = new THREE.Scene();
+    this.pmrem = new THREE.PMREMGenerator(this.renderer);
+    const s = this.envScene = new THREE.Scene();
     const geo = new THREE.SphereGeometry(10, 32, 16);
-    const col = [];
-    const pos = geo.attributes.position;
-    const top = new THREE.Color('#5d8fe0'), hor = new THREE.Color('#ffd9b0'), bot = new THREE.Color('#2d3a26');
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(geo.attributes.position.count * 3), 3));
+    this.envSky = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide }));
+    s.add(this.envSky);
+    this.envSun = new THREE.Mesh(new THREE.SphereGeometry(1.1, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    s.add(this.envSun);
+    this.updateEnv(true);
+  }
+  updateEnv(force) {
+    const S = this.scenery, u = S.skyU;
+    const key = [S.time.toFixed(1), (S.rain || 0).toFixed(2)].join('|');
+    if (!force && key === this.envKey) return;
+    this.envKey = key;
+    const top = u.zenith.value.clone(), hor = u.horizon.value.clone();
+    const bot = new THREE.Color(0.16, 0.19, 0.11).multiplyScalar((1 - S.night * 0.85) * (1 - (S.rain || 0) * 0.3));
+    const geo = this.envSky.geometry, pos = geo.attributes.position, col = geo.attributes.color, c = new THREE.Color();
     for (let i = 0; i < pos.count; i++) {
       const y = pos.getY(i) / 10;
-      const c = y > 0 ? hor.clone().lerp(top, Math.pow(y, 0.6)) : hor.clone().lerp(bot, Math.min(1, -y * 3));
-      col.push(c.r, c.g, c.b);
+      if (y > 0) c.copy(hor).lerp(top, Math.pow(y, 0.6)); else c.copy(hor).lerp(bot, Math.min(1, -y * 3));
+      col.setXYZ(i, c.r, c.g, c.b);
     }
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    s.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
-    const sun = new THREE.Mesh(new THREE.SphereGeometry(1.2, 8, 8), new THREE.MeshBasicMaterial({ color: new THREE.Color(8, 7, 6) }));
-    sun.position.set(5, 6, 4); s.add(sun);
-    this.scene.environment = pm.fromScene(s, 0.02).texture;
-    pm.dispose();
+    col.needsUpdate = true;
+    const up = S.sunDir.y > -0.05;
+    this.envSun.visible = up;
+    this.envSun.position.copy(S.sunDir).multiplyScalar(8);
+    this.envSun.material.color.copy(u.sunCol.value).multiplyScalar(6);
+    const rt = this.pmrem.fromScene(this.envScene, 0.02);
+    this.scene.environment = rt.texture;
+    if (this.envRT) this.envRT.dispose();
+    this.envRT = rt;
+  }
+
+  // Ultra: Bloom-Leuchten, 4× Kantenglättung, Farbstimmung mit Vignette
+  setupComposer() {
+    const R = this.renderer;
+    const hdr = R.extensions.has('EXT_color_buffer_half_float') || R.extensions.has('EXT_color_buffer_float');
+    const rt = new THREE.WebGLRenderTarget(innerWidth * this.pr, innerHeight * this.pr, { type: hdr ? THREE.HalfFloatType : THREE.UnsignedByteType, samples: 4 });
+    const c = this.composer = new EffectComposer(R, rt);
+    c.addPass(new RenderPass(this.scene, this.camera));
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.42, 0.55, 1.0);
+    c.addPass(this.bloom);
+    c.addPass(new OutputPass());
+    c.addPass(new ShaderPass({
+      uniforms: { tDiffuse: { value: null }, vig: { value: 0.24 }, sat: { value: 1.1 } },
+      vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: `uniform sampler2D tDiffuse; uniform float vig, sat; varying vec2 vUv;
+        void main(){ vec4 c = texture2D(tDiffuse, vUv); float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+          c.rgb = mix(vec3(l), c.rgb, sat); vec2 d = (vUv - 0.5) * vec2(1.25, 1.0);
+          c.rgb *= 1.0 - vig * smoothstep(0.32, 0.85, length(d)); gl_FragColor = c; }`,
+    }));
+    c.setPixelRatio(this.pr);
+    c.setSize(innerWidth, innerHeight);
+  }
+  draw() {
+    if (this.composer) this.composer.render(); else this.renderer.render(this.scene, this.camera);
   }
 
   // ---------------------------------------------------------------- Auto
@@ -821,7 +869,7 @@ class Game {
   }
   takePhoto() {
     const f = PHOTO_FILTERS[this.photo.filter];
-    this.renderer.render(this.scene, this.camera);
+    this.draw();
     const src = this.renderer.domElement;
     const cv = document.createElement('canvas');
     cv.width = src.width; cv.height = src.height;
@@ -958,7 +1006,9 @@ class Game {
     this.smoke.update(dt, innerHeight * this.pr * 0.9);
     this.sparks.update(dt, innerHeight * this.pr * 0.9);
     this.fireworks(dt);
-    this.renderer.render(this.scene, this.camera);
+    this.envT = (this.envT || 0) + dt;
+    if (this.envT > 2.5) { this.envT = 0; this.updateEnv(); }
+    this.draw();
   }
 
   updateDrive(dt, raw) {
@@ -1126,6 +1176,7 @@ class Game {
       if (w.front) w.pivot.rotation.y = -car.steer * 0.45;
     }
     setTailGlow(this.carModel, inp.brake > 0 && car.vf > 0.5, this.scenery.night);
+    if (ud.headMat) ud.headMat.emissiveIntensity = 0.8 + this.scenery.night * (this.quality >= 3 ? 4.5 : 1.5);
     this.headL.intensity = this.scenery.night > 0.3 ? 60 * this.scenery.night : 0;
     // Schatten-Fleck
     const gy = this.world.heightAt(car.pos.x, car.pos.z);
@@ -1149,6 +1200,7 @@ class Game {
     for (const sx of [-1, 1]) front.push(new THREE.Vector3(car.pos.x + sy * d.wb / 2 + -cy * sx * (d.W / 2 - 0.15), car.pos.y, car.pos.z + cy * d.wb / 2 + sy * sx * (d.W / 2 - 0.15)));
     const paved = car.surface === 1;
     const slip = car.grounded ? car.slipAmt : 0;
+    const lit = 1 - this.scenery.night * 0.78; // Rauch/Staub nachts dunkler
     // Bremsspuren
     const skidK = paved ? clamp((slip - 0.3) * 1.6, 0, 1) : clamp((slip - 0.2) * 1.2, 0, 0.7);
     rear.forEach((p, i) => this.skids.add(i, p, sy, cy, car.grounded ? skidK : 0));
@@ -1158,19 +1210,19 @@ class Game {
     if (this.smokeT > 1 / 40) {
       this.smokeT = 0;
       if (car.grounded && slip > 0.35 && spd > 2 && paved) {
-        for (const p of rear) S.emit(p.x, p.y + 0.3, p.z, -car.vel.x * 0.15 + (Math.random() - 0.5), 0.6 + Math.random(), -car.vel.z * 0.15 + (Math.random() - 0.5), 0.55 * slip, 0.92, 0.92, 1.6, 1.6 + slip, { drag: 1.4, grow: 3 });
+        for (const p of rear) S.emit(p.x, p.y + 0.3, p.z, -car.vel.x * 0.15 + (Math.random() - 0.5), 0.6 + Math.random(), -car.vel.z * 0.15 + (Math.random() - 0.5), 0.55 * slip, 0.92 * lit, 0.92 * lit, 1.6, 1.6 + slip, { drag: 1.4, grow: 3 });
       }
       if (car.grounded && !paved && spd > 6 && car.surface !== 6) {
         const a = clamp(spd / 40, 0.15, 0.7) * (car.surface === 3 ? 1.3 : 1);
         const br = car.surface === 3 ? [0.85, 0.75] : car.surface === 5 ? [0.95, 0.98] : [0.62, 0.45];
-        for (const p of rear) S.emit(p.x, p.y + 0.3, p.z, -car.vel.x * 0.2 + (Math.random() - 0.5) * 2, 0.8 + Math.random() * 1.5, -car.vel.z * 0.2 + (Math.random() - 0.5) * 2, a, br[0], br[1], 1.4, 1.5, { drag: 1.6, grow: 2.6 });
+        for (const p of rear) S.emit(p.x, p.y + 0.3, p.z, -car.vel.x * 0.2 + (Math.random() - 0.5) * 2, 0.8 + Math.random() * 1.5, -car.vel.z * 0.2 + (Math.random() - 0.5) * 2, a, br[0] * lit, br[1] * lit, 1.4, 1.5, { drag: 1.6, grow: 2.6 });
       }
     }
     // Gischt bei nasser Straße
     const wetFx = smooth(0.45, 0.9, this.weather ? this.weather.rain : 0);
     if (wetFx > 0 && car.grounded && paved && spd > 7 && this.smokeT === 0) {
       for (const p of rear) S.emit(p.x, p.y + 0.25, p.z, -car.vel.x * 0.25 + (Math.random() - 0.5) * 1.5, 0.5 + Math.random(), -car.vel.z * 0.25 + (Math.random() - 0.5) * 1.5,
-        0.32 * wetFx * Math.min(1, spd / 30), 0.9, 0.95, 1.3, 0.9, { drag: 2.2, grow: 3.2 });
+        0.22 * wetFx * Math.min(1, spd / 30), 0.9 * lit, 0.95 * lit, 1.1, 0.8, { drag: 2.2, grow: 3 });
     }
     // Nitro-Flammen
     if (car.nitroOn) {
@@ -1276,6 +1328,7 @@ class Game {
   resize() {
     const w = innerWidth, h = innerHeight;
     this.renderer.setSize(w, h);
+    if (this.composer) { this.composer.setPixelRatio(this.pr); this.composer.setSize(w, h); }
     this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
     const s = Math.min(1.25, Math.max(0.75, Math.min(w, h) / 400));
     for (const id of ['minimap', 'speedo']) { const c = $(id); const sz = Math.round(c.clientWidth * Math.min(2, devicePixelRatio || 1)); if (sz > 0) { c.width = sz; c.height = sz; } }
