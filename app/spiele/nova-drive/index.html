@@ -69,6 +69,7 @@
     <button id="h-map" class="hb" aria-label="Karte">🗺</button>
     <button id="h-radio" class="hb" aria-label="Radio">📻</button>
     <button id="h-cam" class="hb" aria-label="Kamera">🎥</button>
+    <button id="h-rewind" class="hb" aria-label="Zurückspulen (halten)">⏪</button>
     <button id="h-reset" class="hb" aria-label="Zurücksetzen">↺</button>
     <button id="h-full" class="hb" aria-label="Vollbild"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     <button id="h-pause" class="hb" aria-label="Pause">❚❚</button>
@@ -94,6 +95,13 @@
   </div>
   <canvas id="speedo" width="200" height="200"></canvas>
   <div id="fps" hidden></div>
+  <!-- Kino: Balken, Titelkarte vor dem Rennen, Wiederholung -->
+  <div id="cine"><i class="bar t"></i><i class="bar b"></i>
+    <div id="cine-title"><small id="cine-type"></small><b id="cine-name"></b><span id="cine-info"></span></div>
+    <div id="cine-tag"><i></i>WIEDERHOLUNG</div>
+    <button id="cine-skip">Überspringen ▸</button>
+  </div>
+  <div id="rewind-fx"><span>⏪ ZURÜCKSPULEN</span></div>
   <!-- PC: Tastenhilfe (H blendet aus) -->
   <div id="keys"></div>
   <!-- Touch-Steuerung -->

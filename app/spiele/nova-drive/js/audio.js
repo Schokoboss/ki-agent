@@ -1,6 +1,10 @@
 // Ton komplett synthetisch (WebAudio): Motor, Reifen, Wind, Effekte und ein generatives Radio.
 import { clamp, mulberry32 } from './util.js';
 
+const TURBO = new Set(['rally', 'rally80', 'gt', 'hyper', 'wedge', 'hatch', 'wagon']);
+const clamp01 = v => Math.max(0, Math.min(1, v));
+export function isTurbo(style) { return TURBO.has(style); }
+
 export class Audio {
   constructor() {
     this.ctx = null; this.ok = false;
@@ -46,6 +50,9 @@ export class Audio {
     this.tire = this.loopNoise('bandpass', 1100, 1.4);
     this.wind = this.loopNoise('lowpass', 500, 0.5);
     this.nitroS = this.loopNoise('bandpass', 2400, 0.6);
+    this.turbo = this.ctx.createOscillator(); this.turbo.type = 'sine'; this.turbo.frequency.value = 3000;
+    this.turboG = this.ctx.createGain(); this.turboG.gain.value = 0;
+    this.turbo.connect(this.turboG); this.turboG.connect(this.sfx); this.turbo.start();
     this.gravel = this.loopNoise('lowpass', 260, 0.8);
     this.rainS = this.loopNoise('highpass', 2600, 0.4);
     this.ok = true;
@@ -97,6 +104,12 @@ export class Audio {
     this.wind.g.gain.setTargetAtTime(active ? Math.min(0.22, spd * spd * 0.00004) : 0, t, 0.1);
     this.wind.fl.frequency.setTargetAtTime(300 + spd * 12, t, 0.1);
     this.nitroS.g.gain.setTargetAtTime(active && car.nitroOn ? 0.14 : 0, t, 0.05);
+    // Turbo-Pfeifen (Rallye, GT, Hyper, Keil …): steigt mit Drehzahl und Last
+    if (this.turbo) {
+      const boost = TURBO.has(style) && active ? clamp01(rpm * 1.2 - 0.25) * (inp.throttle || 0) : 0;
+      this.turbo.frequency.setTargetAtTime(2200 + rpm * 4200, t, 0.08);
+      this.turboG.gain.setTargetAtTime(boost * 0.025, t, 0.12);
+    }
   }
   // kurze Geräusche
   play(name, amt = 1) {
@@ -133,6 +146,10 @@ export class Audio {
       case 'buy': tone('triangle', 600, 1200, 0.15, 0.15); tone('triangle', 1200, 1600, 0.2, 0.12, 0.12); break;
       case 'trap': tone('sine', 1500, 1500, 0.06, 0.2); noise(5000, 1, 0.06, 0.15); break;
       case 'nitro': noise(1500, 0.5, 0.4, 0.3); break;
+      case 'rewind': tone('sawtooth', 900, 120, 0.5, 0.06); noise(2500, 0.6, 0.45, 0.12); break;
+      case 'whoosh': noise(700, 0.4, 0.6, 0.12); break;
+      case 'pop': noise(160 + Math.random() * 120, 0.9, 0.06, 0.3 * amt, 'lowpass'); noise(2600, 1.5, 0.03, 0.12 * amt); break;
+      case 'blowoff': noise(3200, 1.2, 0.35, 0.16 * amt); noise(1400, 0.8, 0.25, 0.08 * amt); break;
       case 'splash': noise(800, 0.5, 0.8, 0.6, 'lowpass'); break;
       case 'shutter': noise(5000, 1, 0.05, 0.35); noise(1800, 1, 0.08, 0.25); break;
       case 'thunder': noise(90, 0.6, 2.8 * amt + 1, 0.9 * amt, 'lowpass'); noise(400, 0.5, 0.6, 0.3 * amt, 'lowpass'); tone('sine', 55, 30, 2.2, 0.35 * amt); break;

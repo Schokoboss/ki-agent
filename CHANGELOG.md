@@ -25,6 +25,12 @@ Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 - **Grafikstufe Hyper ✦** (Einstellungen → Grafik): Umgebungsverdeckung (GTAO), Echtzeit-Spiegelungen der
   Umgebung im eigenen Auto (auch in der Garage), mindestens 1,5-fache Auflösung (Supersampling), dichteres Gras
   in größerem Umkreis, feineres Gelände, Bäume detailliert bis 1 km, weitere Sicht. Für starke GPUs/PCs.
+- **AAA-Inszenierung**: Kamerafahrt am Startfeld vor jedem Rennen mit Kino-Balken und Titelkarte (überspringbar),
+  Wiederholung der letzten 8 s nach dem Ziel mit TV-Kameras (Streckenrand mit Tele-Zoom, tiefe Verfolger-, Hubschrauber-
+  Kamera), **Zurückspulen** (Q/Rücktaste, Steuerkreuz ↓ oder ⏪ halten – Auto, Gegner und Rennzeit laufen 12 s zurück).
+- Fehlzündungen mit Flammen und Knallen beim Gaswegnehmen, Turbo-Pfeifen und Abblasen, Linsenreflexe gegen die Sonne,
+  Regentropfen auf der Kamera, Schmutz auf dem Lack (Schotter/Wiese, Regen wäscht ab; Gegner in Rallyes verdreckt).
+- Hyper-Fix: schwarzes Bild durch ungültige Werte in der Spiegelungskarte behoben (8-Bit-Würfelkamera, Schutzfilter).
 - Navigation: Route zu jedem Ziel über das Straßennetz (Karte → „🧭 Navi starten“, Pause → Navi), Pfeile auf der Straße,
   Abbiegehinweise mit Entfernung, Sprachansagen, Neuberechnung beim Verfahren; Rennstrecke wird vorab angezeigt.
 - Grafik Ultra, Ladebildschirm mit Fortschritt, vorberechnetes Licht (siehe frühere Commits).

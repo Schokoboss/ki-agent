@@ -1,6 +1,7 @@
 // Events auf der Insel: Rennen, Blitzer, Driftzonen, Schanzen, Plakate – und die Skill-Kette.
 import * as THREE from '../lib/three.module.min.js';
 import { EVENTS, CARS } from './data.js';
+import { INTRO } from './cine.js';
 import { clamp, fmtTime, fmtNum, mulberry32 } from './util.js';
 import { RaceAI, speedProfile } from './ai.js';
 import { EVENT_COLORS } from './world.js';
@@ -236,7 +237,7 @@ export class Events {
     const prof = speedProfile(path, top * 0.99, latAcc, 12.5, W, st.offroad);
     const race = {
       ev, path, prof, total, hw: ev.hw, world: W, dirt: !!ev.dirt, top, accel: st.accel * 0.95,
-      startS: ev.s, t: -3.6, started: false, ais: [], cps: [], next: 0, prog: 0, pS: ev.s, lastPos: 0,
+      startS: ev.s, t: -3.6 - INTRO, t0: -3.6 - INTRO, started: false, ais: [], cps: [], next: 0, prog: 0, pS: ev.s, lastPos: 0,
       ghostRec: [], ghost: null, ghostData: ghost, finished: false, finishT: 0, crashes: 0, laps: sprint ? 1 : ev.laps, missed: false,
     };
     for (let s = 160; s < total - 20; s += 170) race.cps.push(s);
@@ -252,6 +253,8 @@ export class Events {
       const col = spec.colors[Math.floor(rnd() * spec.colors.length)];
       const skill = diff * (0.92 + (i / Math.max(1, n - 1)) * 0.1) * (0.985 + rnd() * 0.03);
       const ai = new RaceAI(g.scene, spec, col, names[i], skill);
+      const pd = ai.model.userData.paintMat && ai.model.userData.paintMat.userData.dirt;
+      if (pd && ev.dirt) pd.value = 0.35 + rnd() * 0.4;
       const row = Math.floor(i / 2), side = i % 2 ? 1 : -1;
       ai.s = ev.s - 10 - row * 10; ai.prog = -10 - row * 10;
       ai.lat = ai.latT = side * Math.min(2.8, ev.hw - 1.6); ai.lane = side * 0.6;
@@ -274,6 +277,7 @@ export class Events {
     for (const e of this.list) if (e.beacon) e.beacon.hidden = true;
     g.traffic.active = false;
     this.race = race;
+    g.tm.clear();
     g.hud.prompt(null);
     g.hud.raceStart(race);
     g.setState('race');
@@ -291,6 +295,7 @@ export class Events {
     g.scenery.setGate(0, null); g.scenery.setGate(1, null);
     g.traffic.active = true;
     this.race = null;
+    g.tm.clear();
     g.hud.raceEnd();
     if (aborted) g.setState('free');
   }
@@ -355,7 +360,7 @@ export class Events {
     g.hud.raceInfo(r, rank, lap);
     if (r.finished) {
       r.after += dt;
-      if (r.after > 3.5 && !r.shown) { r.shown = true; this.results(); }
+      if (r.after > 3.5 && !r.shown && (r.replayDone || r.after > 40)) { r.shown = true; this.results(); }
     }
   }
 

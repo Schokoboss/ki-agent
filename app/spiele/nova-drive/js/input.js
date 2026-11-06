@@ -3,10 +3,10 @@ import { clamp } from './util.js';
 
 export class Input {
   constructor() {
-    this.state = { throttle: 0, brake: 0, steer: 0, handbrake: false, nitro: false, look: false };
+    this.state = { throttle: 0, brake: 0, steer: 0, handbrake: false, nitro: false, look: false, rewind: false };
     this.kbSteer = 0; this._t = 0; this.padPrev = {}; this.padUsed = false;
     this.keys = new Set();
-    this.btn = { left: false, right: false, gas: false, brake: false, hand: false, nitro: false };
+    this.btn = { left: false, right: false, gas: false, brake: false, hand: false, nitro: false, rewind: false };
     this.mode = 'buttons'; // buttons | slider | tilt
     this.autoGas = false;
     this.tilt = 0; this.tiltOk = false; this.tiltRaw = 0; this.tiltZero = 0; this.tiltInvert = false;
@@ -25,7 +25,7 @@ export class Input {
   }
 
   bindTouch(root) {
-    const map = { 'c-left': 'left', 'c-right': 'right', 'c-gas': 'gas', 'c-brake': 'brake', 'c-hand': 'hand', 'c-nitro': 'nitro' };
+    const map = { 'c-left': 'left', 'c-right': 'right', 'c-gas': 'gas', 'c-brake': 'brake', 'c-hand': 'hand', 'c-nitro': 'nitro', 'h-rewind': 'rewind' };
     for (const [id, key] of Object.entries(map)) {
       const el = root.querySelector('#' + id);
       if (!el) continue;
@@ -92,6 +92,7 @@ export class Input {
     let hand = k.has('Space') || b.hand;
     let nitro = k.has('ShiftLeft') || k.has('ShiftRight') || b.nitro;
     let look = k.has('KeyX');
+    let rewind = k.has('Backspace') || k.has('KeyQ') || b.rewind;
     // Gamepad (Standard-Belegung): RT Gas, LT Bremse, A Handbremse, B/X/RB Nitro, LB Rückblick,
     // Y Kamera, Start Pause, Back Karte; im Menü: Steuerkreuz/Stick wählen, A bestätigen, B zurück
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -104,6 +105,7 @@ export class Input {
       if (bv(0) > 0.5) hand = true;
       if (bv(1) > 0.5 || bv(2) > 0.5 || bv(5) > 0.5) nitro = true;
       if (bv(4) > 0.5) look = true;
+      if (bv(13) > 0.5) rewind = true; // Steuerkreuz ↓ halten = zurückspulen
       // Flanken (einmal pro Druck)
       const edge = (name, on) => { const was = this.padPrev[p.index + name]; this.padPrev[p.index + name] = on; if (on && !was) { this.pressed.add(name); this.padUsed = true; } };
       edge('KeyC', bv(3) > 0.5); edge('Escape', bv(9) > 0.5); edge('KeyM', bv(8) > 0.5);
@@ -114,7 +116,7 @@ export class Input {
     }
     if (this.autoGas && !brake) gas = Math.max(gas, 1);
     s.steer = clamp(steer, -1, 1);
-    s.throttle = gas; s.brake = brake; s.handbrake = hand; s.nitro = nitro; s.look = look;
+    s.throttle = gas; s.brake = brake; s.handbrake = hand; s.nitro = nitro; s.look = look; s.rewind = rewind;
     return s;
   }
   calibrate() { this.tiltZero = this.tiltRaw || 0; }

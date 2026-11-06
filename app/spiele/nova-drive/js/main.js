@@ -9,7 +9,8 @@ import { Vehicle, carContact } from './physics.js';
 import { Traffic } from './ai.js';
 import { Events, Skills, TYPE_NAMES } from './events.js';
 import { HUD, makeMapImage } from './hud.js';
-import { Audio } from './audio.js';
+import { Audio, isTurbo } from './audio.js';
+import { TimeMachine, introCam, INTRO, Replay, REPLAY_FRAMES } from './cine.js';
 import { Input } from './input.js';
 import { Particles, Smoke, Skids, Rain } from './effects.js';
 import { CARS, UPGRADES, carStats, rating, carClass, CLASS_COLORS, EVENTS, RADIO, TIPS } from './data.js';
@@ -45,6 +46,7 @@ class Game {
     const mobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && innerWidth < 1100);
     this.mobile = mobile;
     this.orbit = { yaw: 0, pitch: 0, zoom: 1, drag: false, t: 0 };
+    this.tm = new TimeMachine(); this.replay = null; this.rewinding = false;
     this.quality = this.settings.quality === 'auto' ? 3 : +this.settings.quality;
     this.state = 'loading';
     this.screen = null;
@@ -211,12 +213,35 @@ class Game {
     const rt = new THREE.WebGLRenderTarget(innerWidth * this.pr, innerHeight * this.pr, { type: hdr ? THREE.HalfFloatType : THREE.UnsignedByteType, samples: 4 });
     const c = this.composer = new EffectComposer(R, rt);
     c.addPass(new RenderPass(this.scene, this.camera));
+    // Schutzfilter: ungültige Pixel (NaN/Unendlich) durch Schwarz ersetzen und extreme Helligkeit begrenzen,
+    // sonst verteilen Leuchten/Verdeckung einen einzigen kaputten Pixel über das ganze Bild
+    c.addPass(new ShaderPass({
+      uniforms: { tDiffuse: { value: null } },
+      vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: `uniform sampler2D tDiffuse; varying vec2 vUv;
+        void main(){ vec4 c = texture2D(tDiffuse, vUv);
+          bool bad = !(c.r == c.r) || !(c.g == c.g) || !(c.b == c.b) || max(max(abs(c.r), abs(c.g)), abs(c.b)) > 60000.0;
+          gl_FragColor = bad ? vec4(0.0, 0.0, 0.0, 1.0) : vec4(clamp(c.rgb, 0.0, 48.0), 1.0); }`,
+    }));
     // Hyper: Umgebungsverdeckung (GTAO) – Kontaktschatten unter Autos, in Ecken, zwischen Bäumen und Häusern
     if (this.quality >= 4) {
       const ao = this.ao = new GTAOPass(this.scene, this.camera, innerWidth, innerHeight);
       ao.updateGtaoMaterial({ radius: 1.6, distanceExponent: 1.2, thickness: 1.5, scale: 1.1, samples: 12, distanceFallOff: 1, screenSpaceRadius: false });
       ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 5, rings: 2, samples: 12 });
       ao.blendIntensity = 0.85;
+      // nur feste Flächen mit Normalen zählen: Sprites (Wolken, Symbole), Durchsichtiges und Flächen ohne Normalen
+      // (Bremsspuren, Partikel) würden sonst ungültige Werte liefern, die die Rauschfilterung übers Bild schmiert
+      ao.overrideVisibility = function () {
+        const cache = this._visibilityCache;
+        this.scene.traverse(o => {
+          cache.set(o, o.visible);
+          if (o.isPoints || o.isLine || o.isSprite) { o.visible = false; return; }
+          if (o.isMesh) {
+            const m = Array.isArray(o.material) ? o.material[0] : o.material;
+            if (!o.geometry.attributes.normal || (m && (m.transparent || m.isShaderMaterial || m.isMeshBasicMaterial))) o.visible = false;
+          }
+        });
+      };
       c.addPass(ao);
     }
     this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.42, 0.55, 1.0);
@@ -224,11 +249,31 @@ class Game {
     c.addPass(new OutputPass());
     this.grade = new ShaderPass({
       uniforms: { tDiffuse: { value: null }, vig: { value: 0.24 }, sat: { value: 1.1 }, sunPos: { value: new THREE.Vector2(0.5, 0.5) },
-        sunVis: { value: 0 }, sunCol: { value: new THREE.Color(1, 0.9, 0.7) }, speed: { value: 0 } },
+        sunVis: { value: 0 }, sunCol: { value: new THREE.Color(1, 0.9, 0.7) }, speed: { value: 0 }, rain: { value: 0 }, time: { value: 0 }, aspect: { value: 1.78 } },
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-      fragmentShader: `uniform sampler2D tDiffuse; uniform float vig, sat, sunVis, speed; uniform vec2 sunPos; uniform vec3 sunCol; varying vec2 vUv;
+      fragmentShader: `uniform sampler2D tDiffuse; uniform float vig, sat, sunVis, speed, rain, time, aspect; uniform vec2 sunPos; uniform vec3 sunCol; varying vec2 vUv;
+        float h21(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+        // Regentropfen auf der Kameralinse: zwei Lagen, Tropfen erscheinen, brechen das Bild und rinnen teils herab
+        vec2 drops(vec2 uv) {
+          vec2 off = vec2(0.0);
+          for (int L = 0; L < 2; L++) {
+            float sc = L == 0 ? 7.0 : 12.0;
+            vec2 g = uv * vec2(sc * aspect, sc), id = floor(g), f = fract(g) - 0.5;
+            float h = h21(id + float(L) * 17.0);
+            float life = fract(time * (0.12 + h * 0.18) + h);
+            vec2 ctr = vec2(h - 0.5, fract(h * 7.31) - 0.5) * 0.5;
+            ctr.y -= step(0.72, h) * life * life * 0.45;
+            vec2 d = f - ctr;
+            float r = 0.1 + 0.13 * fract(h * 13.7);
+            float m = smoothstep(r, r * 0.55, length(d)) * (1.0 - life * life) * step(0.3, h);
+            off += d * m;
+          }
+          return off;
+        }
         void main(){
-          vec4 c = texture2D(tDiffuse, vUv);
+          vec2 dOff = rain > 0.01 ? drops(vUv) * rain : vec2(0.0);
+          vec4 c = texture2D(tDiffuse, vUv - dOff * 0.07);
+          c.rgb += length(dOff) * 0.35 * rain;
           if (speed > 0.01) {
             vec2 dir = vUv - 0.5; float k = speed * 0.03 * smoothstep(0.12, 0.62, length(dir));
             vec3 acc = c.rgb;
@@ -240,6 +285,18 @@ class Game {
             vec2 p = vUv; float illum = 0.0, decay = 1.0;
             for (int i = 0; i < 16; i++) { p -= delta; vec3 s = texture2D(tDiffuse, p).rgb; illum += max(dot(s, vec3(0.3333)) - 0.76, 0.0) * decay; decay *= 0.92; }
             c.rgb += sunCol * illum * 0.18 * sunVis;
+            // Linsenreflexe: Geisterbilder gespiegelt durch die Bildmitte + Halo um die Sonne
+            vec2 toC = vec2(0.5) - sunPos; vec3 fl = vec3(0.0);
+            for (int i = 0; i < 4; i++) {
+              float k = 0.55 + float(i) * 0.42;
+              vec2 gp = sunPos + toC * k * 1.6;
+              float dd = length((vUv - gp) * vec2(aspect, 1.0)), rr = 0.025 + 0.022 * float(i);
+              vec3 tint = i == 1 ? vec3(0.55, 0.8, 1.0) : i == 3 ? vec3(0.8, 0.6, 1.0) : vec3(1.0, 0.85, 0.6);
+              fl += tint * smoothstep(rr, rr * 0.35, dd) * 0.05;
+            }
+            float hd = length((vUv - sunPos) * vec2(aspect, 1.0));
+            fl += vec3(1.0, 0.9, 0.75) * smoothstep(0.018, 0.0, abs(hd - 0.24)) * 0.04;
+            c.rgb += fl * sunCol * sunVis;
           }
           float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
           c.rgb = mix(vec3(l), c.rgb, sat); vec2 d = (vUv - 0.5) * vec2(1.25, 1.0);
@@ -263,35 +320,44 @@ class Game {
       G.sunCol.value.copy(S.skyU.sunCol.value);
       const drive = this.state === 'free' || this.state === 'race';
       G.speed.value = drive ? clamp((this.car.speedKmh - 130) / 170, 0, 1) * (this.car.nitroOn ? 1.4 : 1) : 0;
+      // Tropfen nur in Außenkameras beim Fahren (nicht in Menüs/Motorhaube) – Fahrtwind lässt sie seltener haften
+      const wet = this.weather ? clamp((this.weather.rain - 0.35) / 0.6, 0, 1) : 0;
+      G.rain.value = drive && this.camMode !== 2 && !this.replay ? wet * (1 - clamp(this.car.speedKmh / 260, 0, 0.6)) : 0;
+      G.time.value = this.time; G.aspect.value = innerWidth / innerHeight;
       this.updateReflections();
       this.composer.render();
     } else this.renderer.render(this.scene, this.camera);
   }
 
-  // Hyper: echte Spiegelungen der Umgebung im eigenen Auto (Würfelkamera am Auto, alle 2 Bilder neu)
+  // Hyper: echte Spiegelungen der Umgebung im eigenen Auto (Würfelkamera am Auto, alle 2 Bilder neu).
+  // Die Unschärfe-Karte (PMREM) wird hier selbst berechnet – nicht nebenbei mitten im Rendern.
   setupReflections() {
     if (this.quality < 4 || this.cubeRT) return;
-    this.cubeRT = new THREE.WebGLCubeRenderTarget(256, { type: THREE.HalfFloatType, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter });
+    // 8 Bit: die sehr helle Sonne kann hier nicht überlaufen (Halbfloat → Unendlich → NaN in der Unschärfe-Karte)
+    this.cubeRT = new THREE.WebGLCubeRenderTarget(256, { type: THREE.UnsignedByteType });
     this.cubeCam = new THREE.CubeCamera(0.5, 650, this.cubeRT);
-    this.cubeN = 0;
+    this.reflGen = new THREE.PMREMGenerator(this.renderer);
+    this.reflEnv = null; this.reflModel = null; this.cubeN = 0;
   }
   applyReflections(model) {
-    if (!this.cubeRT || !model) return;
-    model.traverse(o => { if (o.isMesh && o.material && 'envMap' in o.material) { o.material.envMap = this.cubeRT.texture; o.material.needsUpdate = true; } });
+    if (!this.reflEnv || !model) return;
+    model.traverse(o => { if (o.isMesh && o.material && 'envMap' in o.material && o.material.envMap !== this.reflEnv.texture) { o.material.envMap = this.reflEnv.texture; o.material.needsUpdate = true; } });
+    this.reflModel = model;
   }
   updateReflections() {
     if (!this.cubeCam) return;
     const garage = this.state === 'garage' && this.previewModel;
     const tgt = garage ? this.previewModel : this.carModel;
-    if (!tgt || !tgt.visible || (++this.cubeN % 2 && this.cubeN > 2)) return;
+    if (!tgt || !tgt.visible || (++this.cubeN % 2 && this.reflEnv)) return;
     const R = this.renderer, au = R.shadowMap.autoUpdate, grass = this.scenery.grass && this.scenery.grass.im;
     const gv = grass ? grass.visible : false;
     tgt.visible = false; if (grass) grass.visible = false; R.shadowMap.autoUpdate = false;
     this.cubeCam.position.set(tgt.position.x, tgt.position.y + 0.9, tgt.position.z);
     this.cubeCam.updateMatrixWorld();
     this.cubeCam.update(R, this.scene);
-    this.cubeRT.texture.needsPMREMUpdate = true;
+    this.reflEnv = this.reflGen.fromCubemap(this.cubeRT.texture, this.reflEnv);
     tgt.visible = true; if (grass) grass.visible = gv; R.shadowMap.autoUpdate = au;
+    if (this.reflModel !== tgt) this.applyReflections(tgt);
   }
 
   // ---------------------------------------------------------------- Auto
@@ -361,6 +427,7 @@ class Game {
     }
     c.reset(best.x, best.z, best.yaw);
     this.skids.cut();
+    this.tm.clear();
     this.camYaw = best.yaw;
     this.fade();
   }
@@ -368,6 +435,7 @@ class Game {
 
   teleport(x, z, yaw) {
     this.car.reset(x, z, yaw);
+    this.tm.clear();
     this.camYaw = yaw;
     this.skids.cut();
     this.fade();
@@ -592,6 +660,7 @@ class Game {
     click('h-radio', () => this.nextStation());
     click('h-reset', () => this.respawn());
     click('h-full', () => this.toggleFull());
+    click('cine-skip', () => { this.skipCine = true; });
     click('prompt-go', () => { const ev = this.events.byId($('prompt').dataset.id); if (ev) this.events.startRace(ev); });
     // Pause
     click('p-resume', () => this.resume());
@@ -940,10 +1009,10 @@ class Game {
     if (!el) return;
     const pad = this.input.padUsed;
     const rows = pad
-      ? [['RT', 'Gas'], ['LT', 'Bremse'], ['Stick', 'Lenken'], ['A', 'Handbremse'], ['B / RB', 'Nitro'], ['LB', 'Rückblick'], ['Y', 'Kamera'], ['Back', 'Karte'], ['X', 'Event starten'], ['Start', 'Pause']]
+      ? [['RT', 'Gas'], ['LT', 'Bremse'], ['Stick', 'Lenken'], ['A', 'Handbremse'], ['B / RB', 'Nitro'], ['LB', 'Rückblick'], ['Y', 'Kamera'], ['Back', 'Karte'], ['X', 'Event starten'], ['↓ halten', 'Zurückspulen'], ['Start', 'Pause']]
       : [['W ↑', 'Gas'], ['S ↓', 'Bremse'], ['A D ← →', 'Lenken'], ['Leertaste', 'Handbremse'], ['Shift', 'Nitro'], ['X', 'Rückblick'], ['C', 'Kamera'],
         ['Maus ziehen', 'Umsehen'], ['Mausrad', 'Zoom'], ['Enter', 'Event starten'], ['M', 'Karte'], ['N', 'Navi zum Rennen'], ['G', 'Fotomodus'],
-        ['R', 'Zurücksetzen'], ['T', 'Radio'], ['F', 'Vollbild'], ['Esc', 'Pause']];
+        ['Q / ⌫ halten', 'Zurückspulen'], ['R', 'Zurücksetzen'], ['T', 'Radio'], ['F', 'Vollbild'], ['Esc', 'Pause']];
     el.innerHTML = `<div class="k-head">${pad ? '🎮 Gamepad' : '⌨️ Tastatur'} <span>H blendet aus</span></div>` +
       rows.map(([k, t]) => `<div class="k-row"><kbd>${k}</kbd><span>${t}</span></div>`).join('');
     this._padShown = pad;
@@ -1219,9 +1288,9 @@ class Game {
     if (I.took('KeyH') || I.took('F1')) { this.settings.keyHelp = !this.settings.keyHelp; this.saveSettings(); this.renderKeyHelp(); }
     if (I.padUsed !== this._padShown) this.renderKeyHelp();
     const promptOpen = !$('prompt').hidden && drive && !this.events.race;
-    const enter = I.took('Enter') | I.took('NumpadEnter'), padX = I.took('PadX');
-    if ((enter || padX) && promptOpen) $('prompt-go').click();
-    else if (enter && this.state === 'title' && this.screen === 'title') $('t-drive').click();
+    // Enter nur verbrauchen, wenn es hier etwas auslöst (sonst z. B. Intro überspringen in updateDrive)
+    if (promptOpen) { if (I.took('Enter') | I.took('NumpadEnter') | I.took('PadX')) $('prompt-go').click(); }
+    else if (this.state === 'title' && this.screen === 'title') { if (I.took('Enter') | I.took('NumpadEnter')) $('t-drive').click(); }
     if (I.took('KeyN') && this.state === 'free') this.navToNextRace();
     if (I.took('KeyG') && drive && !this.events.race) { this.prevState = this.state; this.openPhoto(); }
     // Gamepad / Pfeiltasten im Menü
@@ -1319,6 +1388,17 @@ class Game {
 
   updateDrive(dt, raw) {
     const car = this.car, race = this.events.race;
+    // Wiederholung nach dem Ziel
+    if (this.replay) { this.tickReplay(dt); return; }
+    if (race && race.finished && !race.replayDone && !race.replayStart && race.after > 1.2) this.startReplay(race);
+    // Zurückspulen (Q / Rücktaste / Steuerkreuz ↓ / ⏪ halten)
+    const canRewind = !(race && (race.finished || !race.started)) && this.tm.buf.length > 3;
+    if (raw.rewind && canRewind) { this.rewindStep(dt); return; }
+    if (this.rewinding) this.endRewind();
+    // Kamerafahrt vor dem Start: Gas, Enter oder Tippen überspringt
+    const intro = !!(race && race.t0 !== undefined && race.t < race.t0 + INTRO);
+    if (intro && (raw.throttle > 0.5 || this.skipCine || this.input.took('Enter') || this.input.took('PadA'))) { race.t = race.t0 + INTRO; this.skipCine = false; }
+    if (intro !== (this.cineMode === 'intro')) this.setCine(intro && race.t < race.t0 + INTRO ? 'intro' : null, race);
     let inp = raw;
     if (race && !race.started) inp = { throttle: 0, brake: 1, steer: raw.steer, handbrake: true, nitro: false, rev: raw.throttle };
     if (race && race.finished) inp = { throttle: 0.3, brake: 0, steer: 0, handbrake: false, nitro: false };
@@ -1384,7 +1464,84 @@ class Game {
     }
 
     this.hud.minimap(dt, car, extra);
+    if (!race || race.started) this.tm.record(this, dt);
     if (this.nitroWas !== car.nitroOn) { this.nitroWas = car.nitroOn; if (car.nitroOn) this.audio.play('nitro'); document.body.classList.toggle('nitro', car.nitroOn); }
+  }
+
+  // ---------------------------------------------------------------- Zeit & Kino
+  rewindStep(dt) {
+    if (!this.rewinding) {
+      this.rewinding = true; document.body.classList.add('rewind'); this.audio.play('rewind');
+      if (this.events.race) this.events.race.rewinds = (this.events.race.rewinds || 0) + 1;
+      this.skids.cut();
+    }
+    this.tm.back(this, dt * 2.2);
+    this.acc = 0;
+    this.syncCar(dt, { steer: this.car.steer, throttle: 0, brake: 0 });
+    this.updateCamera(dt, {});
+    this.audio.updateCar(this.car, { throttle: 0 }, true, this.carStyle);
+    this.hud.speedo(this.car);
+  }
+  endRewind() {
+    this.rewinding = false; document.body.classList.remove('rewind');
+    this.camYaw = this.car.yaw; this.acc = 0; this.skids.cut();
+  }
+  setCine(mode, race) {
+    this.cineMode = mode;
+    document.body.classList.toggle('cine', !!mode);
+    document.body.dataset.cine = mode || '';
+    if (mode === 'intro' && race) {
+      const ev = race.ev;
+      $('cine-type').textContent = ev.dirt ? 'Rallye · Schotter' : ev.sprint ? 'Sprint' : 'Rundstrecke';
+      $('cine-name').textContent = ev.name;
+      $('cine-info').textContent = `${ev.sprint ? Math.round(race.total / 100) / 10 + ' km' : race.laps + ' Runden'} · ${race.ais.length + 1} Fahrer · ${this.carSpec().maker} ${this.carSpec().name}`;
+      this.audio.play('whoosh');
+    }
+  }
+  startReplay(race) {
+    race.replayStart = true;
+    const frames = this.tm.buf.slice(-REPLAY_FRAMES);
+    if (frames.length < 60 || this.quality < 1) { race.replayDone = true; return; }
+    this.replay = new Replay(this, frames);
+    this.setCine('replay', race);
+    this.audio.play('whoosh');
+  }
+  tickReplay(dt) {
+    const R = this.replay, race = this.events.race;
+    R.tick(dt, this.camera);
+    this.syncCar(dt, { steer: this.car.steer, throttle: 0.6, brake: 0 });
+    this.audio.updateCar(this.car, { throttle: 0.6 }, true, this.carStyle);
+    const skip = this.skipCine || this.input.took('Enter') || this.input.took('PadA') || this.input.took('Space') || this.input.took('Escape');
+    if (R.done || skip || !race) {
+      R.finish();
+      this.replay = null; this.skipCine = false;
+      this.setCine(null);
+      this.syncCar(dt);
+      if (race) { race.replayDone = true; race.after = 3.5; }
+      this.camYaw = undefined; this.camY = undefined;
+    }
+  }
+  // Fehlzündungen beim Gaswegnehmen aus hoher Drehzahl, Turbo-Abblasen
+  backfire(dt, inp) {
+    const car = this.car, thr = inp.throttle || 0;
+    if ((this.lastThr || 0) > 0.7 && thr < 0.2 && car.rpm > 0.55 && Math.abs(car.vf) > 8 && this.carStyle !== 'ev') {
+      this.popT = 0.35 + Math.random() * 0.35;
+      if (isTurbo(this.carStyle)) this.audio.play('blowoff', clamp(car.rpm, 0.4, 1));
+    }
+    this.lastThr = thr;
+    if (!(this.popT > 0)) return;
+    this.popT -= dt;
+    this.popN = (this.popN || 0) - dt;
+    if (this.popN > 0) return;
+    this.popN = 0.05 + Math.random() * 0.09;
+    if (Math.random() < 0.35) return;
+    this.audio.play('pop', 0.6 + Math.random() * 0.5);
+    const sy = Math.sin(this.car.yaw), cy = Math.cos(this.car.yaw);
+    for (const e of this.carModel.userData.exhaust) {
+      _v.copy(e).applyQuaternion(this.carModel.quaternion).add(car.pos);
+      for (let i = 0; i < 5; i++) this.sparks.emit(_v.x, _v.y, _v.z, -sy * (6 + Math.random() * 6) + car.vel.x * 0.9, Math.random() * 0.8, -cy * (6 + Math.random() * 6) + car.vel.z * 0.9,
+        1, 0.55 + Math.random() * 0.25, 0.15, 0.45, 0.09 + Math.random() * 0.06, { drag: 5, grow: 2.2 });
+    }
   }
 
   carCollisions(dt) {
@@ -1533,6 +1690,15 @@ class Game {
       for (const p of rear) S.emit(p.x, p.y + 0.25, p.z, -car.vel.x * 0.25 + (Math.random() - 0.5) * 1.5, 0.5 + Math.random(), -car.vel.z * 0.25 + (Math.random() - 0.5) * 1.5,
         0.1 * wetFx * Math.min(1, spd / 30), 0.85 * lit, 0.9 * lit, 0.7, 0.55, { drag: 2.6, grow: 2.2 });
     }
+    this.backfire(dt, inp);
+    // Schmutz auf dem Lack: Schotter/Wiese verschmutzt, Regen und Wasser waschen ab
+    const pm = ud.paintMat;
+    if (pm && pm.userData.dirt) {
+      let dd = pm.userData.dirt.value;
+      if (car.grounded && car.surface !== 1 && spd > 4) dd += dt * 0.035 * Math.min(2, spd / 18);
+      dd -= dt * (0.02 * (this.weather ? this.weather.rain : 0) + (car.inWater > 0 ? 0.6 : 0));
+      pm.userData.dirt.value = clamp(dd, 0, 1);
+    }
     // Nitro-Flammen
     if (car.nitroOn) {
       const ex = ud.exhaust;
@@ -1545,6 +1711,8 @@ class Game {
 
   updateCamera(dt, inp) {
     const car = this.car, cam = this.camera;
+    const race = this.events.race;
+    if (race && race.t0 !== undefined && race.t < race.t0 + INTRO) { introCam(this, race, cam); this.camYaw = car.yaw; this.camY = undefined; return; }
     const spd = Math.abs(car.vf), topMs = car.stats.top / 3.6;
     if (this.camYaw === undefined) this.camYaw = car.yaw;
     const velYaw = Math.hypot(car.vel.x, car.vel.z) > 4 ? Math.atan2(car.vel.x, car.vel.z) : car.yaw;

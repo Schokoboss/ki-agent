@@ -132,14 +132,28 @@ export function setCarDetail(q) { DETAIL = q; }
 // Grundschicht pixelweise (Objektraum-Rauschen), der Klarlack bleibt spiegelglatt → Glitzern in der Sonne.
 export function carPaint(color, detail = DETAIL) {
   const m = new THREE.MeshPhysicalMaterial({ color, metalness: 0.5, roughness: 0.34, clearcoat: 1, clearcoatRoughness: 0.025, envMapIntensity: 1.4 });
-  const U = { uFlake: { value: detail >= 4 ? 1 : 0.75 } };
-  m.userData.flake = U.uFlake;
+  const U = { uFlake: { value: detail >= 4 ? 1 : 0.75 }, uDirt: { value: 0 } };
+  m.userData.flake = U.uFlake; m.userData.dirt = U.uDirt;
   m.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, U);
     sh.vertexShader = 'varying vec3 vFlakeP;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vFlakeP = position;');
-    sh.fragmentShader = `uniform float uFlake; varying vec3 vFlakeP;
+    sh.fragmentShader = `uniform float uFlake, uDirt; varying vec3 vFlakeP;
       float flakeH(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
-      ` + sh.fragmentShader.replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+      float vn3(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(mix(flakeH(i), flakeH(i + vec3(1,0,0)), f.x), mix(flakeH(i + vec3(0,1,0)), flakeH(i + vec3(1,1,0)), f.x), f.y),
+                   mix(mix(flakeH(i + vec3(0,0,1)), flakeH(i + vec3(1,0,1)), f.x), mix(flakeH(i + vec3(0,1,1)), flakeH(i + vec3(1,1,1)), f.x), f.y), f.z); }
+      ` + sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+        // Schmutz: unten dichter, fleckig; macht den Lack matt
+        float dirtM = 0.0;
+        if (uDirt > 0.001) {
+          float dn = vn3(vFlakeP * 3.1) * 0.6 + vn3(vFlakeP * 9.0) * 0.4;
+          dirtM = clamp(uDirt * 1.25 * smoothstep(1.05, 0.15, vFlakeP.y) * smoothstep(0.25, 0.65, dn + uDirt * 0.35), 0.0, 0.9);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.46, 0.37, 0.26), dirtM);
+        }`).replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
+        material.roughness = mix(material.roughness, 0.95, dirtM);
+        #ifdef USE_CLEARCOAT
+          material.clearcoat *= 1.0 - dirtM;
+        #endif`).replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
         {
           vec3 fp = vFlakeP * 380.0, ci = floor(fp);
           vec3 fr = vec3(flakeH(ci), flakeH(ci + 17.31), flakeH(ci + 41.73)) - 0.5;

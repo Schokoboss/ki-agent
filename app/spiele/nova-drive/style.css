@@ -381,3 +381,35 @@ body[data-pc="1"] #c:active { cursor: grabbing; }
 button:focus-visible, input:focus-visible { outline: 3px solid var(--violet); outline-offset: 2px; }
 body[data-pc="1"] #nav, body[data-pc="1"] #prompt { font-size: 1.04em; }
 body[data-pc="1"] #prompt-go::after { content: ' · Enter'; font-size: .8em; opacity: .75; }
+
+/* ---------------- Kino (Rennintro, Wiederholung) & Zurückspulen */
+#cine { position: absolute; inset: 0; pointer-events: none; z-index: 30; }
+#cine .bar { position: absolute; left: 0; right: 0; height: 0; background: #000; transition: height .55s cubic-bezier(.2,.8,.2,1); }
+#cine .bar.t { top: 0; } #cine .bar.b { bottom: 0; }
+body.cine #cine .bar { height: 11vh; }
+#cine-title { position: absolute; left: calc(5vw + var(--sl)); bottom: 15vh; opacity: 0; transform: translateX(-40px); transition: opacity .6s .25s, transform .8s .25s cubic-bezier(.2,.8,.2,1); text-shadow: 0 2px 18px rgba(0,0,0,.6); }
+body[data-cine="intro"] #cine-title { opacity: 1; transform: none; }
+#cine-title small { display: block; font-size: 13px; letter-spacing: .3em; text-transform: uppercase; color: var(--gold); margin-bottom: 4px; }
+#cine-title b { display: block; font-weight: 800; font-style: italic; font-size: clamp(30px, 7vh, 64px); line-height: 1; text-transform: uppercase;
+  background: linear-gradient(90deg, #fff, #ffd6e8); -webkit-background-clip: text; background-clip: text; color: transparent; }
+#cine-title span { display: block; margin-top: 8px; font-size: 15px; color: #e8e6f5; }
+#cine-tag { position: absolute; left: calc(4vw + var(--sl)); top: calc(11vh + 14px); font-weight: 800; letter-spacing: .25em; font-size: 14px; opacity: 0; transition: opacity .4s; display: flex; align-items: center; gap: 8px; }
+#cine-tag i { width: 10px; height: 10px; border-radius: 50%; background: #ff3b3b; animation: recblink 1s steps(2) infinite; }
+@keyframes recblink { 50% { opacity: 0; } }
+body[data-cine="replay"] #cine-tag { opacity: 1; }
+#cine-skip { position: absolute; right: calc(3vw + var(--sr)); bottom: calc(11vh + 12px); pointer-events: auto; background: rgba(0,0,0,.45); color: #fff; border: 1px solid rgba(255,255,255,.3);
+  border-radius: 999px; padding: 8px 16px; font-weight: 700; opacity: 0; transition: opacity .4s .4s; }
+body.cine #cine-skip { opacity: 1; }
+body:not(.cine) #cine-skip { pointer-events: none; }
+body.cine #tl, body.cine #tr, body.cine #controls, body.cine #speedo, body.cine #race, body.cine #keys, body.cine #nav, body.cine #prompt,
+body.cine #skill, body.cine #gains { opacity: 0 !important; pointer-events: none !important; transition: opacity .35s; }
+#rewind-fx { position: absolute; inset: 0; pointer-events: none; z-index: 29; opacity: 0; transition: opacity .15s;
+  background: repeating-linear-gradient(0deg, rgba(255,255,255,.05) 0 2px, transparent 2px 5px); }
+body.rewind #rewind-fx { opacity: 1; }
+#rewind-fx span { position: absolute; top: 18vh; left: 0; right: 0; text-align: center; font-weight: 800; font-style: italic; font-size: 26px; letter-spacing: .12em;
+  color: #9ee7ff; text-shadow: 0 0 18px rgba(80,200,255,.8); animation: rwpulse .5s ease-in-out infinite alternate; }
+@keyframes rwpulse { to { opacity: .55; transform: scale(1.04); } }
+body.rewind #c { filter: saturate(.35) contrast(1.12) brightness(1.06) hue-rotate(-12deg) !important; }
+#h-rewind { font-size: 16px; }
+body[data-cine="replay"] #cine-title { transition: none; opacity: 0; }
+body[data-cine="replay"] #countdown, body[data-cine="replay"] #banner, body[data-cine="replay"] #toasts { opacity: 0 !important; }
