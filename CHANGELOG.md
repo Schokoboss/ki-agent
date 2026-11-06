@@ -31,6 +31,10 @@ Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 - Fehlzündungen mit Flammen und Knallen beim Gaswegnehmen, Turbo-Pfeifen und Abblasen, Linsenreflexe gegen die Sonne,
   Regentropfen auf der Kamera, Schmutz auf dem Lack (Schotter/Wiese, Regen wäscht ab; Gegner in Rallyes verdreckt).
 - Hyper-Fix: schwarzes Bild durch ungültige Werte in der Spiegelungskarte behoben (8-Bit-Würfelkamera, Schutzfilter).
+- **HD-Paket**: 2K-Fototexturen mit Rauheitskarten (`models/tex-hd`, Einstellung „HD-Texturen“, automatisch auf Hyper
+  und am PC ab Ultra), Unterholz aus Fotomodellen (Farne, Büsche, Baumstümpfe mit Kollision, liegende Stämme) und zwei
+  weitere fotografierte Felsarten (Poly Haven, CC0). Offline spielbar: eigener Service Worker speichert alles Geladene.
+- Fehler behoben: Beim Festival-Rundkurs stand die Bühne auf der Straße – der Nordbogen führt jetzt hinter der Bühne vorbei.
 - Navigation: Route zu jedem Ziel über das Straßennetz (Karte → „🧭 Navi starten“, Pause → Navi), Pfeile auf der Straße,
   Abbiegehinweise mit Entfernung, Sprachansagen, Neuberechnung beim Verfahren; Rennstrecke wird vorab angezeigt.
 - Grafik Ultra, Ladebildschirm mit Fortschritt, vorberechnetes Licht (siehe frühere Commits).

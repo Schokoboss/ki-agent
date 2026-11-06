@@ -9,7 +9,8 @@ export const ROADS = [
   },
   {
     id: 'festival', name: 'Festival-Rundkurs', closed: true, hw: 7.5, type: 'asphalt', lamps: true, cones: true,
-    pts: roundedPoly([[-200, 440], [60, 430], [210, 470], [235, 600], [130, 690], [-50, 650], [-150, 720], [-245, 620]], 38),
+    // Nordbogen läuft hinter der Bühne (Bühne + Zuschauer bei z 648–681 liegen innerhalb der Runde)
+    pts: roundedPoly([[-200, 440], [60, 430], [210, 470], [235, 600], [140, 712], [55, 752], [-62, 750], [-150, 722], [-245, 620]], 38),
   },
   {
     id: 'pass', name: 'Sonnenpass', closed: false, hw: 6, type: 'asphalt', lamps: false, fences: true,

@@ -168,19 +168,26 @@ export function makeTextures(aniso) {
 // Echte Foto-Oberflächen (Poly Haven, CC0) aus models/tex – aufbereitet von werkstatt/texturen.py.
 // _d = Detail (Mittel 50 %, wird mit der Bodenfarbe multipliziert), _n = Normal-Map (OpenGL).
 export const PHOTO_SETS = ['grass', 'rock', 'sand', 'asphalt', 'gravel'];
-export async function loadPhotoTextures(T, aniso, url = p => p, prog = () => {}) {
+// hd = 2K-Texturen + Rauheit aus models/tex-hd (HD-Paket); fehlt etwas, wird die 1K-Fassung genommen.
+export async function loadPhotoTextures(T, aniso, url = p => p, prog = () => {}, hd = false) {
   const L = new THREE.TextureLoader();
   const flat = new THREE.DataTexture(new Uint8Array([128, 128, 255, 255]), 1, 1, THREE.RGBAFormat);
   flat.needsUpdate = true;
   T.flatN = flat;
-  T.photo = {};
+  const grey = new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1, THREE.RGBAFormat);
+  grey.needsUpdate = true;
+  T.flatR = grey;
+  T.photo = {}; T.photoHD = hd;
+  const keys = hd ? ['d', 'n', 'r'] : ['d', 'n'];
   let done = 0;
-  const jobs = PHOTO_SETS.flatMap(n => ['d', 'n'].map(k => L.loadAsync(url(`models/tex/${n}_${k}.webp`)).then(t => {
+  const load = (n, k, dir) => L.loadAsync(url(`${dir}/${n}_${k}.webp`)).then(t => {
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.anisotropy = aniso;
     if (k === 'd') t.colorSpace = THREE.SRGBColorSpace;
     T.photo[`${n}_${k}`] = t;
-  }).catch(e => console.warn('Foto-Textur fehlt', n, k, e)).finally(() => prog(++done / (PHOTO_SETS.length * 2)))));
+  });
+  const jobs = PHOTO_SETS.flatMap(n => keys.map(k => (hd ? load(n, k, 'models/tex-hd').catch(() => k === 'r' ? null : load(n, k, 'models/tex')) : load(n, k, 'models/tex'))
+    .catch(e => console.warn('Foto-Textur fehlt', n, k, e)).finally(() => prog(++done / (PHOTO_SETS.length * keys.length)))));
   await Promise.all(jobs);
 }
 

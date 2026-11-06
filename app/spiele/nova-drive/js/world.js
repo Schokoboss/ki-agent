@@ -39,6 +39,7 @@ export class Scenery {
       ['Schanzen und Zäune', () => { this.buildRampsM(); this.buildSmashablesM(); }, 2],
       ['Zuschauer, Boote, Windräder', () => { this.buildCrowd(); this.buildBoats(); this.buildTurbines(); }, 1],
       ['Gras säen', () => this.buildGrass(), 1],
+      ['Unterholz pflanzen', () => this.buildProps(), 1],
       ['Letzte Details', () => { this.buildClouds(); this.buildGlows(); this.buildGates(); }, 1],
     ];
     const total = steps.reduce((a, s) => a + s[2], 0);
@@ -324,6 +325,7 @@ export class Scenery {
     this.splatU = {
       tGrass: { value: ph ? P.grass_d : T.dGrass }, tRock: { value: ph ? P.rock_d : T.dRock }, tSand: { value: ph ? P.sand_d : T.dSand },
       nGrass: { value: (ph && P.grass_n) || flat }, nRock: { value: (ph && P.rock_n) || flat }, nSand: { value: (ph && P.sand_n) || flat },
+      rGrass: { value: P.grass_r || T.flatR || flat }, rRock: { value: P.rock_r || T.flatR || flat }, rSand: { value: P.sand_r || T.flatR || flat },
       uWet: { value: 0 }, uNStr: { value: ph && flat ? (this.q >= 3 ? 1.0 : 0.8) : 0 },
     };
     // Kachelgrößen (Wiederholungen pro Meter): Foto-Gras ≈ 3 m, Fels ≈ 7 m, Sand ≈ 4 m
@@ -333,7 +335,7 @@ export class Scenery {
       Object.assign(sh.uniforms, this.splatU);
       sh.vertexShader = 'varying vec3 vTW; varying vec3 vTN;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
         vTW = (modelMatrix * vec4(transformed, 1.0)).xyz; vTN = normalize(mat3(modelMatrix) * objectNormal);`);
-      sh.fragmentShader = 'uniform sampler2D tGrass, tRock, tSand, nGrass, nRock, nSand; uniform float uWet, uNStr; varying vec3 vTW; varying vec3 vTN;\n' + sh.fragmentShader
+      sh.fragmentShader = 'uniform sampler2D tGrass, tRock, tSand, nGrass, nRock, nSand, rGrass, rRock, rSand; uniform float uWet, uNStr; varying vec3 vTW; varying vec3 vTN;\n' + sh.fragmentShader
         .replace('#include <map_fragment>', `
           float dist = length(vTW - cameraPosition);
           float far = smoothstep(60.0, 380.0, dist);
@@ -364,6 +366,10 @@ export class Scenery {
             wN = normalize(wN + pert * nK);
           }`)
         .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+          // HD-Paket: echte Rauheit (Mittel 0,5 → Faktor 1), sonst neutral
+          float rr = mix(texture2D(rGrass, uG1).r, texture2D(rSand, vTW.xz * ${S.s1}).r, wSand);
+          rr = mix(rr, texture2D(rRock, vTW.xz * ${S.r}).r, wRock);
+          roughnessFactor *= clamp(mix(1.0, rr * 2.0, 1.0 - far), 0.55, 1.35);
           roughnessFactor = mix(roughnessFactor, 0.82, wRock * 0.6) * (1.0 - uWet * 0.3);`)
         .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
           normal = normalize((viewMatrix * vec4(wN, 0.0)).xyz);`);
@@ -427,18 +433,21 @@ export class Scenery {
   roadDetail(mat, dirt) {
     const P = this.T.photo || {}, d = P[dirt ? 'gravel_d' : 'asphalt_d'], n = P[dirt ? 'gravel_n' : 'asphalt_n'];
     if (!d || this.q < 1) return;
-    const U = { tDet: { value: d }, tNor: { value: n || this.T.flatN }, uNStr: { value: n && this.q >= 2 ? (dirt ? 1.1 : 0.7) : 0 } };
+    const r = P[dirt ? 'gravel_r' : 'asphalt_r'];
+    const U = { tDet: { value: d }, tNor: { value: n || this.T.flatN }, tRough: { value: r || this.T.flatR || this.T.flatN }, uNStr: { value: n && this.q >= 2 ? (dirt ? 1.1 : 0.7) : 0 } };
     const k = dirt ? '0.3' : '0.32', mixK = dirt ? '0.85' : '0.7';
     mat.onBeforeCompile = sh => {
       Object.assign(sh.uniforms, U);
       sh.vertexShader = 'varying vec3 vRW;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
         vRW = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
-      sh.fragmentShader = 'uniform sampler2D tDet, tNor; uniform float uNStr; varying vec3 vRW;\n' + sh.fragmentShader
+      sh.fragmentShader = 'uniform sampler2D tDet, tNor, tRough; uniform float uNStr; varying vec3 vRW;\n' + sh.fragmentShader
         .replace('#include <map_fragment>', `#include <map_fragment>
           float rFar = smoothstep(25.0, 220.0, length(vRW - cameraPosition));
           vec2 rUv = vRW.xz * ${k};
           vec3 rd = mix(texture2D(tDet, rUv).rgb, texture2D(tDet, rUv * 0.21).rgb, 0.3 + rFar * 0.4) * 2.0;
           diffuseColor.rgb *= mix(vec3(1.0), rd, ${mixK});`)
+        .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+          roughnessFactor *= clamp(mix(1.0, texture2D(tRough, rUv).r * 2.0, 1.0 - rFar), 0.6, 1.3);`)
         .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
           if (uNStr > 0.001) {
             vec3 rn = texture2D(tNor, rUv).xyz * 2.0 - 1.0;
@@ -1020,7 +1029,7 @@ export class Scenery {
 
   // Fotografierte Felsen (Poly Haven, CC0): eigene Textur + Normal-Map, je Sorte ein InstancedMesh
   buildRocksPhoto() {
-    const kinds = ['prock_a', 'prock_b', 'prock_c'].map(n => meshOf(n)).filter(Boolean);
+    const kinds = ['prock_a', 'prock_b', 'prock_c', 'prock_d', 'prock_e'].map(n => meshOf(n)).filter(Boolean);
     if (!kinds.length) return false;
     const aniso = Math.min(8, this.T.ground ? this.T.ground.anisotropy : 4);
     for (const k of kinds) {
@@ -1044,6 +1053,64 @@ export class Scenery {
       this.scene.add(im);
     });
     return true;
+  }
+
+  // Unterholz aus Fotomodellen (Poly Haven, CC0): Farne & Büsche am Waldrand, Baumstümpfe, liegende Stämme.
+  // Gezeichnet wird nur, was im Umkreis der Kamera liegt – die Instanzen werden beim Fahren neu gefüllt.
+  buildProps() {
+    if (this.q < 2) return;
+    const defs = [
+      { n: 'pv_fern', s: [0.9, 1.5] }, { n: 'pv_fern_b', s: [0.9, 1.5] },
+      { n: 'pv_shrub_a', s: [2.6, 3.6] }, { n: 'pv_shrub_b', s: [2.2, 3.0] },
+      { n: 'pv_stump', s: [0.7, 1.1], far: true, col: 0.55 }, { n: 'pv_log', s: [0.9, 1.4], far: true },
+    ].map(d => ({ ...d, m: meshOf(d.n) })).filter(d => d.m);
+    if (!defs.length) return;
+    const W = this.world, rnd = mulberry32(31), items = defs.map(() => []);
+    const idx = n => defs.findIndex(d => d.n === n);
+    const put = (k, x, z) => {
+      if (k < 0 || W.edgeAt(x, z) < 3) return;
+      const h = W.heightAt(x, z);
+      if (h < 1.8) return;
+      const d = defs[k], sc = d.s[0] + rnd() * (d.s[1] - d.s[0]);
+      items[k].push(x, h, z, rnd() * 6.283, sc);
+      if (d.col) W.addCollider({ t: 0, x, z, r: d.col * sc });
+    };
+    for (const t of W.trees) {
+      const r = rnd(), a = rnd() * 6.283, dist = 1.6 + rnd() * 3.5;
+      const x = t.x + Math.cos(a) * dist, z = t.z + Math.sin(a) * dist;
+      if (r < 0.32) put(idx(rnd() < 0.5 ? 'pv_fern' : 'pv_fern_b'), x, z);
+      else if (r < 0.5) put(idx(rnd() < 0.5 ? 'pv_shrub_a' : 'pv_shrub_b'), x, z);
+      else if (r < 0.535) put(idx('pv_stump'), x, z);
+      else if (r < 0.56) put(idx('pv_log'), x, z);
+    }
+    const R = this.q >= 4 ? 125 : this.q >= 3 ? 90 : 60;
+    this.props = defs.map((d, k) => {
+      const m = d.m.mat;
+      m.side = THREE.DoubleSide; m.roughness = 0.9; m.metalness = 0; m.envMapIntensity = 0.4;
+      for (const t of [m.map, m.normalMap]) if (t) t.anisotropy = 4;
+      const max = d.far ? 300 : this.q >= 4 ? 900 : 600;
+      const im = new THREE.InstancedMesh(d.m.geo, m, max);
+      im.count = 0; im.frustumCulled = false;
+      im.castShadow = d.far || this.q >= 4; im.receiveShadow = true;
+      this.scene.add(im);
+      return { data: new Float32Array(items[k]), im, max, R: R * (d.far ? 1.8 : 1) };
+    });
+    this.propsAt = { x: 1e9, z: 1e9 };
+  }
+  updateProps(cam) {
+    if (!this.props || Math.hypot(cam.x - this.propsAt.x, cam.z - this.propsAt.z) < 10) return;
+    this.propsAt.x = cam.x; this.propsAt.z = cam.z;
+    for (const P of this.props) {
+      const { data, im, max } = P, R2 = P.R * P.R;
+      let n = 0;
+      for (let i = 0; i < data.length && n < max; i += 5) {
+        const dx = data[i] - cam.x, dz = data[i + 2] - cam.z;
+        if (dx * dx + dz * dz > R2) continue;
+        _m.compose(_p.set(data[i], data[i + 1] - 0.03, data[i + 2]), _q.setFromEuler(_e.set(0, data[i + 3], 0)), _s.setScalar(data[i + 4]));
+        im.setMatrixAt(n++, _m);
+      }
+      im.count = n; im.instanceMatrix.needsUpdate = true;
+    }
   }
 
   buildBuildingsM() {
@@ -1492,6 +1559,7 @@ export class Scenery {
     }
     const lodD = this.q >= 4 ? 1000 : this.q >= 3 ? 700 : this.q >= 2 ? 420 : this.q >= 1 ? 300 : 180;
     this.updateGrass(camPos, t);
+    this.updateProps(camPos);
     this.skyU.time.value = t;
     if (this.windU) { this.windU.uTime.value = t; this.windU.uAmp.value = 1 + (this.rain || 0) * 1.6; }
     for (const L of this.treeLod || []) {

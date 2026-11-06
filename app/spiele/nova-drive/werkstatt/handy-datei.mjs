@@ -22,7 +22,7 @@ const code = res.outputFiles[0].text.replace(/<\/script/gi, '<\\/script');
 
 // 2) Modelle als data-URLs
 const models = {};
-const walk = d => { for (const f of readdirSync(d)) { const p = join(d, f); if (statSync(p).isDirectory()) walk(p); else if (/\.(glb|webp)$/.test(f)) models[relative(ROOT, p).split('\\').join('/')] = `data:${f.endsWith('.webp') ? 'image/webp' : 'model/gltf-binary'};base64,` + readFileSync(p).toString('base64'); } };
+const walk = d => { for (const f of readdirSync(d)) { const p = join(d, f); if (statSync(p).isDirectory()) { if (f !== 'tex-hd') walk(p); } else if (/\.(glb|webp)$/.test(f)) models[relative(ROOT, p).split('\\').join('/')] = `data:${f.endsWith('.webp') ? 'image/webp' : 'model/gltf-binary'};base64,` + readFileSync(p).toString('base64'); } };
 walk(join(ROOT, 'models'));
 
 // 3) HTML zusammensetzen

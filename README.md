@@ -115,7 +115,9 @@ Automodelle neu bauen: `python werkstatt/autos.py -- ../models` (braucht Blender
 mit `gltf-transform meshopt` komprimieren (je Auto `<id>.glb` voll, `<id>_mid.glb` für Gegner, `<id>_lod.glb`).
 Vorschau aller Modelle: `werkstatt/vorschau.html?cars=sundog,atlas` (16 Autos, Navigation über die Karte).
 Foto-Texturen (Poly Haven, CC0) neu laden: `python werkstatt/texturen.py` → `models/tex/` (Quellen in `QUELLEN.txt`);
-fotografierte Felsen: `python werkstatt/felsen.py` → `models/welt/prock_*.glb`.
+fotografierte Felsen und Unterholz: `python werkstatt/felsen.py` → `models/welt/prock_*.glb`, `pv_*.glb`;
+HD-Paket (2K + Rauheit): `python werkstatt/texturen.py --hd` → `models/tex-hd/` (nicht in der Einzeldatei).
+Offline: `sw.js` im Spielordner speichert alles Geladene (nur über http/https, z. B. Starter oder GitHub Pages).
 **PC-Modus**: am PC automatisch (oder `index.html?pc`, Einstellungen → Gerät): Tastatur mit weicher Lenkung,
 Maus zum Umsehen/Zoomen, Gamepad auch im Menü, Tastenhilfe (H). Alle Tasten stehen in `LIES-MICH.txt`.
 **Grafik Hyper ✦** (über Ultra): GTAO-Umgebungsverdeckung, Echtzeit-Spiegelungen am eigenen Auto, Supersampling,

@@ -19,6 +19,8 @@ Vor jedem Rennen gibt es eine Kamerafahrt (Gas oder „Überspringen“), nach d
 
 Grafik: Einstellungen → Grafik. „Hyper ✦“ ist die höchste Stufe (Spiegelungen, Schattierung, mehr Detail)
 – für starke Grafikkarten. Wird beim nächsten Start aktiv.
+„HD-Texturen“ (Auto/An/Aus) lädt schärfere 2K-Oberflächen – nur über den Starter bzw. die Webseite, nicht in der
+Einzeldatei. Einmal geladen, läuft das Spiel auch offline weiter.
 
 PC-Modus (automatisch am PC, sonst Einstellungen → Gerät → PC, oder Adresse mit ?pc):
   Tastatur: W/↑ Gas, S/↓ Bremse, A D/← → lenken (baut sich weich auf), Leertaste Handbremse,

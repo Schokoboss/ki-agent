@@ -8,7 +8,8 @@ export const WORLD_MODELS = ['pine_a', 'pine_b', 'leaf_a', 'leaf_b', 'palm', 'ro
   'house_a', 'house_b', 'house_c', 'house_d', 'house_e', 'house_f', 'farmhouse', 'barn',
   'lamp', 'fence', 'cone', 'hay', 'poster', 'ramp', 'stage', 'tent', 'ferris', 'arch', 'tower',
   'person_a', 'person_b', 'boat', 'turbine',
-  'prock_a', 'prock_b', 'prock_c']; // prock_*: fotografierte Felsen (Poly Haven, CC0) – werkstatt/felsen.py
+  'prock_a', 'prock_b', 'prock_c', 'prock_d', 'prock_e', // fotografierte Felsen (Poly Haven, CC0) – werkstatt/felsen.py
+  'pv_fern', 'pv_fern_b', 'pv_shrub_a', 'pv_shrub_b', 'pv_stump', 'pv_log']; // Unterholz (Poly Haven, CC0)
 
 const LIB = {};
 // In der Handy-Einzeldatei stecken die Modelle eingebettet in window.__NOVA_MODELS (sonst normale Dateien)

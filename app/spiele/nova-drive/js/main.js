@@ -38,7 +38,7 @@ class Game {
   constructor() {
     this.save = Object.assign({ credits: 25000, fans: 0, owned: {}, current: null, best: {}, stars: {}, posters: [], races: 0, wins: 0 }, store.get(SAVE_KEY) || {});
     this.settings = Object.assign({ quality: 'auto', control: 'buttons', autoGas: false, sfx: 0.8, music: 0.45, station: 0, cam: 0, name: '', difficulty: 1, time: 'dyn',
-      sens: 1, tiltInvert: false, ctl: 1, haptic: true, weather: 'dyn', voice: true, device: 'auto', keyHelp: true }, store.get(SET_KEY) || {});
+      sens: 1, tiltInvert: false, ctl: 1, haptic: true, weather: 'dyn', voice: true, device: 'auto', keyHelp: true, hd: 'auto' }, store.get(SET_KEY) || {});
     // ?pc in der Adresse (z. B. vom Starter am Laptop) schaltet den PC-Modus fest ein
     const q = new URLSearchParams(location.search);
     if (q.has('pc')) this.settings.device = 'pc';
@@ -96,7 +96,12 @@ class Game {
     this.world.events = EVENTS;
     await this.world.generate(sec(0.02, 0.62)); // meldet 0…0.6
     await makeDetailTextures(this.T, aniso, this.quality >= 3, sec(0.38, 0.43));
-    await loadPhotoTextures(this.T, aniso, modelUrl, sec(0.43, 0.45));
+    // HD-Paket (2K-Texturen mit Rauheit): automatisch auf Hyper und am PC ab Ultra – nicht in der Einzeldatei
+    const s = this.settings;
+    this.hd = !globalThis.__NOVA_MODELS && (s.hd === 'on' || (s.hd === 'auto' && (this.quality >= 4 || (this.quality >= 3 && this.pc))));
+    await loadPhotoTextures(this.T, aniso, modelUrl, sec(0.43, 0.45), this.hd);
+    // offline spielbar: Dateien werden beim ersten Laden zwischengespeichert (nur über http/https)
+    if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol) && !globalThis.__NOVA_MODELS) navigator.serviceWorker.register('sw.js').catch(() => {});
     prog(0.45, 'Modelle aus der Werkstatt laden');
     await loadWorldModels(sec(0.45, 0.5));
     setCarDetail(this.quality);
@@ -952,6 +957,7 @@ class Game {
     seg('s-station', s.station, v => { s.station = +v; this.audio.setStation(s.station); });
     seg('s-tiltinv', s.tiltInvert ? '1' : '0', v => { s.tiltInvert = v === '1'; this.applyControlMode(); });
     seg('s-ctl', s.ctl, v => { s.ctl = +v; this.resize(); });
+    seg('s-hd', s.hd, v => { s.hd = v; this.hud.toast('HD-Texturen: wird beim nächsten Start aktiv', 'info'); });
     seg('s-device', s.device, v => { s.device = v; this.applyControlMode(); this.hud.toast(this.pc ? 'PC-Modus: Tastatur, Maus & Gamepad' : 'Handy-Modus: Touch-Steuerung', 'info'); });
     seg('s-haptic', s.haptic ? '1' : '0', v => { s.haptic = v === '1'; this.applyControlMode(); });
     $('s-calib').onclick = () => { this.input.calibrate(); this.audio.play('ui'); this.hud.toast(this.input.tiltOk ? 'Neigung: aktuelle Haltung ist jetzt geradeaus' : 'Erst „Lenkung: Neigen“ wählen', 'info'); };
