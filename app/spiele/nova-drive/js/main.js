@@ -16,6 +16,7 @@ import { CARS, UPGRADES, carStats, rating, carClass, CLASS_COLORS, EVENTS, RADIO
 import { clamp, lerp, damp, fmtNum, fmtTime, wrapAngle, breathe } from './util.js';
 import { EVENT_COLORS } from './world.js';
 import { Economy, PRIZES } from './economy.js';
+import { RoadGraph, NavRibbon, say, fmtDist, TURN_ICON, turnText } from './nav.js';
 import { EffectComposer } from '../lib/postprocessing/EffectComposer.js';
 import { RenderPass } from '../lib/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from '../lib/postprocessing/UnrealBloomPass.js';
@@ -35,7 +36,7 @@ class Game {
   constructor() {
     this.save = Object.assign({ credits: 25000, fans: 0, owned: {}, current: null, best: {}, stars: {}, posters: [], races: 0, wins: 0 }, store.get(SAVE_KEY) || {});
     this.settings = Object.assign({ quality: 'auto', control: 'buttons', autoGas: false, sfx: 0.8, music: 0.45, station: 0, cam: 0, name: '', difficulty: 1, time: 'dyn',
-      sens: 1, tiltInvert: false, ctl: 1, haptic: true, weather: 'dyn' }, store.get(SET_KEY) || {});
+      sens: 1, tiltInvert: false, ctl: 1, haptic: true, weather: 'dyn', voice: true }, store.get(SET_KEY) || {});
     const mobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && innerWidth < 1100);
     this.mobile = mobile;
     this.quality = this.settings.quality === 'auto' ? 3 : +this.settings.quality;
@@ -121,6 +122,8 @@ class Game {
     this.events = new Events(this);
     this.events.init();
     this.eco = new Economy(this);
+    this.graph = new RoadGraph(this.world);
+    this.ribbon = new NavRibbon(this.scene, this.world);
     this.spawnAtFestival();
     this.scenery.setTime(this.settings.time === 'dyn' ? 17.2 : TIME_FIXED[this.settings.time] ?? 17.2);
     this.updateEnv(true);
@@ -547,6 +550,9 @@ class Game {
     // Pause
     click('p-resume', () => this.resume());
     click('p-photo', () => this.openPhoto());
+    click('p-nav-race', () => { this.navToNextRace(); this.resume(); });
+    click('p-nav-fest', () => { this.setNav(FESTIVAL.x, FESTIVAL.z - 40, 'Festival'); this.resume(); });
+    click('nav-x', () => this.clearNav(true));
     click('ph-back', () => this.closePhoto());
     click('ph-filter', () => { this.photo.filter = (this.photo.filter + 1) % PHOTO_FILTERS.length; this.applyPhotoFilter(); });
     $('ph-shot').addEventListener('click', e => { e.preventDefault(); this.takePhoto(); });
@@ -746,6 +752,10 @@ class Game {
         if (st) { g.fillStyle = '#ffd23f'; g.font = '700 10px sans-serif'; g.fillText('★'.repeat(st), x, y + r + 8); }
         this.mapHits.push({ ev, x, y });
       }
+      if (this.nav) {
+        g.strokeStyle = '#1fe0ff'; g.lineWidth = 4; g.lineJoin = 'round'; g.beginPath();
+        this.nav.r.pts.forEach((p, i) => { const [x, y] = P(p.x, p.z); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke();
+      }
       if (this.waypoint) { const [x, y] = P(this.waypoint.x, this.waypoint.z); g.strokeStyle = '#ffd23f'; g.lineWidth = 3; g.beginPath(); g.arc(x, y, 16, 0, 7); g.stroke(); }
       const [px, py] = P(this.car.pos.x, this.car.pos.z);
       g.save(); g.translate(px, py); g.rotate(-this.car.yaw + Math.PI);
@@ -790,16 +800,15 @@ class Game {
       }
       if (ev.type === 'jump') { x = ev.x - Math.sin(ev.yaw) * 110; z = ev.z - Math.cos(ev.yaw) * 110; }
       this.teleport(x, z, yaw);
-      this.waypoint = null;
+      if (this.nav) this.clearNav();
       if (this.backTo === 'title') { this.backTo = 'game'; this.startDriving(); }
       else this.setState('free');
       this.last = performance.now();
     };
     $('mi-way').onclick = () => {
       this.audio.play('ui');
-      this.waypoint = { x: ev.type === 'jump' ? ev.ax : ev.x, z: ev.type === 'jump' ? ev.az : ev.z };
+      this.setNav(ev.type === 'jump' ? ev.ax : ev.x, ev.type === 'jump' ? ev.az : ev.z, ev.name);
       this.drawMap();
-      this.hud.toast('Wegpunkt gesetzt', 'info');
     };
   }
 
@@ -821,6 +830,7 @@ class Game {
     seg('s-autogas', s.autoGas ? '1' : '0', v => { s.autoGas = v === '1'; this.applyControlMode(); });
     seg('s-diff', s.difficulty, v => { s.difficulty = +v; });
     seg('s-time', s.time, v => { s.time = v; if (v !== 'dyn') this.scenery.setTime(TIME_FIXED[v]); });
+    seg('s-voice', s.voice ? '1' : '0', v => { s.voice = v === '1'; if (s.voice) say('Navi-Stimme an'); });
     seg('s-weather', s.weather, v => { s.weather = v; this.weather.t = 0; });
     seg('s-station', s.station, v => { s.station = +v; this.audio.setStation(s.station); });
     seg('s-tiltinv', s.tiltInvert ? '1' : '0', v => { s.tiltInvert = v === '1'; this.applyControlMode(); });
@@ -869,6 +879,93 @@ class Game {
     document.body.dataset.autogas = s.autoGas ? '1' : '0';
     document.body.dataset.touch = this.mobile || matchMedia('(pointer: coarse)').matches ? '1' : '0';
   }
+  // ---------------------------------------------------------------- Navigation
+  setNav(x, z, label) {
+    const c = this.car.pos, r = this.graph.route(c.x, c.z, x, z);
+    if (!r) { this.hud.toast('Keine Route gefunden', 'warn'); return; }
+    this.nav = { tx: x, tz: z, label, r, idx: 0, off: 0, said: {}, t: 0 };
+    this.waypoint = { x, z };
+    $('nav').hidden = false; document.body.classList.add('navon');
+    this.hud.toast(`🧭 Route zu ${label}: ${fmtDist(r.length)}`, 'info');
+    if (this.settings.voice) say(`Route zu ${label}. ${fmtDist(r.length).replace(',', ' Komma ')}.`);
+    this.updateNav(0, true);
+  }
+  clearNav(manual) {
+    this.nav = null; this.waypoint = null;
+    $('nav').hidden = true; document.body.classList.remove('navon');
+    this.ribbon.hide();
+    if (manual) this.hud.toast('Navigation beendet', 'info');
+  }
+  navToNextRace() {
+    const c = this.car.pos;
+    const list = this.events.list.filter(e => e.type === 'race');
+    list.sort((a, b) => ((this.save.stars[a.id] || 0) - (this.save.stars[b.id] || 0)) * 3000 + Math.hypot(a.x - c.x, a.z - c.z) - Math.hypot(b.x - c.x, b.z - c.z));
+    const ev = list[0];
+    if (ev) this.setNav(ev.x, ev.z, ev.name);
+  }
+  updateNav(dt, force) {
+    const race = this.events.race, car = this.car;
+    this.ribbon.tick(this.time, race ? 0.75 : 0.9);
+    // Im Rennen: Spur zeigt die Strecke voraus
+    if (race) {
+      $('nav').hidden = true;
+      if ((this.navT = (this.navT || 0) + dt) > 0.15 || force) {
+        this.navT = 0;
+        const pts = [];
+        for (let s = 2; s < 230 && race.prog + s < race.total + 5; s += 2.5) { const p = race.path.at(race.pS + s, {}); pts.push({ x: p.x, z: p.z }); }
+        this.ribbon.set(pts, 0xffd23f);
+      }
+      return;
+    }
+    const n = this.nav;
+    if (!n) { this.ribbon.hide(); return; }
+    $('nav').hidden = false;
+    n.t += dt;
+    if (n.t < 0.12 && !force) return;
+    n.t = 0;
+    const pts = n.r.pts, cum = n.r.cum;
+    // Position auf der Route (lokal suchen)
+    let bi = n.idx, bd = 1e9;
+    for (let i = Math.max(0, n.idx - 10); i < Math.min(pts.length, n.idx + 60); i++) {
+      const d = Math.hypot(pts[i].x - car.pos.x, pts[i].z - car.pos.z);
+      if (d < bd) { bd = d; bi = i; }
+    }
+    n.idx = bi;
+    const along = cum[bi], remain = n.r.length - along;
+    // vom Weg abgekommen → neu berechnen
+    if (bd > 45) { n.off += 0.12; if (n.off > 2) { this.hud.toast('Route wird neu berechnet', 'info'); if (this.settings.voice) say('Route wird neu berechnet.'); this.setNav(n.tx, n.tz, n.label); return; } }
+    else n.off = 0;
+    if (remain < 30 || Math.hypot(n.tx - car.pos.x, n.tz - car.pos.z) < 30) {
+      if (this.settings.voice) say('Sie haben Ihr Ziel erreicht.');
+      this.hud.toast('🏁 Ziel erreicht: ' + n.label, 'info');
+      this.clearNav(); return;
+    }
+    const k = n.r.steps.findIndex(st => st.at > along + 4);
+    const st = n.r.steps[k] || n.r.steps[n.r.steps.length - 1];
+    const dNext = Math.max(0, st.at - along);
+    $('nav-icon').textContent = TURN_ICON[st.turn];
+    $('nav-dist').textContent = fmtDist(dNext);
+    $('nav-text').textContent = turnText(st);
+    const eta = remain / Math.max(12, Math.abs(car.vf));
+    $('nav-total').innerHTML = `${fmtDist(remain)}<br>${Math.floor(eta / 60)}:${String(Math.round(eta % 60)).padStart(2, '0')} min`;
+    // Ansagen bei 400 m, 150 m und kurz davor
+    if (this.settings.voice) {
+      for (const [b, lim] of [['far', 400], ['mid', 150], ['now', 35]]) {
+        const key = k + b;
+        if (dNext < lim && dNext > lim - 120 && !n.said[key]) {
+          n.said[key] = 1;
+          const txt = st.turn === 'ziel' ? `In ${Math.round(dNext / 10) * 10} Metern ist das Ziel.` : b === 'now' ? turnText(st).replace(' – ', ' auf die ') : `In ${Math.round(dNext / 50) * 50} Metern ${turnText(st).replace(' – ', ' auf die ')}.`;
+          say(txt);
+          break;
+        }
+      }
+    }
+    // Pfeil-Spur: die nächsten ~260 m der Route
+    const ahead = [];
+    for (let i = bi; i < pts.length && cum[i] - along < 260; i++) ahead.push(pts[i]);
+    this.ribbon.set(ahead, 0x1fe0ff);
+  }
+
   // ---------------------------------------------------------------- Fotomodus
   openPhoto() {
     const car = this.car;
@@ -1126,6 +1223,7 @@ class Game {
     if (car.inWater > 1.3) { this.respawn(); this.skills.crash(); }
     this.skills.update(dt, car);
     this.events.update(dt);
+    this.updateNav(dt);
     this.kmAcc = (this.kmAcc || 0) + Math.hypot(car.vel.x, car.vel.z) * dt;
     if (this.kmAcc >= 100) { this.kmAcc -= 100; this.eco.track('km', 0.1); }
     this.spdT = (this.spdT || 0) + dt;
@@ -1138,13 +1236,14 @@ class Game {
     // HUD
     this.hud.speedo(car);
     const extra = { events: race ? null : this.events.list, ais: race ? race.ais : null, waypoint: race ? null : this.waypoint };
+    if (!race && this.nav) extra.navPts = this.nav.r.pts.slice(this.nav.idx, this.nav.idx + 500);
     if (race) {
       extra.route = { path: race.path, from: race.pS, len: Math.min(900, race.startS + race.total - race.pS + (race.path.closed ? 0 : 0)) };
       if (race.path.closed) extra.route.len = Math.min(900, race.total - race.prog);
       const cpS = race.cps[race.next];
       if (cpS !== undefined) { const p = race.path.at(race.startS + cpS, P); extra.cp = { x: p.x, z: p.z }; }
     }
-    if (this.waypoint && Math.hypot(this.waypoint.x - car.pos.x, this.waypoint.z - car.pos.z) < 25) { this.waypoint = null; this.hud.toast('Ziel erreicht', 'info'); }
+
     this.hud.minimap(dt, car, extra);
     if (this.nitroWas !== car.nitroOn) { this.nitroWas = car.nitroOn; if (car.nitroOn) this.audio.play('nitro'); document.body.classList.toggle('nitro', car.nitroOn); }
   }

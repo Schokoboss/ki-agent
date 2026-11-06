@@ -93,7 +93,7 @@ export class World {
     // Straßenhöhe: geglättetes Gelände, dann entlang der Straße mit Steigungsgrenze; Kreuzungen werden festgepinnt
     const R = boxBlur(boxBlur(H0, 10), 8);
     this.RF = new Float32Array(N * N);
-    const order = ['festival', 'kueste', 'stadt', 'markt', 'see', 'schnell', 'pass', 'wald', 'berg'];
+    const order = ['festival', 'kueste', 'stadt', 'markt', 'see', 'schnell', 'pass', 'wald', 'waldweg', 'berg'];
     this.rasterDisk(FESTIVAL.x, FESTIVAL.z, FESTIVAL.r, sampleGrid(R, FESTIVAL.x, FESTIVAL.z));
     for (const id of order) {
       const r = this.roadById[id], p = r.path;

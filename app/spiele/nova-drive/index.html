@@ -73,6 +73,12 @@
     <button id="h-full" class="hb" aria-label="Vollbild"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     <button id="h-pause" class="hb" aria-label="Pause">❚❚</button>
   </div>
+  <div id="nav" hidden>
+    <div id="nav-icon">↑</div>
+    <div class="nav-col"><div id="nav-dist"></div><div id="nav-text"></div></div>
+    <div id="nav-total"></div>
+    <button id="nav-x" aria-label="Navigation beenden">✕</button>
+  </div>
   <div id="gains"></div>
   <div id="skill"><div id="skill-name"></div><div class="sk-row"><span id="skill-total"></span><span id="skill-mult"></span></div></div>
   <div id="toasts"></div>
@@ -157,7 +163,7 @@
     <div id="mi-name"></div>
     <div id="mi-info" class="muted"></div>
     <div id="mi-stars"></div>
-    <div class="row"><button id="mi-travel" class="btn primary">Schnellreise</button><button id="mi-way" class="btn">Wegpunkt</button></div>
+    <div class="row"><button id="mi-travel" class="btn primary">Schnellreise</button><button id="mi-way" class="btn">🧭 Navi starten</button></div>
   </div>
 </section>
 
@@ -167,6 +173,7 @@
     <h2>Pause</h2>
     <button id="p-resume" class="btn primary">Weiter</button>
     <button id="p-photo" class="btn">📸 Fotomodus</button>
+    <div class="row nav-row"><button id="p-nav-race" class="btn">🧭 Nächstes Rennen</button><button id="p-nav-fest" class="btn">🧭 Festival</button></div>
     <button id="p-restart" class="btn">Rennen neu starten</button>
     <button id="p-abort" class="btn">Rennen abbrechen</button>
     <button id="p-daily" class="btn">Tagesaufgaben</button>
@@ -200,6 +207,8 @@
       <div class="seg" id="s-quality"><button data-v="auto">Auto (Ultra)</button><button data-v="0">Niedrig</button><button data-v="1">Mittel</button><button data-v="2">Hoch</button><button data-v="3">Ultra</button></div>
       <label>Tageszeit</label>
       <div class="seg" id="s-time"><button data-v="dyn">Wechselnd</button><button data-v="day">Tag</button><button data-v="sunset">Abend</button><button data-v="night">Nacht</button></div>
+      <label>Navi-Stimme</label>
+      <div class="seg" id="s-voice"><button data-v="1">An</button><button data-v="0">Aus</button></div>
       <label>Wetter</label>
       <div class="seg" id="s-weather"><button data-v="dyn">Wechselnd</button><button data-v="sun">Sonne</button><button data-v="rain">Regen</button></div>
       <label>Radio</label>

@@ -134,6 +134,11 @@ export class HUD {
       for (let s = 0; s <= len; s += 8) { const p = path.at(from + s, {}); const [x, z] = P(p.x, p.z); s ? g.lineTo(x, z) : g.moveTo(x, z); }
       g.stroke();
     }
+    if (extra.navPts && extra.navPts.length > 1) {
+      g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 9 / zoom * 1.4; g.lineCap = 'round'; g.lineJoin = 'round';
+      g.beginPath(); extra.navPts.forEach((p, i) => { const [x, z] = P(p.x, p.z); i ? g.lineTo(x, z) : g.moveTo(x, z); }); g.stroke();
+      g.strokeStyle = '#1fe0ff'; g.lineWidth = 5.5 / zoom * 1.4; g.stroke();
+    }
     const dot = (x, z, col, r) => { const [px, pz] = P(x, z); g.fillStyle = col; g.beginPath(); g.arc(px, pz, r / zoom, 0, 7); g.fill(); g.strokeStyle = '#fff'; g.lineWidth = 1.5 / zoom; g.stroke(); };
     if (extra.events) for (const ev of extra.events) dot(ev.type === 'jump' ? ev.ax : ev.x, ev.type === 'jump' ? ev.az : ev.z, EVENT_COLORS[ev.type], ev.type === 'race' ? 6 : 4.5);
     if (extra.ais) for (const a of extra.ais) dot(a.pos.x, a.pos.z, '#ff9a1f', 4);
