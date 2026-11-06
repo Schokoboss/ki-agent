@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nova Drive – Start</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+  :root { --bg: #0b0a18; --panel: #16142a; --text: #f5f3ff; --muted: #b9b4d6; --pink: #ff3d7f; --violet: #7a6bff; --cyan: #1fd1ff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; background: radial-gradient(ellipse at 50% 120%, #ff3d7f44, transparent 60%), var(--bg);
+         color: var(--text); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { width: 100%; max-width: 760px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: center; }
+  @media (max-width: 680px) { main { grid-template-columns: 1fr; } }
+  h1 { margin: 0; font-size: 44px; font-style: italic; line-height: 1; }
+  h1 .a { color: var(--pink); } h1 .b { color: var(--cyan); }
+  p { color: var(--muted); margin: 10px 0; }
+  a.play { display: inline-block; margin-top: 12px; padding: 14px 24px; border-radius: 14px; font-weight: 700; font-size: 18px; color: #fff; text-decoration: none;
+           background: linear-gradient(100deg, var(--pink), var(--violet)); }
+  .card { background: var(--panel); border-radius: 22px; padding: 20px; text-align: center; }
+  .qr { background: #fff; border-radius: 16px; padding: 14px; width: 260px; max-width: 100%; aspect-ratio: 1; margin: 0 auto; display: grid; place-items: center; color: #333; }
+  .qr svg { width: 100%; height: auto; }
+  code { display: block; margin-top: 12px; font-size: 18px; color: var(--cyan); word-break: break-all; }
+  ol { text-align: left; color: var(--muted); padding-left: 20px; margin: 12px 0 0; font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <section>
+    <h1><span class="a">NOVA</span> <span class="b">DRIVE</span></h1>
+    <p>Läuft lokal auf diesem Laptop – ohne Anmeldung, ohne Internet-Server.</p>
+    <a class="play" href="index.html">Am Laptop spielen ▶</a>
+    <p style="font-size:14px">Vollbild am Laptop: <b>F11</b>, Taste <b>F</b> oder der Vollbild-Knopf oben rechts im Spiel.</p>
+  </section>
+  <section class="card">
+    <b>Am Handy spielen</b>
+    <div class="qr" id="qr">QR-Code …</div>
+    <code id="url"></code>
+    <ol>
+      <li>Handy im <b>selben WLAN</b> wie der Laptop.</li>
+      <li>QR-Code mit der Kamera scannen (oder Adresse eintippen).</li>
+      <li>Quer halten, „Fahren“ tippen – das Spiel geht in Vollbild.</li>
+      <li>Tipp: Im Browser-Menü „Zum Startbildschirm hinzufügen“.</li>
+    </ol>
+  </section>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script>
+  const url = decodeURIComponent(location.hash.slice(1)) || location.origin + '/';
+  document.getElementById('url').textContent = url;
+  const box = document.getElementById('qr');
+  try {
+    const qr = qrcode(0, 'M'); qr.addData(url); qr.make();
+    box.innerHTML = qr.createSvgTag({ cellSize: 6, margin: 2, scalable: true });
+  } catch { box.textContent = 'Kein QR-Code ohne Internet – Adresse unten eintippen.'; }
+</script>
+</body>
+</html>

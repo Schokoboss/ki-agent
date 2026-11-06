@@ -1,0 +1,18 @@
+NOVA DRIVE – lokal spielen
+==========================
+
+1. Ordner entpacken (z. B. auf den Desktop).
+2. Doppelklick auf „Nova Drive starten.cmd“.
+   Ein schwarzes Fenster geht auf – offen lassen, solange du spielst.
+   Fragt Windows nach Netzwerkzugriff: „Zulassen“ (für das Handy nötig).
+3. Der Browser öffnet eine Startseite:
+   - „Am Laptop spielen“ – Vollbild mit F11 oder Taste F.
+   - Am Handy: im selben WLAN den QR-Code scannen, quer halten, „Fahren“ tippen.
+
+Ohne Windows: im Ordner „python3 starten.py“ ausführen.
+
+Mit Nova (KI-Agent): Ordner nach  ki-agent\app\spiele\nova-drive  kopieren.
+Dann läuft das Spiel auch unter  http://localhost:8765/spiele/nova-drive/
+
+Steuerung Handy: ◀ ▶ lenken, ▲ Gas, ▼ Bremse, HB Handbremse (driften), N₂O Nitro.
+Tastatur: Pfeile/WASD, Leertaste Handbremse, Shift Nitro, C Kamera, F Vollbild, M Karte, R zurücksetzen, Esc Pause.

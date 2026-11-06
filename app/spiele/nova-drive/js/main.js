@@ -376,6 +376,16 @@ class Game {
   }
   resume() { this.setState(this.prevState || 'free'); this.last = performance.now(); }
 
+  async toggleFull() {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else {
+        await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+        if (screen.orientation && screen.orientation.lock && this.mobile) await screen.orientation.lock('landscape').catch(() => {});
+      }
+    } catch { this.hud.toast('Vollbild geht hier nicht – am Laptop F11 drücken', 'warn'); }
+  }
+
   async goFullscreen() {
     try {
       if (this.mobile && !document.fullscreenElement && document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
@@ -410,6 +420,7 @@ class Game {
     click('h-cam', () => this.cycleCam());
     click('h-radio', () => this.nextStation());
     click('h-reset', () => this.respawn());
+    click('h-full', () => this.toggleFull());
     click('prompt-go', () => { const ev = this.events.byId($('prompt').dataset.id); if (ev) this.events.startRace(ev); });
     // Pause
     click('p-resume', () => this.resume());
@@ -757,6 +768,7 @@ class Game {
     if (this.input.took('KeyM') && this.state === 'free') { this.prevState = 'free'; this.state = 'paused'; this.backTo = 'game'; this.showScreen('map'); }
     if (this.input.took('KeyR') && (this.state === 'free' || this.state === 'race')) this.respawn();
     if (this.input.took('KeyT')) this.nextStation();
+    if (this.input.took('KeyF')) this.toggleFull();
     // Tageszeit
     if (this.settings.time === 'dyn' && this.state !== 'paused') this.scenery.setTime(this.scenery.time + dt / 40);
     if (this.state === 'free' || this.state === 'race') this.updateDrive(dt, inp);
