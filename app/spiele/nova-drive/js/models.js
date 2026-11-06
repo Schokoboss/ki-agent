@@ -7,7 +7,8 @@ import { mergeGeometries } from '../lib/utils/BufferGeometryUtils.js';
 export const WORLD_MODELS = ['pine_a', 'pine_b', 'leaf_a', 'leaf_b', 'palm', 'rock_a', 'rock_b', 'rock_c',
   'house_a', 'house_b', 'house_c', 'house_d', 'house_e', 'house_f', 'farmhouse', 'barn',
   'lamp', 'fence', 'cone', 'hay', 'poster', 'ramp', 'stage', 'tent', 'ferris', 'arch', 'tower',
-  'person_a', 'person_b', 'boat', 'turbine'];
+  'person_a', 'person_b', 'boat', 'turbine',
+  'prock_a', 'prock_b', 'prock_c']; // prock_*: fotografierte Felsen (Poly Haven, CC0) – werkstatt/felsen.py
 
 const LIB = {};
 // In der Handy-Einzeldatei stecken die Modelle eingebettet in window.__NOVA_MODELS (sonst normale Dateien)
@@ -69,6 +70,20 @@ export function merged(name, { mat = null, notMat = null, node = null, notNode =
   const out = mergeGeometries(list);
   out.computeBoundingSphere();
   out.computeBoundingBox();
+  return out;
+}
+
+// Erstes Mesh eines Modells mit UV und eigenem (texturiertem) Material, z. B. für Foto-Felsen
+export function meshOf(name) {
+  const root = LIB[name];
+  if (!root) return null;
+  let out = null;
+  root.traverse(o => {
+    if (out || !o.isMesh) return;
+    const geo = toFloat(o.geometry).applyMatrix4(o.matrixWorld);
+    geo.computeBoundingSphere();
+    out = { geo, mat: o.material.clone() };
+  });
   return out;
 }
 

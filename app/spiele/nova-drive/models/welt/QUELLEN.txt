@@ -1,0 +1,4 @@
+prock_*: fotografierte Felsen von Poly Haven – Lizenz CC0 (gemeinfrei), aufbereitet mit werkstatt/felsen.py
+prock_a: https://polyhaven.com/a/boulder_01 (CC0)
+prock_b: https://polyhaven.com/a/namaqualand_boulder_02 (CC0)
+prock_c: https://polyhaven.com/a/rock_moss_set_01 (CC0)

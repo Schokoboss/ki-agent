@@ -6,7 +6,7 @@ NOVA DRIVE – lokal spielen
    Ein schwarzes Fenster geht auf – offen lassen, solange du spielst.
    Fragt Windows nach Netzwerkzugriff: „Zulassen“ (für das Handy nötig).
 3. Der Browser öffnet eine Startseite:
-   - „Am Laptop spielen“ – Vollbild mit F11 oder Taste F.
+   - „Am PC spielen“ – startet den PC-Modus (Tastatur, Maus, Gamepad). Vollbild mit Taste F.
    - Am Handy: im selben WLAN den QR-Code scannen, quer halten, „Fahren“ tippen.
 
 Ohne Windows: im Ordner „python3 starten.py“ ausführen.
@@ -15,4 +15,11 @@ Mit Nova (KI-Agent): Ordner nach  ki-agent\app\spiele\nova-drive  kopieren.
 Dann läuft das Spiel auch unter  http://localhost:8765/spiele/nova-drive/
 
 Steuerung Handy: ◀ ▶ lenken, ▲ Gas, ▼ Bremse, HB Handbremse (driften), N₂O Nitro.
-Tastatur: Pfeile/WASD, Leertaste Handbremse, Shift Nitro, C Kamera, F Vollbild, M Karte, R zurücksetzen, Esc Pause.
+
+PC-Modus (automatisch am PC, sonst Einstellungen → Gerät → PC, oder Adresse mit ?pc):
+  Tastatur: W/↑ Gas, S/↓ Bremse, A D/← → lenken (baut sich weich auf), Leertaste Handbremse,
+            Shift Nitro, X Rückblick, C Kamera, Enter Event starten, M Karte, N Navi zum nächsten Rennen,
+            G Fotomodus, R zurücksetzen, T Radio, F Vollbild, H Tastenhilfe, Esc Pause/zurück.
+  Maus:     im Bild ziehen = umsehen (federt zurück), Mausrad = Kamera-Abstand.
+  Gamepad:  RT Gas, LT Bremse, Stick lenken, A Handbremse, B/RB Nitro, LB Rückblick, Y Kamera,
+            X Event starten, Back Karte, Start Pause. Im Menü: Steuerkreuz wählen, A bestätigen, B zurück.

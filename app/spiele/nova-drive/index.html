@@ -94,6 +94,8 @@
   </div>
   <canvas id="speedo" width="200" height="200"></canvas>
   <div id="fps" hidden></div>
+  <!-- PC: Tastenhilfe (H blendet aus) -->
+  <div id="keys"></div>
   <!-- Touch-Steuerung -->
   <div id="controls">
     <div id="steer-btns">
@@ -125,6 +127,7 @@
     </div>
   </div>
   <div class="foot">Offene Insel · 9 Rennen · Blitzer · Driftzonen · Schanzen · 20 Plakate · Freunde per Link herausfordern</div>
+  <div class="pc-hint">🖥 PC-Modus · <kbd>Enter</kbd> Fahren · Tastatur, Maus &amp; Gamepad · <kbd>H</kbd> Tastenhilfe</div>
 </section>
 
 <!-- Startauto -->
@@ -190,15 +193,17 @@
   <div class="panel wide">
     <div class="g-top"><button class="btn back" data-back>‹ Zurück</button><h2>Einstellungen</h2></div>
     <div class="set">
-      <label>Lenkung</label>
-      <div class="seg" id="s-control"><button data-v="buttons">Tasten ◀ ▶</button><button data-v="slider">Wischen</button><button data-v="tilt">Neigen</button></div>
+      <label>Gerät</label>
+      <div class="seg" id="s-device"><button data-v="auto">Automatisch</button><button data-v="phone">📱 Handy</button><button data-v="pc">🖥 PC</button></div>
+      <label class="touch-only">Lenkung</label>
+      <div class="seg touch-only" id="s-control"><button data-v="buttons">Tasten ◀ ▶</button><button data-v="slider">Wischen</button><button data-v="tilt">Neigen</button></div>
       <label>Lenkgefühl</label><div class="rangebox"><span>sanft</span><input id="s-sens" type="range" min="0.5" max="1.5" step="0.05"><span>direkt</span></div>
-      <label>Neigen</label>
-      <div class="seg" id="s-tiltinv"><button data-v="0">Normal</button><button data-v="1">Umgekehrt</button><button id="s-calib" type="button">Mitte setzen</button></div>
-      <label>Tasten</label>
-      <div class="seg" id="s-ctl"><button data-v="0.85">Klein</button><button data-v="1">Normal</button><button data-v="1.2">Groß</button></div>
-      <label>Vibration</label>
-      <div class="seg" id="s-haptic"><button data-v="1">An</button><button data-v="0">Aus</button></div>
+      <label class="touch-only">Neigen</label>
+      <div class="seg touch-only" id="s-tiltinv"><button data-v="0">Normal</button><button data-v="1">Umgekehrt</button><button id="s-calib" type="button">Mitte setzen</button></div>
+      <label class="touch-only">Tasten</label>
+      <div class="seg touch-only" id="s-ctl"><button data-v="0.85">Klein</button><button data-v="1">Normal</button><button data-v="1.2">Groß</button></div>
+      <label class="touch-only">Vibration</label>
+      <div class="seg touch-only" id="s-haptic"><button data-v="1">An</button><button data-v="0">Aus</button></div>
       <label>Auto-Gas</label>
       <div class="seg" id="s-autogas"><button data-v="0">Aus</button><button data-v="1">An</button></div>
       <label>Gegner</label>

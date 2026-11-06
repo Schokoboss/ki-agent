@@ -356,3 +356,28 @@ body.nitro #speedo { filter: drop-shadow(0 0 14px #1fd1ff); }
   .set { grid-template-columns: 76px 1fr; gap: 6px 10px; }
   .seg button { padding: 6px 8px; min-height: 34px; font-size: 12px; }
 }
+
+/* ---------------- PC-Modus (Tastatur, Maus, Gamepad) */
+#keys { display: none; position: absolute; left: calc(12px + var(--sl)); bottom: calc(12px + var(--sb)); background: rgba(14, 12, 26, .62);
+  border: 1px solid var(--line); border-radius: 14px; padding: 8px 12px; font-size: 12px; line-height: 1.25; backdrop-filter: blur(6px);
+  display: none; grid-template-columns: auto auto; gap: 3px 14px; pointer-events: none; max-width: 420px; }
+body[data-pc="1"] #keys { display: grid; }
+#keys .k-head { grid-column: 1 / -1; font-weight: 700; margin-bottom: 4px; display: flex; justify-content: space-between; gap: 14px; }
+#keys .k-head span { color: var(--muted); font-weight: 500; }
+#keys .k-row { display: flex; gap: 8px; align-items: center; white-space: nowrap; }
+#keys.min { grid-template-columns: auto; padding: 6px 10px; }
+#keys.min .k-row { display: none; }
+#keys.min .k-head span { display: none; }
+#keys.min .k-head::after { content: 'H = Tasten'; color: var(--muted); font-weight: 500; }
+kbd { display: inline-block; min-width: 18px; padding: 1px 6px; border-radius: 6px; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.22);
+  border-bottom-width: 2px; font: 600 11px/1.4 inherit; text-align: center; color: #fff; }
+.pc-hint { display: none; position: absolute; bottom: calc(40px + var(--sb)); left: 0; right: 0; text-align: center; color: var(--muted); font-size: 13px; }
+body[data-pc="1"] .pc-hint { display: block; }
+body[data-pc="1"] .touch-only { display: none; }
+body[data-pc="1"] button { cursor: pointer; }
+body[data-pc="1"] .btn:hover, body[data-pc="1"] .hb:hover, body[data-pc="1"] .g-card:hover, body[data-pc="1"] .seg button:hover { filter: brightness(1.18); }
+body[data-pc="1"] #c { cursor: grab; }
+body[data-pc="1"] #c:active { cursor: grabbing; }
+button:focus-visible, input:focus-visible { outline: 3px solid var(--violet); outline-offset: 2px; }
+body[data-pc="1"] #nav, body[data-pc="1"] #prompt { font-size: 1.04em; }
+body[data-pc="1"] #prompt-go::after { content: ' · Enter'; font-size: .8em; opacity: .75; }

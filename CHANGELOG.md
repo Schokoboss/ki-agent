@@ -12,6 +12,12 @@ Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 - Garage nach Preis sortiert. Motorsound je nach Autotyp.
 - Echte Foto-Oberflächen von Poly Haven (CC0): Wiese, Fels, Sand, Asphalt und Schotter mit Normal-Maps – Boden und
   Straßen haben jetzt Relief im Licht (Felshänge dreiseitig projiziert). Laden/Aufbereiten: `werkstatt/texturen.py`.
+- Fotografierte Felsen von Poly Haven (CC0) statt Low-Poly-Felsen: in Blender auf ~1000 Dreiecke reduziert,
+  Fototextur + Normal-Map (`werkstatt/felsen.py`).
+- **PC-Modus** (automatisch am PC, Einstellungen → Gerät, oder `?pc`): keine Touch-Tasten, Tastatur-Lenkung baut sich
+  weich auf, Maus zum Umsehen (federt zurück) und Mausrad-Zoom, Rückblick (X/LB), Enter startet Events, N Navi,
+  G Fotomodus, H Tastenhilfe (wechselt automatisch zu Gamepad-Belegung), Esc = zurück, Gamepad steuert auch Menüs,
+  Hover-Effekte. Starter-Seite: „Am PC spielen“.
 - Navigation: Route zu jedem Ziel über das Straßennetz (Karte → „🧭 Navi starten“, Pause → Navi), Pfeile auf der Straße,
   Abbiegehinweise mit Entfernung, Sprachansagen, Neuberechnung beim Verfahren; Rennstrecke wird vorab angezeigt.
 - Grafik Ultra, Ladebildschirm mit Fortschritt, vorberechnetes Licht (siehe frühere Commits).

@@ -4,7 +4,7 @@ import { HALF, N, CELL, FESTIVAL } from './terrain.js';
 import { part, merge, Builder } from './geo.js';
 import { clamp, lerp, smoothstep, fbm, perlin, mulberry32, breathe } from './util.js';
 import { drawLed } from './textures.js';
-import { has, merged, clone, nodeGeometry, scene as modelScene } from './models.js';
+import { has, merged, clone, nodeGeometry, meshOf, scene as modelScene } from './models.js';
 
 const lin = v => Math.pow(v, 2.2);
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
@@ -997,6 +997,7 @@ export class Scenery {
   }
 
   buildRocksM() {
+    if (this.q >= 1 && has('prock_a') && this.buildRocksPhoto()) return;
     if (!has('rock_a')) return this.buildRocks();
     const geos = ['rock_a', 'rock_b', 'rock_c'].map(n => merged(n));
     const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
@@ -1015,6 +1016,34 @@ export class Scenery {
       im.castShadow = this.q >= 1; im.receiveShadow = true;
       this.scene.add(im);
     }
+  }
+
+  // Fotografierte Felsen (Poly Haven, CC0): eigene Textur + Normal-Map, je Sorte ein InstancedMesh
+  buildRocksPhoto() {
+    const kinds = ['prock_a', 'prock_b', 'prock_c'].map(n => meshOf(n)).filter(Boolean);
+    if (!kinds.length) return false;
+    const aniso = Math.min(8, this.T.ground ? this.T.ground.anisotropy : 4);
+    for (const k of kinds) {
+      const m = k.mat;
+      m.roughness = 0.92; m.metalness = 0; m.envMapIntensity = 0.45;
+      for (const t of [m.map, m.normalMap]) if (t) { t.anisotropy = aniso; t.needsUpdate = true; }
+    }
+    const rnd = mulberry32(9);
+    kinds.forEach((k, v) => {
+      const list = this.world.rocks.filter((_, i) => i % kinds.length === v);
+      if (!list.length) return;
+      const im = new THREE.InstancedMesh(k.geo, k.mat, list.length);
+      list.forEach((r, i) => {
+        _m.compose(_p.set(r.x, r.y - r.s * 0.15, r.z), _q.setFromEuler(_e.set(r.tilt * 0.5, r.rot, 0)), _s.set(r.s * 0.95, r.s * (0.8 + rnd() * 0.4), r.s * 0.95));
+        im.setMatrixAt(i, _m);
+        const c = 0.9 + rnd() * 0.22;
+        im.setColorAt(i, _c.setRGB(c, c * (0.97 + rnd() * 0.05), c * (0.95 + rnd() * 0.05)));
+      });
+      im.computeBoundingSphere();
+      im.castShadow = true; im.receiveShadow = true;
+      this.scene.add(im);
+    });
+    return true;
   }
 
   buildBuildingsM() {

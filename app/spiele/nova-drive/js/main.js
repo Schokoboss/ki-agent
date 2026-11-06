@@ -36,9 +36,14 @@ class Game {
   constructor() {
     this.save = Object.assign({ credits: 25000, fans: 0, owned: {}, current: null, best: {}, stars: {}, posters: [], races: 0, wins: 0 }, store.get(SAVE_KEY) || {});
     this.settings = Object.assign({ quality: 'auto', control: 'buttons', autoGas: false, sfx: 0.8, music: 0.45, station: 0, cam: 0, name: '', difficulty: 1, time: 'dyn',
-      sens: 1, tiltInvert: false, ctl: 1, haptic: true, weather: 'dyn', voice: true }, store.get(SET_KEY) || {});
+      sens: 1, tiltInvert: false, ctl: 1, haptic: true, weather: 'dyn', voice: true, device: 'auto', keyHelp: true }, store.get(SET_KEY) || {});
+    // ?pc in der Adresse (z. B. vom Starter am Laptop) schaltet den PC-Modus fest ein
+    const q = new URLSearchParams(location.search);
+    if (q.has('pc')) this.settings.device = 'pc';
+    if (q.has('handy')) this.settings.device = 'phone';
     const mobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && innerWidth < 1100);
     this.mobile = mobile;
+    this.orbit = { yaw: 0, pitch: 0, zoom: 1, drag: false, t: 0 };
     this.quality = this.settings.quality === 'auto' ? 3 : +this.settings.quality;
     this.state = 'loading';
     this.screen = null;
@@ -129,6 +134,7 @@ class Game {
     this.scenery.setTime(this.settings.time === 'dyn' ? 17.2 : TIME_FIXED[this.settings.time] ?? 17.2);
     this.updateEnv(true);
     this.bindUI();
+    this.bindMouseCam();
     this.hud.money();
     this.updatePosters();
     // Shader vorbereiten und die Welt einmal von mehreren Orten aus rendern → kein Ruckeln beim Losfahren
@@ -837,6 +843,7 @@ class Game {
     seg('s-station', s.station, v => { s.station = +v; this.audio.setStation(s.station); });
     seg('s-tiltinv', s.tiltInvert ? '1' : '0', v => { s.tiltInvert = v === '1'; this.applyControlMode(); });
     seg('s-ctl', s.ctl, v => { s.ctl = +v; this.resize(); });
+    seg('s-device', s.device, v => { s.device = v; this.applyControlMode(); this.hud.toast(this.pc ? 'PC-Modus: Tastatur, Maus & Gamepad' : 'Handy-Modus: Touch-Steuerung', 'info'); });
     seg('s-haptic', s.haptic ? '1' : '0', v => { s.haptic = v === '1'; this.applyControlMode(); });
     $('s-calib').onclick = () => { this.input.calibrate(); this.audio.play('ui'); this.hud.toast(this.input.tiltOk ? 'Neigung: aktuelle Haltung ist jetzt geradeaus' : 'Erst „Lenkung: Neigen“ wählen', 'info'); };
     const sens = $('s-sens');
@@ -872,6 +879,11 @@ class Game {
       location.reload();
     };
   }
+  // PC-Modus: Tastatur/Maus/Gamepad, keine Touch-Tasten, Tastenhilfe. „Auto“ erkennt Maus vs. Touchscreen.
+  get pc() {
+    const d = this.settings.device;
+    return d === 'pc' || (d === 'auto' && !this.mobile && !matchMedia('(pointer: coarse)').matches);
+  }
   applyControlMode() {
     const s = this.settings;
     this.input.mode = s.control; this.input.autoGas = s.autoGas;
@@ -879,7 +891,23 @@ class Game {
     if (this.car) this.car.sens = s.sens;
     document.body.dataset.control = s.control;
     document.body.dataset.autogas = s.autoGas ? '1' : '0';
-    document.body.dataset.touch = this.mobile || matchMedia('(pointer: coarse)').matches ? '1' : '0';
+    document.body.dataset.touch = this.pc ? '0' : (s.device === 'phone' || this.mobile || matchMedia('(pointer: coarse)').matches ? '1' : '0');
+    document.body.dataset.pc = this.pc ? '1' : '0';
+    this.renderKeyHelp();
+  }
+  renderKeyHelp() {
+    const el = $('keys');
+    if (!el) return;
+    const pad = this.input.padUsed;
+    const rows = pad
+      ? [['RT', 'Gas'], ['LT', 'Bremse'], ['Stick', 'Lenken'], ['A', 'Handbremse'], ['B / RB', 'Nitro'], ['LB', 'Rückblick'], ['Y', 'Kamera'], ['Back', 'Karte'], ['X', 'Event starten'], ['Start', 'Pause']]
+      : [['W ↑', 'Gas'], ['S ↓', 'Bremse'], ['A D ← →', 'Lenken'], ['Leertaste', 'Handbremse'], ['Shift', 'Nitro'], ['X', 'Rückblick'], ['C', 'Kamera'],
+        ['Maus ziehen', 'Umsehen'], ['Mausrad', 'Zoom'], ['Enter', 'Event starten'], ['M', 'Karte'], ['N', 'Navi zum Rennen'], ['G', 'Fotomodus'],
+        ['R', 'Zurücksetzen'], ['T', 'Radio'], ['F', 'Vollbild'], ['Esc', 'Pause']];
+    el.innerHTML = `<div class="k-head">${pad ? '🎮 Gamepad' : '⌨️ Tastatur'} <span>H blendet aus</span></div>` +
+      rows.map(([k, t]) => `<div class="k-row"><kbd>${k}</kbd><span>${t}</span></div>`).join('');
+    this._padShown = pad;
+    el.classList.toggle('min', !this.settings.keyHelp);
   }
   // ---------------------------------------------------------------- Navigation
   setNav(x, z, label) {
@@ -1145,6 +1173,68 @@ class Game {
     this.events.startRace(ev, { car: CARS[c.car] ? CARS[c.car].id : 'kestrel', color: c.color, time: c.time, pts: c.pts, rate: 5, name: c.name });
   }
 
+  // ---------------------------------------------------------------- PC: Tastenkürzel, Gamepad im Menü, Maus-Kamera
+  pcKeys() {
+    const I = this.input, drive = this.state === 'free' || this.state === 'race';
+    if (I.took('KeyH') || I.took('F1')) { this.settings.keyHelp = !this.settings.keyHelp; this.saveSettings(); this.renderKeyHelp(); }
+    if (I.padUsed !== this._padShown) this.renderKeyHelp();
+    const promptOpen = !$('prompt').hidden && drive && !this.events.race;
+    const enter = I.took('Enter') | I.took('NumpadEnter'), padX = I.took('PadX');
+    if ((enter || padX) && promptOpen) $('prompt-go').click();
+    else if (enter && this.state === 'title' && this.screen === 'title') $('t-drive').click();
+    if (I.took('KeyN') && this.state === 'free') this.navToNextRace();
+    if (I.took('KeyG') && drive && !this.events.race) { this.prevState = this.state; this.openPhoto(); }
+    // Gamepad / Pfeiltasten im Menü
+    if (!drive && this.screen) {
+      const dir = I.took('PadUp') ? [0, -1] : I.took('PadDown') ? [0, 1] : I.took('PadLeft') ? [-1, 0] : I.took('PadRight') ? [1, 0] : null;
+      if (dir) this.menuMove(dir);
+      if (I.took('PadA')) { const f = document.activeElement; if (f && f.tagName === 'BUTTON' && f.offsetParent) f.click(); else this.menuMove([0, 1]); }
+      if (I.took('PadB')) { const b = document.querySelector(`#${this.screen} [data-back], #${this.screen} .back`); if (b && b.offsetParent) b.click(); else if (this.screen === 'pause') this.resume(); }
+    } else for (const k of ['PadUp', 'PadDown', 'PadLeft', 'PadRight', 'PadA', 'PadB']) I.took(k);
+  }
+  // nächsten sichtbaren Knopf in Richtung dir fokussieren (räumliche Navigation)
+  menuMove([dx, dy]) {
+    const root = $(this.screen);
+    if (!root) return;
+    const list = [...root.querySelectorAll('button, input[type=range]')].filter(b => b.offsetParent && !b.disabled);
+    if (!list.length) return;
+    const cur = document.activeElement && list.includes(document.activeElement) ? document.activeElement : null;
+    if (!cur) { list[0].focus(); return; }
+    const a = cur.getBoundingClientRect(), ax = a.left + a.width / 2, ay = a.top + a.height / 2;
+    let best = null, bd = 1e9;
+    for (const b of list) {
+      if (b === cur) continue;
+      const r = b.getBoundingClientRect(), x = r.left + r.width / 2 - ax, y = r.top + r.height / 2 - ay;
+      const along = x * dx + y * dy, side = Math.abs(x * dy - y * dx);
+      if (along <= 4) continue;
+      const d = along + side * 2.2;
+      if (d < bd) { bd = d; best = b; }
+    }
+    if (best) { best.focus(); best.scrollIntoView({ block: 'nearest', inline: 'nearest' }); this.audio.play('ui'); }
+  }
+  bindMouseCam() {
+    const c = $('c'), o = this.orbit;
+    let px = 0, py = 0;
+    c.addEventListener('pointerdown', e => {
+      if (e.pointerType !== 'mouse' || !(this.state === 'free' || this.state === 'race')) return;
+      o.drag = true; px = e.clientX; py = e.clientY;
+      try { c.setPointerCapture(e.pointerId); } catch {}
+    });
+    c.addEventListener('pointermove', e => {
+      if (!o.drag) return;
+      o.yaw -= (e.clientX - px) * 0.0065; o.pitch = clamp(o.pitch + (e.clientY - py) * 0.004, -0.25, 0.9);
+      px = e.clientX; py = e.clientY; o.t = 0;
+    });
+    const up = () => { o.drag = false; o.t = 0; };
+    c.addEventListener('pointerup', up); c.addEventListener('pointercancel', up);
+    c.addEventListener('contextmenu', e => e.preventDefault());
+    c.addEventListener('wheel', e => {
+      if (!(this.state === 'free' || this.state === 'race')) return;
+      e.preventDefault();
+      o.zoom = clamp(o.zoom * (1 + Math.sign(e.deltaY) * 0.09), 0.65, 1.9);
+    }, { passive: false });
+  }
+
   // ---------------------------------------------------------------- Schleife
   loop(now) {
     requestAnimationFrame(t => this.loop(t));
@@ -1155,12 +1245,19 @@ class Game {
     this.time += dt;
     this.perf(dt);
     const inp = this.input.poll();
-    if (this.input.took('Escape') || this.input.took('KeyP')) { if (this.state === 'paused' && this.screen === 'pause') this.resume(); else this.pause(); }
+    if (this.input.took('Escape') || this.input.took('KeyP')) {
+      const drive = this.state === 'free' || this.state === 'race';
+      if (this.state === 'paused' && this.screen === 'pause') this.resume();
+      else if (this.state === 'photo') this.closePhoto();
+      else if (!drive && this.screen) { const b = document.querySelector(`#${this.screen} [data-back]`); if (b && b.offsetParent) b.click(); }
+      else this.pause();
+    }
     if (this.input.took('KeyC')) this.cycleCam();
     if (this.input.took('KeyM') && this.state === 'free') { this.prevState = 'free'; this.state = 'paused'; this.backTo = 'game'; this.showScreen('map'); }
     if (this.input.took('KeyR') && (this.state === 'free' || this.state === 'race')) this.respawn();
     if (this.input.took('KeyT')) this.nextStation();
     if (this.input.took('KeyF')) this.toggleFull();
+    this.pcKeys();
     // Tageszeit
     this.updateWeather(dt);
     this.scenery.setTime(this.scenery.time + (this.settings.time === 'dyn' && this.state !== 'paused' ? dt / 40 : 0));
@@ -1413,19 +1510,25 @@ class Game {
     const velYaw = Math.hypot(car.vel.x, car.vel.z) > 4 ? Math.atan2(car.vel.x, car.vel.z) : car.yaw;
     const target = car.vf < -2 ? car.yaw : car.yaw + wrapAngle(velYaw - car.yaw) * 0.35;
     this.camYaw += wrapAngle(target - this.camYaw) * (1 - Math.exp(-(this.camMode === 2 ? 12 : 5) * dt));
-    const sy = Math.sin(this.camYaw), cy = Math.cos(this.camYaw);
+    // Maus-Umsehen federt nach 1,2 s zurück; Rückblick (X / LB) dreht die Kamera sofort nach hinten
+    const o = this.orbit;
+    if (!o.drag) { o.t += dt; if (o.t > 1.2) { o.yaw = damp(o.yaw, 0, 3, dt); o.pitch = damp(o.pitch, 0, 3, dt); } }
+    const look = inp && inp.look;
+    const yawC = this.camYaw + o.yaw + (look ? Math.PI : 0);
+    const sy = Math.sin(yawC), cy = Math.cos(yawC);
     let fov = 60 + clamp(spd / topMs, 0, 1.1) * 16 + (car.nitroOn ? 7 : 0);
     if (this.camMode === 2) {
+      const hy = car.yaw + o.yaw + (look ? Math.PI : 0);
       cam.position.set(car.pos.x + Math.sin(car.yaw) * 0.2, car.pos.y + car.dims.H * 0.92 + 0.12, car.pos.z + Math.cos(car.yaw) * 0.2);
-      _v.set(car.pos.x + Math.sin(car.yaw) * 30, car.pos.y + 1.0 + car.up.z * 0, car.pos.z + Math.cos(car.yaw) * 30);
+      _v.set(car.pos.x + Math.sin(hy) * 30, car.pos.y + 1.0 + car.up.z * 0, car.pos.z + Math.cos(hy) * 30);
       _v.y = this.world.heightAt(_v.x, _v.z) + 1.2;
       _v.y = lerp(car.pos.y + 0.8, _v.y, 0.5);
       cam.lookAt(_v);
       fov += 6;
     } else {
       const far = this.camMode === 1;
-      const dist = (far ? 9.2 : 6.4) + clamp(spd / topMs, 0, 1) * (far ? 1.6 : 1.1) + car.dims.L * 0.2;
-      const hgt = far ? 3.3 : 2.35;
+      const dist = ((far ? 9.2 : 6.4) + clamp(spd / topMs, 0, 1) * (far ? 1.6 : 1.1) + car.dims.L * 0.2) * o.zoom;
+      const hgt = (far ? 3.3 : 2.35) * Math.sqrt(o.zoom) + o.pitch * dist;
       const tx = car.pos.x - sy * dist, tz = car.pos.z - cy * dist;
       let ty = car.pos.y + hgt;
       const gy = this.world.heightAt(tx, tz) + 1.1;
