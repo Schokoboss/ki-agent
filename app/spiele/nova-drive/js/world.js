@@ -2,7 +2,7 @@
 import * as THREE from '../lib/three.module.min.js';
 import { HALF, N, CELL, FESTIVAL } from './terrain.js';
 import { part, merge, Builder } from './geo.js';
-import { clamp, lerp, smoothstep, fbm, perlin, mulberry32 } from './util.js';
+import { clamp, lerp, smoothstep, fbm, perlin, mulberry32, breathe } from './util.js';
 import { drawLed } from './textures.js';
 import { has, merged, clone, nodeGeometry, scene as modelScene } from './models.js';
 
@@ -10,6 +10,7 @@ const lin = v => Math.pow(v, 2.2);
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
 const _c = new THREE.Color();
 
+const AO_DIST = [5, 12, 26, 55];
 export const EVENT_COLORS = { race: '#7a6bff', trap: '#ff9a1f', drift: '#ff3d9a', jump: '#ffd400' };
 
 export class Scenery {
@@ -20,6 +21,73 @@ export class Scenery {
     this.instances = {};
     this.beacons = [];
     this.glowPts = [];
+  }
+
+  // Aufbau in Häppchen mit Fortschritt (für den Ladebildschirm)
+  async buildAsync(prog = () => {}) {
+    const steps = [
+      ['Himmel und Licht', () => this.buildSkyAndLights(), 1],
+      ['Licht und Schatten berechnen', () => this.bakeShade(), 2],
+      ['Gelände modellieren', () => this.buildTerrain(prog, 0.06, 0.5), 10],
+      ['Straßen asphaltieren', () => this.buildRoads(), 2],
+      ['Meer und See füllen', () => this.buildWater(), 1],
+      ['Wälder pflanzen', () => this.buildTreesM(), 3],
+      ['Felsen setzen', () => this.buildRocksM(), 1],
+      ['Häuser bauen', () => this.buildBuildingsM(), 2],
+      ['Laternen aufstellen', () => this.buildLampsM(), 1],
+      ['Festival aufbauen', () => this.buildFestivalM(), 2],
+      ['Schanzen und Zäune', () => { this.buildRampsM(); this.buildSmashablesM(); }, 2],
+      ['Zuschauer, Boote, Windräder', () => { this.buildCrowd(); this.buildBoats(); this.buildTurbines(); }, 1],
+      ['Gras säen', () => this.buildGrass(), 1],
+      ['Letzte Details', () => { this.buildClouds(); this.buildGlows(); this.buildGates(); }, 1],
+    ];
+    const total = steps.reduce((a, s) => a + s[2], 0);
+    let done = 0;
+    for (const [name, fn, w] of steps) {
+      prog(done / total, name);
+      await breathe(0);
+      await fn();
+      done += w;
+    }
+    prog(1, 'Fertig');
+  }
+
+  // vorberechnete Verschattung durch Bäume, Felsen und Häuser (Raster wie die Höhenkarte)
+  bakeShade() {
+    if (this.q < 2) return;
+    const W = this.world, G = new Float32Array(N * N);
+    const add = (x, z, r, amt) => {
+      const i0 = Math.max(0, Math.floor((x - r + HALF) / CELL)), i1 = Math.min(N - 1, Math.ceil((x + r + HALF) / CELL));
+      const j0 = Math.max(0, Math.floor((z - r + HALF) / CELL)), j1 = Math.min(N - 1, Math.ceil((z + r + HALF) / CELL));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        const d = Math.hypot(-HALF + i * CELL - x, -HALF + j * CELL - z);
+        if (d >= r) continue;
+        const v = amt * Math.pow(1 - d / r, 1.3), k = j * N + i;
+        G[k] = 1 - (1 - G[k]) * (1 - v);
+      }
+    };
+    for (const t of W.trees) add(t.x, t.z, 3.6 * t.s + 1.2, 0.36);
+    for (const r of W.rocks) add(r.x, r.z, r.s * 1.8 + 1.2, 0.32);
+    for (const b of W.buildings) add(b.x, b.z, Math.max(b.w, b.d) * 0.62 + 3.5, 0.42);
+    this.shade = G;
+  }
+  shadeAt(x, z) {
+    if (!this.shade) return 0;
+    const fx = clamp((x + HALF) / CELL, 0, N - 1.001), fz = clamp((z + HALF) / CELL, 0, N - 1.001);
+    const i = Math.floor(fx), j = Math.floor(fz), u = fx - i, v = fz - j, k = j * N + i, G = this.shade;
+    return (G[k] * (1 - u) + G[k + 1] * u) * (1 - v) + (G[k + N] * (1 - u) + G[k + N + 1] * u) * v;
+  }
+  // Horizont-Verdeckung: wie viel Himmel sieht dieser Punkt? (Senken, Hangfüße, Einschnitte → dunkler)
+  horizonAO(x, z, h) {
+    const W = this.world;
+    let occ = 0;
+    for (let a = 0; a < 8; a++) {
+      const dx = Math.cos(a * 0.785398), dz = Math.sin(a * 0.785398);
+      let m = 0;
+      for (const d of AO_DIST) { const t = (W.baseAt(x + dx * d, z + dz * d) - h) / d; if (t > m) m = t; }
+      occ += Math.atan(m);
+    }
+    return 1 - 0.78 * occ / (8 * 1.5708);
   }
 
   build() {
@@ -193,8 +261,9 @@ export class Scenery {
   }
 
   // ---------------------------------------------------------------- Gelände
-  buildTerrain() {
+  async buildTerrain(prog = () => {}, p0 = 0, p1 = 1) {
     const w = this.world;
+    const bake = this.q >= 2;
     const step = this.q >= 3 ? 5 : this.q >= 2 ? 6.5 : this.q >= 1 ? 8 : 11;
     const M = Math.round((2 * HALF) / step);
     const st = (2 * HALF) / M;
@@ -202,7 +271,10 @@ export class Scenery {
     const mat = this.q >= 2 ? this.terrainSplat() : new THREE.MeshLambertMaterial({ vertexColors: true, map: this.T.ground });
     this.terrainMat = mat;
     const col = [0, 0, 0];
+    let chunk = 0;
     for (let cj = 0; cj < C; cj++) for (let ci = 0; ci < C; ci++) {
+      await breathe();
+      prog(p0 + (p1 - p0) * (chunk++ / (C * C)), 'Gelände modellieren · Licht berechnen');
       const i0 = ci * per, i1 = Math.min(M, (ci + 1) * per), j0 = cj * per, j1 = Math.min(M, (cj + 1) * per);
       const nx = i1 - i0 + 1, nz = j1 - j0 + 1;
       const pos = new Float32Array(nx * nz * 3), nor = new Float32Array(nx * nz * 3), cl = new Float32Array(nx * nz * 3), uv = new Float32Array(nx * nz * 2);
@@ -215,6 +287,10 @@ export class Scenery {
         const slope = Math.hypot(gx, gz);
         if (e < 1.8) h -= 0.45;
         groundColor(w, x, z, h, e, slope, col);
+        if (bake) {
+          const ao = this.horizonAO(x, z, h) * (1 - 0.55 * this.shadeAt(x, z));
+          col[0] *= ao; col[1] *= ao; col[2] *= ao;
+        }
         pos[k * 3] = x; pos[k * 3 + 1] = h; pos[k * 3 + 2] = z;
         const l = Math.hypot(gx, 1, gz);
         nor[k * 3] = -gx / l; nor[k * 3 + 1] = 1 / l; nor[k * 3 + 2] = -gz / l;
@@ -274,8 +350,8 @@ export class Scenery {
     const T = this.T;
     // Standard-Material, damit nasse Straßen den Himmel spiegeln können (Rauheit sinkt bei Regen)
     const mats = {
-      asphalt: new THREE.MeshStandardMaterial({ map: T.asphalt, roughness: 0.93, metalness: 0, envMapIntensity: 0.6 }),
-      dirt: new THREE.MeshStandardMaterial({ map: T.dirt, roughness: 1, metalness: 0, envMapIntensity: 0.4 }),
+      asphalt: new THREE.MeshStandardMaterial({ map: T.asphalt, roughness: 0.93, metalness: 0, envMapIntensity: 0.6, vertexColors: true }),
+      dirt: new THREE.MeshStandardMaterial({ map: T.dirt, roughness: 1, metalness: 0, envMapIntensity: 0.4, vertexColors: true }),
     };
     this.roadMats = [];
     let order = 0;
@@ -288,8 +364,10 @@ export class Scenery {
         const x = p.x[i], z = p.z[i], y = p.y[i] + 0.06, rx = -p.tz[i], rz = p.tx[i];
         const v = (k * p.ds) / vScale;
         b.v(x - rx * (hw + 0.6), y - 1.6, z - rz * (hw + 0.6), -rx, 0.3, -rz, 0.6, 0.6, 0.6, 0, v);
-        b.v(x - rx * hw, y, z - rz * hw, 0, 1, 0, 1, 1, 1, 0, v);
-        b.v(x + rx * hw, y, z + rz * hw, 0, 1, 0, 1, 1, 1, 1, v);
+        const aoL = this.shade ? (1 - 0.5 * this.shadeAt(x - rx * hw, z - rz * hw)) * this.horizonAO(x - rx * hw, z - rz * hw, y) : 1;
+        const aoR = this.shade ? (1 - 0.5 * this.shadeAt(x + rx * hw, z + rz * hw)) * this.horizonAO(x + rx * hw, z + rz * hw, y) : 1;
+        b.v(x - rx * hw, y, z - rz * hw, 0, 1, 0, aoL, aoL, aoL, 0, v);
+        b.v(x + rx * hw, y, z + rz * hw, 0, 1, 0, aoR, aoR, aoR, 1, v);
         b.v(x + rx * (hw + 0.6), y - 1.6, z + rz * (hw + 0.6), rx, 0.3, rz, 0.6, 0.6, 0.6, 1, v);
         if (k > 0) {
           const a = (k - 1) * 4, c = k * 4;
@@ -812,8 +890,8 @@ export class Scenery {
 
   buildTreesM() {
     if (!has('pine_a')) { this.treeLod = []; return this.buildTrees(); }
-    const hi = ['pine_a', 'pine_b', 'leaf_a', 'leaf_b', 'palm'].map(n => merged(n));
-    const lo = this.procTreeGeos();
+    const hi = ['pine_a', 'pine_b', 'leaf_a', 'leaf_b', 'palm'].map(n => volumeAO(merged(n), 0.55, 1.12));
+    const lo = this.procTreeGeos().map(g => volumeAO(g, 0.6, 1.08));
     const loOf = [0, 0, 1, 1, 2], loScale = [1.25, 1.62, 1.35, 1.3, 1.08];
     const matHi = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
     const matLo = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
@@ -897,8 +975,8 @@ export class Scenery {
     for (const v in byV) {
       const list = byV[v];
       const parts = [
-        [merged(v, { mat: ['wall'] }), wallMat, list, true],
-        [merged(v, { notMat: ['wall', 'window'] }), restMat, list, false],
+        [groundAO(merged(v, { mat: ['wall'] })), wallMat, list, true],
+        [groundAO(merged(v, { notMat: ['wall', 'window'] })), restMat, list, false],
         [merged(v, { mat: ['window'] }), this.winLitMat, list.filter(b => b.lit), false],
         [merged(v, { mat: ['window'] }), winDark, list.filter(b => !b.lit), false],
       ];
@@ -1366,6 +1444,28 @@ export class Scenery {
     }
     this.updateDebris(dt);
   }
+}
+
+// Vertexfarben nach Höhe abdunkeln (Volumen-Eindruck: Stamm/Unterseite dunkler)
+function volumeAO(g, lo, hi) {
+  if (!g || !g.attributes.color) return g;
+  g.computeBoundingBox();
+  const P = g.attributes.position, C = g.attributes.color, y0 = g.boundingBox.min.y, y1 = g.boundingBox.max.y;
+  for (let i = 0; i < P.count; i++) {
+    const t = Math.pow(clamp((P.getY(i) - y0) / Math.max(0.01, y1 - y0), 0, 1), 0.8), k = lo + (hi - lo) * t;
+    C.setXYZ(i, C.getX(i) * k, C.getY(i) * k, C.getZ(i) * k);
+  }
+  return g;
+}
+// Hauswände am Boden etwas dunkler (Kontakt zum Boden)
+function groundAO(g) {
+  if (!g || !g.attributes.color) return g;
+  const P = g.attributes.position, C = g.attributes.color;
+  for (let i = 0; i < P.count; i++) {
+    const k = 0.68 + 0.32 * smoothstep(-0.3, 2.6, P.getY(i));
+    C.setXYZ(i, C.getX(i) * k, C.getY(i) * k, C.getZ(i) * k);
+  }
+  return g;
 }
 
 // Punkte-Material mit Größe pro Punkt (Leuchten, Partikel)

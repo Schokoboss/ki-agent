@@ -2,7 +2,7 @@
 import * as THREE from '../lib/three.module.min.js';
 import { World, FESTIVAL, HALF } from './terrain.js';
 import { Scenery } from './world.js';
-import { makeTextures } from './textures.js';
+import { makeTextures, makeDetailTextures } from './textures.js';
 import { buildCar, styleDims, loadCarModels, setTailGlow, setCarDetail } from './carmodel.js';
 import { loadWorldModels } from './models.js';
 import { Vehicle, carContact } from './physics.js';
@@ -13,7 +13,7 @@ import { Audio } from './audio.js';
 import { Input } from './input.js';
 import { Particles, Smoke, Skids, Rain } from './effects.js';
 import { CARS, UPGRADES, carStats, rating, carClass, CLASS_COLORS, EVENTS, RADIO, TIPS } from './data.js';
-import { clamp, lerp, damp, fmtNum, fmtTime, wrapAngle } from './util.js';
+import { clamp, lerp, damp, fmtNum, fmtTime, wrapAngle, breathe } from './util.js';
 import { EVENT_COLORS } from './world.js';
 import { Economy, PRIZES } from './economy.js';
 import { EffectComposer } from '../lib/postprocessing/EffectComposer.js';
@@ -51,9 +51,20 @@ class Game {
 
   // ---------------------------------------------------------------- Start
   async boot() {
-    const bar = $('load-bar'), msg = $('load-msg');
-    const prog = (p, m) => { bar.style.width = (p * 100).toFixed(0) + '%'; if (m) msg.textContent = m + ' …'; };
-    $('load-tip').textContent = TIPS[Math.floor(Math.random() * TIPS.length)];
+    const bar = $('load-bar'), msg = $('load-msg'), pct = $('load-pct'), tipEl = $('load-tip');
+    const tips = [...TIPS].sort(() => Math.random() - 0.5);
+    let tipI = 0, tipT = -1e9, shown = 0;
+    // Gesamt-Fortschritt aus Abschnitten: sec(von, bis) liefert eine Funktion für 0…1 innerhalb des Abschnitts
+    const prog = (p, m) => {
+      shown = Math.max(shown, p);
+      bar.style.width = (shown * 100).toFixed(1) + '%';
+      pct.textContent = Math.floor(shown * 100) + ' %';
+      if (m) msg.textContent = m + ' …';
+      const now = performance.now();
+      if (now - tipT > 5200) { tipT = now; tipEl.textContent = '💡 ' + tips[tipI++ % tips.length]; }
+    };
+    const sec = (a, b) => (f, m) => prog(a + (b - a) * clamp(f, 0, 1), m);
+    prog(0.005, 'Motor vorwärmen');
     await frame();
     const R = this.renderer = new THREE.WebGLRenderer({ canvas: $('c'), antialias: this.quality === 2, powerPreference: 'high-performance' });
     this.maxPR = Math.min(window.devicePixelRatio || 1, this.quality >= 3 ? 3 : this.quality >= 2 ? 2 : this.quality >= 1 ? 1.5 : 1);
@@ -67,23 +78,22 @@ class Game {
     R.shadowMap.type = this.quality >= 3 ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.3, 3000);
-    this.T = makeTextures(Math.min(8, R.capabilities.getMaxAnisotropy()));
+    const aniso = Math.min(16, R.capabilities.getMaxAnisotropy());
+    this.T = makeTextures(aniso);
     // Welt
     this.world = new World(this.quality);
     this.world.events = EVENTS;
-    await this.world.generate((p, m) => prog(p * 0.75, m));
-    prog(0.76, 'Modelle aus der Werkstatt laden');
-    await loadWorldModels(f => prog(0.76 + f * 0.06, 'Modelle aus der Werkstatt laden'));
+    await this.world.generate(sec(0.02, 0.62)); // meldet 0…0.6
+    await makeDetailTextures(this.T, aniso, this.quality >= 3, sec(0.38, 0.45));
+    prog(0.45, 'Modelle aus der Werkstatt laden');
+    await loadWorldModels(sec(0.45, 0.5));
     setCarDetail(this.quality);
-    prog(0.82, 'Landschaft bauen');
-    await frame();
     this.scenery = new Scenery(this.scene, this.world, this.T, this.quality);
-    this.scenery.build();
+    await this.scenery.buildAsync(sec(0.5, 0.78));
     this.makeEnv();
     if (this.quality >= 3) this.setupComposer();
-    prog(0.88, 'Karte zeichnen');
-    await frame();
-    this.mapImg = makeMapImage(this.world, this.quality >= 1 ? 1024 : 768);
+    prog(0.78, 'Karte zeichnen');
+    this.mapImg = await makeMapImage(this.world, this.quality >= 3 ? 1536 : this.quality >= 1 ? 1024 : 768, sec(0.78, 0.84));
     this.hud = new HUD(this);
     this.hud.setMap(this.mapImg);
     this.audio = new Audio();
@@ -96,14 +106,16 @@ class Game {
     this.skids = new Skids(this.scene, this.quality >= 1 ? 1800 : 900);
     this.rainFx = new Rain(this.scene, this.quality >= 2 ? 1800 : this.quality >= 1 ? 1200 : 600);
     this.weather = { rain: this.settings.weather === 'rain' ? 1 : 0, target: 0, t: 200, thunder: 15 };
-    prog(0.9, 'Autos aus der Werkstatt holen');
-    await loadCarModels(CARS.map(c => c.id), f => prog(0.9 + f * 0.08, 'Autos aus der Werkstatt holen'));
+    prog(0.84, 'Autos aus der Werkstatt holen');
+    await loadCarModels(CARS.map(c => c.id), sec(0.84, 0.9));
     // Spieler
     if (!this.save.current || !this.save.owned[this.save.current]) this.save.current = null;
     const spec = this.carSpec() || CARS[0];
     this.car = new Vehicle(this.world, carStats(spec, {}), styleDims(spec.style));
     this.car.sens = this.settings.sens;
     this.setPlayerCar(spec.id);
+    prog(0.91, 'Verkehr und Gegner bereitstellen');
+    await breathe(0);
     this.traffic = new Traffic(this.scene, this.world, this.quality >= 2 ? 16 : this.quality >= 1 ? 12 : 7);
     this.skills = new Skills(this);
     this.events = new Events(this);
@@ -115,9 +127,21 @@ class Game {
     this.bindUI();
     this.hud.money();
     this.updatePosters();
+    // Shader vorbereiten und die Welt einmal von mehreren Orten aus rendern → kein Ruckeln beim Losfahren
+    prog(0.93, 'Shader vorbereiten');
+    await breathe(0);
+    try { if (R.compileAsync) await R.compileAsync(this.scene, this.camera); else R.compile(this.scene, this.camera); } catch { /* egal */ }
+    const spots = [[FESTIVAL.x, FESTIVAL.z - 60], [-620, 40], [600, -100], [0, -700], [700, 400]];
+    for (let i = 0; i < spots.length; i++) {
+      prog(0.95 + 0.05 * i / spots.length, 'Welt vorab rendern');
+      const [x, z] = spots[i], y = this.world.heightAt(x, z) + 8;
+      this.camera.position.set(x, y, z); this.camera.lookAt(x + 40, y - 6, z + 40);
+      this.scenery.update(0.016, i, this.camera.position, 0, this.camera.position);
+      this.draw();
+      await frame();
+    }
+    this.spawnAtFestival();
     prog(1, 'Bereit');
-    // Shader vorab übersetzen, damit der Start nicht ruckelt
-    R.compile(this.scene, this.camera);
     this.last = performance.now();
     $('loading').classList.add('done');
     setTimeout(() => $('loading').remove(), 700);
@@ -193,8 +217,8 @@ class Game {
           if (sunVis > 0.01) {
             vec2 delta = (vUv - sunPos) * (0.9 / 16.0);
             vec2 p = vUv; float illum = 0.0, decay = 1.0;
-            for (int i = 0; i < 16; i++) { p -= delta; vec3 s = texture2D(tDiffuse, p).rgb; illum += max(dot(s, vec3(0.3333)) - 0.7, 0.0) * decay; decay *= 0.92; }
-            c.rgb += sunCol * illum * 0.26 * sunVis;
+            for (int i = 0; i < 16; i++) { p -= delta; vec3 s = texture2D(tDiffuse, p).rgb; illum += max(dot(s, vec3(0.3333)) - 0.76, 0.0) * decay; decay *= 0.92; }
+            c.rgb += sunCol * illum * 0.18 * sunVis;
           }
           float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
           c.rgb = mix(vec3(l), c.rgb, sat); vec2 d = (vUv - 0.5) * vec2(1.25, 1.0);

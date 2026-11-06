@@ -1,5 +1,5 @@
 // Weltdaten ohne Grafik: Höhenkarte, Straßen, Untergrund, Hindernisse und Deko-Positionen.
-import { clamp, lerp, smoothstep, perlin, fbm, ridged, mulberry32, Path } from './util.js';
+import { clamp, lerp, smoothstep, perlin, fbm, ridged, mulberry32, Path, breathe } from './util.js';
 import { ROADS, CROSS, HOUSES } from './data.js';
 
 export const HALF = 1300, CELL = 4, N = (HALF * 2) / CELL + 1;
@@ -81,7 +81,7 @@ export class World {
     for (let j = 0; j < N; j++) {
       const z = -HALF + j * CELL;
       for (let i = 0; i < N; i++) H0[j * N + i] = baseHeight(-HALF + i * CELL, z);
-      if (j % 130 === 0) await tick(0.02 + 0.25 * j / N, 'Insel formen');
+      if (j % 24 === 0) { progress(0.02 + 0.25 * j / N, 'Insel formen'); await breathe(); }
     }
     await tick(0.3, 'Straßen bauen');
     for (const def of ROADS) {
@@ -124,6 +124,7 @@ export class World {
     for (let i = 0; i < this.cross.n; i++) this.cross.y[i] = this.heightAt(this.cross.x[i], this.cross.z[i]);
     // Untergrund
     for (let j = 0; j < N; j++) {
+      if (j % 40 === 0) await breathe();
       for (let i = 0; i < N; i++) {
         const k = j * N + i;
         const h = this.H[k], e = this.E[k];
@@ -143,7 +144,7 @@ export class World {
       }
     }
     await tick(0.5, 'Wald pflanzen');
-    this.placeScenery();
+    await this.placeScenery(f => progress(0.5 + f * 0.1, 'Wald pflanzen'));
     await tick(0.6, 'Fertig');
   }
 
@@ -237,7 +238,7 @@ export class World {
   }
   near(x, z, grid = this.grid) { return grid.get(this.key(x, z)) || EMPTY; }
 
-  placeScenery() {
+  async placeScenery(prog = () => {}) {
     const rnd = mulberry32(42);
     const q = this.quality;
     const free = (x, z, rad) => { // nichts Statisches in der Nähe
@@ -391,6 +392,8 @@ export class World {
     // --- Bäume
     const treeStep = q >= 3 ? 5.6 : q >= 2 ? 6.5 : q >= 1 ? 7.5 : 9.5;
     for (let gz = -HALF + 10; gz < HALF - 10; gz += treeStep) {
+      await breathe();
+      prog((gz + HALF) / (2 * HALF));
       for (let gx = -HALF + 10; gx < HALF - 10; gx += treeStep) {
         const x = gx + (rnd() - 0.5) * treeStep, z = gz + (rnd() - 0.5) * treeStep;
         const h = this.baseAt(x, z);

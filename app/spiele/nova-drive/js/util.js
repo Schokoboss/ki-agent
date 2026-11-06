@@ -225,3 +225,10 @@ export function fmtTime(t) {
   return `${m}:${s < 10 ? '0' : ''}${s.toFixed(2)}`;
 }
 export const fmtNum = n => Math.round(n).toLocaleString('de-DE');
+
+// Lange Rechnungen in Häppchen teilen: alle ~30 ms kurz dem Browser Luft lassen (Ladebalken, Animationen)
+let _lastBreath = 0;
+export async function breathe(ms = 30) {
+  const n = performance.now();
+  if (n - _lastBreath > ms) { await new Promise(r => setTimeout(r, 0)); _lastBreath = performance.now(); }
+}

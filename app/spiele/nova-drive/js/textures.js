@@ -1,6 +1,6 @@
 // Alle Texturen werden zur Laufzeit auf Canvas gemalt – keine Bilddateien nötig.
 import * as THREE from '../lib/three.module.min.js';
-import { mulberry32 } from './util.js';
+import { mulberry32, breathe } from './util.js';
 
 function canvas(w, h) {
   const c = document.createElement('canvas');
@@ -162,12 +162,16 @@ export function makeTextures(aniso) {
     T.ledCanvas = c; T.ledCtx = g;
     T.led = tex(c, false, 1);
   }
-  // ---- Ultra-Texturen: Wolkenrauschen + Bodendetails (nahtlos kachelbar)
-  T.noise = noiseTexture(256, rnd);
-  T.dGrass = detailGrass(512, rnd, aniso);
-  T.dRock = detailRock(512, rnd, aniso);
-  T.dSand = detailSand(512, rnd, aniso);
   return T;
+}
+
+// Wolkenrauschen + Bodendetails (nahtlos kachelbar); hi = doppelte Auflösung
+export async function makeDetailTextures(T, aniso, hi, prog = () => {}) {
+  const rnd = mulberry32(99), S = hi ? 1024 : 512;
+  T.noise = noiseTexture(256, rnd); prog(0.1); await breathe(0);
+  T.dGrass = detailGrass(S, rnd, aniso); prog(0.45); await breathe(0);
+  T.dRock = detailRock(S, rnd, aniso); prog(0.75); await breathe(0);
+  T.dSand = detailSand(S, rnd, aniso); prog(1); await breathe(0);
 }
 
 // kachelbares Wertrauschen (mehrere Oktaven) als Float-Feld 0…1
@@ -210,13 +214,14 @@ function wrapDraw(g, size, x, y, fn) { for (const ox of [-size, 0, size]) for (c
 function detailGrass(size, rnd, aniso) {
   const [c, g] = fieldCanvas(size, tileNoise(size, [4, 16, 64], rnd), 95, 160, [1, 1.04, 0.92]);
   g.lineCap = 'round';
-  for (let i = 0; i < 9000; i++) {
+  const k2 = (size / 512) ** 2;
+  for (let i = 0; i < 9000 * k2; i++) {
     const x = rnd() * size, y = rnd() * size, a = -Math.PI / 2 + (rnd() - 0.5) * 1.4, L = 3 + rnd() * 9;
     const v = rnd() < 0.5 ? 70 + rnd() * 50 : 160 + rnd() * 70;
     g.strokeStyle = `rgba(${v * 0.95},${v},${v * 0.85},${0.35 + rnd() * 0.4})`; g.lineWidth = 0.8 + rnd() * 1.2;
     wrapDraw(g, size, x, y, (px, py) => { if (px < -12 || py < -12 || px > size + 12 || py > size + 12) return; g.beginPath(); g.moveTo(px, py); g.lineTo(px + Math.cos(a) * L, py + Math.sin(a) * L); g.stroke(); });
   }
-  for (let i = 0; i < 260; i++) {
+  for (let i = 0; i < 260 * k2; i++) {
     const x = rnd() * size, y = rnd() * size, r = 4 + rnd() * 14;
     g.fillStyle = `rgba(60,55,40,${0.06 + rnd() * 0.08})`;
     wrapDraw(g, size, x, y, (px, py) => { g.beginPath(); g.arc(px, py, r, 0, 7); g.fill(); });
@@ -225,7 +230,7 @@ function detailGrass(size, rnd, aniso) {
 }
 function detailRock(size, rnd, aniso) {
   const [c, g] = fieldCanvas(size, tileNoise(size, [4, 8, 32, 128], rnd), 70, 185, [1, 0.98, 0.95]);
-  for (let i = 0; i < 70; i++) {
+  for (let i = 0; i < 70 * (size / 512) ** 2; i++) {
     let x = rnd() * size, y = rnd() * size, a = rnd() * 6.28;
     g.strokeStyle = `rgba(25,22,20,${0.25 + rnd() * 0.35})`; g.lineWidth = 0.8 + rnd() * 1.6;
     const pts = [[x, y]];

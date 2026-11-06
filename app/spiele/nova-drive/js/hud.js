@@ -1,18 +1,19 @@
 // Anzeige: Tacho, Minikarte, Skill-Kette, Hinweise, Rennen, Ergebnisse, Inselkarte.
 import { HALF, N, SURF, FESTIVAL } from './terrain.js';
-import { clamp, fmtTime, fmtNum, smoothstep } from './util.js';
+import { clamp, fmtTime, fmtNum, smoothstep, breathe } from './util.js';
 import { EVENT_COLORS } from './world.js';
 import { TYPE_NAMES } from './events.js';
 import { star } from './textures.js';
 
 const $ = id => document.getElementById(id);
 
-export function makeMapImage(world, size = 1024) {
+export async function makeMapImage(world, size = 1024, prog = () => {}) {
   const c = document.createElement('canvas'); c.width = c.height = size;
   const g = c.getContext('2d');
   const img = g.createImageData(size, size);
   const k = (2 * HALF) / size;
   for (let j = 0; j < size; j++) for (let i = 0; i < size; i++) {
+    if (i === 0 && j % 32 === 0) { prog(j / size); await breathe(); }
     const x = -HALF + (i + 0.5) * k, z = -HALF + (j + 0.5) * k;
     const h = world.baseAt(x, z);
     const s = world.surfaceAt(x, z);
