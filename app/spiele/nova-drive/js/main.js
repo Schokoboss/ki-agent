@@ -17,6 +17,7 @@ import { clamp, lerp, damp, fmtNum, fmtTime, wrapAngle, breathe } from './util.j
 import { EVENT_COLORS } from './world.js';
 import { Economy, PRIZES } from './economy.js';
 import { RoadGraph, NavRibbon, say, fmtDist, TURN_ICON, turnText } from './nav.js';
+import { GTAOPass } from '../lib/postprocessing/GTAOPass.js';
 import { EffectComposer } from '../lib/postprocessing/EffectComposer.js';
 import { RenderPass } from '../lib/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from '../lib/postprocessing/UnrealBloomPass.js';
@@ -73,7 +74,9 @@ class Game {
     prog(0.005, 'Motor vorwärmen');
     await frame();
     const R = this.renderer = new THREE.WebGLRenderer({ canvas: $('c'), antialias: this.quality === 2, powerPreference: 'high-performance' });
-    this.maxPR = Math.min(window.devicePixelRatio || 1, this.quality >= 3 ? 3 : this.quality >= 2 ? 2 : this.quality >= 1 ? 1.5 : 1);
+    // Hyper rendert am PC mindestens 1,5-fach (Supersampling); die dynamische Auflösung regelt bei Bedarf herunter
+    this.maxPR = this.quality >= 4 ? Math.min(3, Math.max(1.5, window.devicePixelRatio || 1))
+      : Math.min(window.devicePixelRatio || 1, this.quality >= 3 ? 3 : this.quality >= 2 ? 2 : this.quality >= 1 ? 1.5 : 1);
     this.pr = this.maxPR;
     R.setPixelRatio(this.pr);
     R.setSize(innerWidth, innerHeight);
@@ -208,6 +211,14 @@ class Game {
     const rt = new THREE.WebGLRenderTarget(innerWidth * this.pr, innerHeight * this.pr, { type: hdr ? THREE.HalfFloatType : THREE.UnsignedByteType, samples: 4 });
     const c = this.composer = new EffectComposer(R, rt);
     c.addPass(new RenderPass(this.scene, this.camera));
+    // Hyper: Umgebungsverdeckung (GTAO) – Kontaktschatten unter Autos, in Ecken, zwischen Bäumen und Häusern
+    if (this.quality >= 4) {
+      const ao = this.ao = new GTAOPass(this.scene, this.camera, innerWidth, innerHeight);
+      ao.updateGtaoMaterial({ radius: 1.6, distanceExponent: 1.2, thickness: 1.5, scale: 1.1, samples: 12, distanceFallOff: 1, screenSpaceRadius: false });
+      ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 5, rings: 2, samples: 12 });
+      ao.blendIntensity = 0.85;
+      c.addPass(ao);
+    }
     this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.42, 0.55, 1.0);
     c.addPass(this.bloom);
     c.addPass(new OutputPass());
@@ -252,8 +263,35 @@ class Game {
       G.sunCol.value.copy(S.skyU.sunCol.value);
       const drive = this.state === 'free' || this.state === 'race';
       G.speed.value = drive ? clamp((this.car.speedKmh - 130) / 170, 0, 1) * (this.car.nitroOn ? 1.4 : 1) : 0;
+      this.updateReflections();
       this.composer.render();
     } else this.renderer.render(this.scene, this.camera);
+  }
+
+  // Hyper: echte Spiegelungen der Umgebung im eigenen Auto (Würfelkamera am Auto, alle 2 Bilder neu)
+  setupReflections() {
+    if (this.quality < 4 || this.cubeRT) return;
+    this.cubeRT = new THREE.WebGLCubeRenderTarget(256, { type: THREE.HalfFloatType, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter });
+    this.cubeCam = new THREE.CubeCamera(0.5, 650, this.cubeRT);
+    this.cubeN = 0;
+  }
+  applyReflections(model) {
+    if (!this.cubeRT || !model) return;
+    model.traverse(o => { if (o.isMesh && o.material && 'envMap' in o.material) { o.material.envMap = this.cubeRT.texture; o.material.needsUpdate = true; } });
+  }
+  updateReflections() {
+    if (!this.cubeCam) return;
+    const garage = this.state === 'garage' && this.previewModel;
+    const tgt = garage ? this.previewModel : this.carModel;
+    if (!tgt || !tgt.visible || (++this.cubeN % 2 && this.cubeN > 2)) return;
+    const R = this.renderer, au = R.shadowMap.autoUpdate, grass = this.scenery.grass && this.scenery.grass.im;
+    const gv = grass ? grass.visible : false;
+    tgt.visible = false; if (grass) grass.visible = false; R.shadowMap.autoUpdate = false;
+    this.cubeCam.position.set(tgt.position.x, tgt.position.y + 0.9, tgt.position.z);
+    this.cubeCam.updateMatrixWorld();
+    this.cubeCam.update(R, this.scene);
+    this.cubeRT.texture.needsPMREMUpdate = true;
+    tgt.visible = true; if (grass) grass.visible = gv; R.shadowMap.autoUpdate = au;
   }
 
   // ---------------------------------------------------------------- Auto
@@ -264,6 +302,7 @@ class Game {
     if (this.carModel) this.scene.remove(this.carModel);
     this.carModel = buildCar(spec, own.color || spec.colors[0]);
     this.carModel.userData.carId = spec.id;
+    this.setupReflections(); this.applyReflections(this.carModel);
     this.scene.add(this.carModel);
     // Bodenschatten
     const d = styleDims(spec.style);
@@ -716,6 +755,7 @@ class Game {
     if (this.previewModel) this.scene.remove(this.previewModel);
     this.previewColor = (own && own.color) || spec.colors[0];
     this.previewModel = buildCar(spec, this.previewColor);
+    this.applyReflections(this.previewModel);
     this.previewId = id;
     const p = this.garagePos();
     this.previewModel.position.set(p.x, p.y, p.z);

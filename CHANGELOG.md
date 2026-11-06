@@ -18,6 +18,13 @@ Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
   weich auf, Maus zum Umsehen (federt zurück) und Mausrad-Zoom, Rückblick (X/LB), Enter startet Events, N Navi,
   G Fotomodus, H Tastenhilfe (wechselt automatisch zu Gamepad-Belegung), Esc = zurück, Gamepad steuert auch Menüs,
   Hover-Effekte. Starter-Seite: „Am PC spielen“.
+- **Schönere Autos** (alle 16 neu aus Blender): hohle Reifenwülste mit offenen Felgen, gelochte Bremsscheiben,
+  feststehende Bremssättel, dunkle Radhaus-Schalen, runde Spiegel mit Spiegelglas, Endrohre mit Wulst,
+  Kiemen-Lamellen, profilierte Heckflügel, Rückleuchten mit Rahmen und Rückfahrlicht, LED-Leiste,
+  Diffusor-Finnen, Spaltmaße an Haube und Kofferraum. Lack mit Metallic-Flakes unter Klarlack (Ultra/Hyper).
+- **Grafikstufe Hyper ✦** (Einstellungen → Grafik): Umgebungsverdeckung (GTAO), Echtzeit-Spiegelungen der
+  Umgebung im eigenen Auto (auch in der Garage), mindestens 1,5-fache Auflösung (Supersampling), dichteres Gras
+  in größerem Umkreis, feineres Gelände, Bäume detailliert bis 1 km, weitere Sicht. Für starke GPUs/PCs.
 - Navigation: Route zu jedem Ziel über das Straßennetz (Karte → „🧭 Navi starten“, Pause → Navi), Pfeile auf der Straße,
   Abbiegehinweise mit Entfernung, Sprachansagen, Neuberechnung beim Verfahren; Rennstrecke wird vorab angezeigt.
 - Grafik Ultra, Ladebildschirm mit Fortschritt, vorberechnetes Licht (siehe frühere Commits).

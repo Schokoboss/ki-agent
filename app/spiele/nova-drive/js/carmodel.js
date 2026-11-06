@@ -128,6 +128,30 @@ const LOD_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 
 let DETAIL = 2;
 export function setCarDetail(q) { DETAIL = q; }
 
+// Autolack: Metallic-Flakes unter glattem Klarlack (Ultra/Hyper). Die Flakes kippen die Normale der
+// Grundschicht pixelweise (Objektraum-Rauschen), der Klarlack bleibt spiegelglatt → Glitzern in der Sonne.
+export function carPaint(color, detail = DETAIL) {
+  const m = new THREE.MeshPhysicalMaterial({ color, metalness: 0.5, roughness: 0.34, clearcoat: 1, clearcoatRoughness: 0.025, envMapIntensity: 1.4 });
+  const U = { uFlake: { value: detail >= 4 ? 1 : 0.75 } };
+  m.userData.flake = U.uFlake;
+  m.onBeforeCompile = sh => {
+    Object.assign(sh.uniforms, U);
+    sh.vertexShader = 'varying vec3 vFlakeP;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vFlakeP = position;');
+    sh.fragmentShader = `uniform float uFlake; varying vec3 vFlakeP;
+      float flakeH(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+      ` + sh.fragmentShader.replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        {
+          vec3 fp = vFlakeP * 380.0, ci = floor(fp);
+          vec3 fr = vec3(flakeH(ci), flakeH(ci + 17.31), flakeH(ci + 41.73)) - 0.5;
+          float fw = length(fwidth(fp));
+          float fk = uFlake * (1.0 - smoothstep(0.5, 1.8, fw));
+          normal = normalize(normal + fr * 0.42 * fk);
+        }`);
+  };
+  m.customProgramCacheKey = () => 'nova-paint';
+  return m;
+}
+
 function fromTemplate(spec, color, opts) {
   const id = TEMPL[spec.id] ? spec.id : STYLE_CAR[spec.style];
   const T = TEMPL[id];
@@ -144,7 +168,7 @@ function fromTemplate(spec, color, opts) {
   let paintMat, tailMat = null;
   if (opts.lod) {
     const L = LODT;
-    paintMat = new THREE.MeshStandardMaterial({ color, metalness: 0.45, roughness: 0.3 });
+    paintMat = DETAIL >= 4 ? carPaint(color) : new THREE.MeshStandardMaterial({ color, metalness: 0.45, roughness: 0.3 });
     const p = new THREE.Mesh(L.paintGeo, paintMat);
     const r = new THREE.Mesh(opts.lod === 'ai' ? L.restGeo : L.trafficGeo, LOD_MAT);
     p.castShadow = r.castShadow = true;
@@ -177,7 +201,7 @@ function fromTemplate(spec, color, opts) {
       o.castShadow = true;
       if (o.material.name === 'paint') {
         if (!paintMat) {
-          if (DETAIL >= 3) paintMat = new THREE.MeshPhysicalMaterial({ color, metalness: 0.55, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 1.35 });
+          if (DETAIL >= 3) paintMat = carPaint(color);
           else { paintMat = o.material.clone(); paintMat.color.set(color); paintMat.envMapIntensity = 1.25; }
         }
         o.material = paintMat;

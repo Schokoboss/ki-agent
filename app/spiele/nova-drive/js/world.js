@@ -179,7 +179,7 @@ export class Scenery {
       this.sun.shadow.normalBias = 0.04;
     }
     s.add(this.sun); s.add(this.sun.target);
-    s.fog = new THREE.Fog(0xb8dcf5, 250, this.q >= 3 ? 2300 : this.q >= 2 ? 1700 : this.q >= 1 ? 1300 : 850);
+    s.fog = new THREE.Fog(0xb8dcf5, 250, this.q >= 4 ? 2900 : this.q >= 3 ? 2300 : this.q >= 2 ? 1700 : this.q >= 1 ? 1300 : 850);
   }
 
   setTime(h) {
@@ -264,7 +264,7 @@ export class Scenery {
   async buildTerrain(prog = () => {}, p0 = 0, p1 = 1) {
     const w = this.world;
     const bake = this.q >= 2;
-    const step = this.q >= 3 ? 5 : this.q >= 2 ? 6.5 : this.q >= 1 ? 8 : 11;
+    const step = this.q >= 4 ? 4 : this.q >= 3 ? 5 : this.q >= 2 ? 6.5 : this.q >= 1 ? 8 : 11;
     const M = Math.round((2 * HALF) / step);
     const st = (2 * HALF) / M;
     const C = 4, per = Math.ceil(M / C);
@@ -1237,7 +1237,7 @@ export class Scenery {
   // ---------- Gras rund um die Kamera (Hoch/Ultra)
   buildGrass() {
     if (this.q < 2) return;
-    const max = this.q >= 3 ? 11000 : 5000;
+    const max = this.q >= 4 ? 19000 : this.q >= 3 ? 11000 : 5000;
     const pos = [], col = [];
     const base = new THREE.Color(0.16, 0.32, 0.07), tip = new THREE.Color(0.5, 0.68, 0.22);
     for (let k = 0; k < 7; k++) {
@@ -1266,7 +1266,7 @@ export class Scenery {
     const im = new THREE.InstancedMesh(g, mat, max);
     im.count = 0; im.frustumCulled = false; im.receiveShadow = true;
     this.scene.add(im);
-    this.grass = { im, max, cx: 1e9, cz: 1e9, R: this.q >= 3 ? 78 : 55, step: this.q >= 3 ? 1.35 : 1.6 };
+    this.grass = { im, max, cx: 1e9, cz: 1e9, R: this.q >= 4 ? 100 : this.q >= 3 ? 78 : 55, step: this.q >= 4 ? 1.2 : this.q >= 3 ? 1.35 : 1.6 };
   }
   updateGrass(cam, t) {
     const G = this.grass;
@@ -1490,7 +1490,7 @@ export class Scenery {
       const bs = im.boundingSphere;
       im.visible = Math.hypot(bs.center.x - camPos.x, bs.center.z - camPos.z) < Math.min(fogFar, 700) + bs.radius;
     }
-    const lodD = this.q >= 3 ? 700 : this.q >= 2 ? 420 : this.q >= 1 ? 300 : 180;
+    const lodD = this.q >= 4 ? 1000 : this.q >= 3 ? 700 : this.q >= 2 ? 420 : this.q >= 1 ? 300 : 180;
     this.updateGrass(camPos, t);
     this.skyU.time.value = t;
     if (this.windU) { this.windU.uTime.value = t; this.windU.uAmp.value = 1 + (this.rain || 0) * 1.6; }

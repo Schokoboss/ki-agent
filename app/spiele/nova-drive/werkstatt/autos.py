@@ -93,11 +93,11 @@ def mats():
         glass=g,
         dash=material('dash', (0.02, 0.02, 0.022), 0.0, 0.55),
         trim=material('trim', (0.018, 0.018, 0.02), 0.0, 0.62),
-        chrome=material('chrome', (0.9, 0.9, 0.92), 1.0, 0.12),
+        chrome=material('chrome', (0.92, 0.92, 0.94), 1.0, 0.06),
         head=material('head', (0.9, 0.9, 0.88), 0.3, 0.1, (1, 0.95, 0.85), 0.8),
         tail=material('tail', (0.5, 0.0, 0.0), 0.1, 0.2, (1, 0.02, 0.02), 0.6),
         tire=material('tire', (0.025, 0.025, 0.028), 0.0, 0.85),
-        rim=material('rim', (0.72, 0.74, 0.78), 0.9, 0.28),
+        rim=material('rim', (0.74, 0.76, 0.8), 0.95, 0.2),
         caliper=material('caliper', (0.85, 0.12, 0.05), 0.2, 0.4),
         plate=material('plate', (0.85, 0.85, 0.82), 0.0, 0.5),
         accent=material('accent', (0.9, 0.9, 0.9), 0.1, 0.4),
@@ -237,6 +237,14 @@ def build_body(S, style, M, level=2):
         seams.append((sh.zRF + sh.zRR) / 2 - 0.05)
     for z in seams:
         stations += [z, z + 0.022]
+    # Spaltmaße oben: Motorhaube vorne, Kofferraumdeckel hinter der Heckscheibe
+    gaps_top = []
+    if style not in OPEN and S['hood'] >= 0.7:
+        gaps_top.append(L / 2 - 0.27)
+    if style not in OPEN and sh.zRear - (-L / 2) > 0.55:
+        gaps_top.append(sh.zRear - 0.07)
+    for z in gaps_top:
+        stations += [z, z + 0.018]
     stations = sorted(set(round(v, 4) for v in stations))
     sh.seams = seams
     bm = bmesh.new()
@@ -312,6 +320,8 @@ def build_body(S, style, M, level=2):
                 idx = (4 if style in ('mini', 'van') else 0) if roofzone else 1
         elif (h < S['clr'] + 0.11 and abs(p.normal.y) < 0.4 and abs(s) < L / 2 - 0.3) or p.normal.z < -0.75:
             idx = 2  # dunkle Unterkante nur an Seiten/Unterboden, nicht quer über Front/Heck
+        elif any(z < s < z + 0.02 for z in gaps_top) and h > Bv - 0.07 and abs(x) < sh.hw(s) * 0.86:
+            idx = 2  # Spaltmaß Haube/Deckel
         elif any(z < s < z + 0.022 for z in seams) and S['clr'] + 0.14 < h < Bv - 0.01:
             idx = 2  # Türfuge
         elif style == 'van' and Bv - 0.35 < h < Bv - 0.2:
@@ -413,7 +423,14 @@ def details(S, style, sh, M, full=False, body=None):
             sT = -fz + 0.07
             tx, ty = sx * (sh.hw(sT) - 0.3), sh.T(sT) - 0.1
             bz = bmin((tx - 0.2, tx, tx + 0.2), (ty - 0.04, ty + 0.04))
-            add(box((tx, ty, bz + 0.03), (0.46, 0.1, 0.08), M['tail'], (0, -sx * 0.15, 0), 0.02))
+            add(box((tx, ty, bz + 0.035), (0.49, 0.125, 0.07), M['trim'], (0, -sx * 0.15, 0), 0.02))
+            add(box((tx, ty + 0.008, bz + 0.03), (0.44, 0.085, 0.08), M['tail'], (0, -sx * 0.15, 0), 0.02))
+            add(box((tx - sx * 0.16, ty - 0.03, bz + 0.03), (0.1, 0.03, 0.081), M['head'], (0, -sx * 0.15, 0), 0.008))
+        if style in ('gt', 'hatch', 'suv', 'wagon', 'wedge', 'rally80'):
+            sT = -fz + 0.07
+            ty = sh.T(sT) - 0.1
+            bz = bmin((-0.3, 0, 0.3), (ty - 0.01, ty + 0.01))
+            add(box((0, ty + 0.02, bz + 0.012), (W * 0.42, 0.018, 0.03), M['tail'], (0, 0, 0), 0.004))
     # Grill, Lippe, Diffusor, Kennzeichen
     gh = S['clr'] + (S['nose'] - S['clr']) * 0.42
     gw, gH = W * (0.32 if style == 'ev' else 0.46), (0.16 if style != 'truck' else 0.32)
@@ -434,22 +451,28 @@ def details(S, style, sh, M, full=False, body=None):
         for sx in (1, -1):
             s = sh.zWs - 0.12
             x = sx * (sh.hw(s) + 0.07)
-            add(box((x, sh.Bl(s) + 0.1, s), (0.16, 0.11, 0.2), M['paint'], (0, 0, 0), 0.03))
-            add(box((x - sx * 0.07, sh.Bl(s) + 0.05, s), (0.08, 0.04, 0.05), M['trim'], (0, 0, 0), 0.005))
+            y = sh.Bl(s) + 0.1
+            add(box((x - sx * 0.075, y - 0.04, s + 0.01), (0.11, 0.03, 0.06), M['trim'], (0, 0, 0), 0.01))
+            add(ball((x + sx * 0.01, y, s), (0.21, 0.12, 0.14), M['paint'], (0, sx * 0.12, 0)))
+            add(ball((x + sx * 0.012, y, s - 0.058), (0.18, 0.095, 0.03), M['chrome'], (0, sx * 0.12, 0)))
     # Seitenschweller
     for sx in (1, -1):
         add(box((sx * (W / 2 - 0.1), S['clr'] + 0.07, 0), (0.08, 0.1, S['wb'] - S['wR'] * 2 - 0.3), M['trim'], (0, 0, 0), 0.02))
     # Auspuff
     ex = [-0.48, 0.48] if style in ('gt', 'muscle', 'hyper') else [0.5]
     if style != 'ev':
+        er = 0.062 if style in ('gt', 'muscle', 'hyper', 'wedge') else 0.05
         for x in ex:
-            add(cyl((x, S['clr'] + 0.09, -fz + 0.02), 0.055, 0.22, M['chrome'], (math.pi / 2, 0, 0), 14))
+            add(cyl((x, S['clr'] + 0.09, -fz + 0.02), er, 0.22, M['chrome'], (math.pi / 2, 0, 0), 20))
+            add(cyl((x, S['clr'] + 0.09, -fz - 0.075), er * 0.72, 0.04, M['trim'], (math.pi / 2, 0, 0), 16))
+            bpy.ops.mesh.primitive_torus_add(major_radius=er, minor_radius=0.01, major_segments=20, minor_segments=6)
+            t = active(); place(t, (x, S['clr'] + 0.09, -fz - 0.09), (math.pi / 2, 0, 0)); add(finish(t, M['chrome'], 0, 2, True))
     # Stil-Extras
     if style == 'hatch':
         add(box((0, S['H'] - 0.07, sh.zRR - 0.1), (W * 0.7, 0.04, 0.24), M['paint'], (-0.18, 0, 0), 0.015))
     if style == 'rally':
         sW = sh.zRR - 0.12
-        add(box((0, S['H'] + 0.1, sW), (W * 0.96, 0.04, 0.32), M['paint'], (0.08, 0, 0), 0.015))
+        add(ball((0, S['H'] + 0.1, sW), (W * 0.95, 0.055, 0.34), M['paint'], (0.08, 0, 0)))
         for sx in (1, -1):
             add(box((sx * W * 0.47, S['H'] + 0.06, sW), (0.03, 0.16, 0.36), M['trim'], (0, 0, 0), 0.005))
             add(box((sx * W * 0.25, S['H'] - 0.01, sW + 0.05), (0.04, 0.12, 0.08), M['trim'], (0, 0, 0), 0.005))
@@ -466,15 +489,21 @@ def details(S, style, sh, M, full=False, body=None):
     if style == 'gt':
         add(box((0, S['tail'] + 0.03, -fz + 0.12), (W * 0.82, 0.035, 0.2), M['paint'], (-0.28, 0, 0), 0.012))
         for sx in (1, -1):
-            add(box((sx * (sh.hw(0.3) + 0.0), sh.Bl(0.3) - 0.2, 0.3), (0.04, 0.12, 0.5), M['trim'], (0, 0, 0), 0.01))
+            gx, gy = sx * (sh.hw(0.3) + 0.0), sh.Bl(0.3) - 0.2
+            add(box((gx, gy, 0.3), (0.04, 0.13, 0.5), M['trim'], (0, 0, 0), 0.01))
+            for k in (-0.04, 0.0, 0.04):
+                add(box((gx + sx * 0.008, gy + k, 0.3), (0.035, 0.016, 0.48), M['paint'], (0, 0, sx * 0.35), 0.005))
     if style == 'hyper':
         sW = -fz + 0.3
-        add(box((0, S['tail'] + 0.42, sW), (W * 0.98, 0.05, 0.4), M['paint'], (0.1, 0, 0), 0.02))
+        add(ball((0, S['tail'] + 0.42, sW), (W * 0.97, 0.065, 0.42), M['paint'], (0.1, 0, 0)))
+        add(box((0, S['tail'] + 0.43, sW - 0.2), (W * 0.9, 0.035, 0.012), M['trim'], (0, 0, 0), 0.003))
         for sx in (1, -1):
-            add(box((sx * 0.55, S['tail'] + 0.2, sW + 0.03), (0.06, 0.4, 0.18), M['trim'], (0, 0, 0), 0.01))
-            add(box((sx * W * 0.49, S['tail'] + 0.36, sW), (0.03, 0.22, 0.46), M['trim'], (0, 0, 0), 0.005))
+            add(box((sx * 0.55, S['tail'] + 0.2, sW + 0.04), (0.035, 0.42, 0.14), M['trim'], (-0.2, 0, 0), 0.01))
+            add(box((sx * W * 0.485, S['tail'] + 0.38, sW), (0.014, 0.26, 0.48), M['trim'], (0, 0, 0), 0.004))
             add(box((sx * (sh.hw(-0.2) - 0.02), sh.Bl(-0.2) - 0.22, -0.2), (0.06, 0.3, 0.75), M['trim'], (0, sx * 0.12, 0), 0.02))
-        add(box((0, S['H'] + 0.06, (sh.zRF + sh.zRR) / 2 - 0.1), (0.3, 0.12, 0.6), M['paint'], (0, 0, 0), 0.04))
+        zs = (sh.zRF + sh.zRR) / 2 - 0.1
+        add(ball((0, S['H'] + 0.04, zs), (0.34, 0.16, 0.7), M['paint']))
+        add(ball((0, S['H'] + 0.07, zs + 0.3), (0.22, 0.08, 0.06), M['trim']))
         add(box((0, S['clr'] + 0.06, -fz + 0.18), (W * 0.8, 0.14, 0.36), M['trim'], (0.35, 0, 0), 0.01))
     if style == 'ev':
         add(box((0, sh.Bl(sh.zWs) + 0.05, sh.zWs + 0.06), (W * 0.62, 0.02, 0.05), M['head'], (0, 0, 0), 0.005))
@@ -510,6 +539,28 @@ def details(S, style, sh, M, full=False, body=None):
         add(box((0, S['tail'] + 0.02, -fz + 0.25), (W * 0.7, 0.03, 0.18), M['paint'], (-0.15, 0, 0), 0.01))
     # ---- neue Stile
     gh = S['clr'] + (S['nose'] - S['clr']) * 0.42
+
+    def liner(sx, cz):
+        # dunkle Radhaus-Schale (Bogen über dem Rad), damit man nicht durchs Auto schaut
+        R = S['wR'] + 0.065
+        x0, x1 = sx * (W / 2 + 0.02), sx * (W / 2 - 0.46)
+        bm = bmesh.new()
+        n = 18
+        a0, a1 = -0.35, math.pi + 0.35
+        rows = []
+        for i in range(n + 1):
+            a = a0 + (a1 - a0) * i / n
+            y, z = S['wR'] + 0.02 + math.sin(a) * R, cz + math.cos(a) * R
+            rows.append((bm.verts.new(B(x0, y, z)), bm.verts.new(B(x1, y, z))))
+        for (a_, b_), (c_, d_) in zip(rows[:-1], rows[1:]):
+            bm.faces.new((a_, b_, d_, c_))
+        me = bpy.data.meshes.new('liner')
+        bm.to_mesh(me)
+        bm.free()
+        o = bpy.data.objects.new('liner', me)
+        bpy.context.collection.objects.link(o)
+        me.materials.append(M['trim'])
+        return o
 
     def rail(x, za, zb, mat, lift=0.05):
         # Dachreling auf Höhe der tatsächlichen Dachwölbung + Füße bis aufs Dach
@@ -567,7 +618,7 @@ def details(S, style, sh, M, full=False, body=None):
         add(cyl((0, S['belt'] + 0.4, -fz + 0.05), S['wR'] * 0.9, 0.25, M['tire'], (math.pi / 2, 0, 0), 20))
     if style == 'wedge':
         sW = -fz + 0.32
-        add(box((0, S['tail'] + 0.3, sW), (W * 0.96, 0.05, 0.36), M['paint'], (0.06, 0, 0), 0.02))
+        add(ball((0, S['tail'] + 0.3, sW), (W * 0.95, 0.06, 0.38), M['paint'], (0.06, 0, 0)))
         for sx in (1, -1):
             add(box((sx * 0.6, S['tail'] + 0.14, sW), (0.06, 0.3, 0.2), M['trim'], (0, 0, 0), 0.01))
             add(box((sx * (sh.hw(-0.3) + 0.0), sh.Bl(-0.3) - 0.2, -0.3), (0.05, 0.22, 0.6), M['trim'], (0, 0, 0), 0.02))
@@ -584,6 +635,18 @@ def details(S, style, sh, M, full=False, body=None):
         add(box((0, S['nose'] + 0.07, fz - 0.24), (W * 0.62, 0.12, 0.06), M['trim'], (0, 0, 0), 0.01))
         for x in (-0.42, -0.14, 0.14, 0.42):
             add(cyl((x, S['nose'] + 0.07, fz - 0.2), 0.075, 0.05, M['head'], (math.pi / 2, 0, 0), 14))
+    # ---- Bremssättel (stehen fest, drehen nicht mit), Radhaus-Schalen, Diffusor-Finnen
+    rr = S['wR'] * (0.58 if S['rim'] in ('offroad', 'beadlock') else 0.66)
+    wx = W / 2 - 0.12
+    for sx in (1, -1):
+        for sz in (1, -1):
+            cz = sz * S['wb'] / 2
+            a = 0.75 if sz > 0 else -0.75  # vorne hinten oben, hinten vorne oben
+            add(box((sx * (wx - 0.005), S['wR'] + math.cos(a) * rr * 0.62, cz - math.sin(a) * rr * 0.62), (0.075, rr * 0.36, rr * 0.3), M['caliper'], (-a, 0, 0), 0.02))
+            add(liner(sx, cz))
+    if style in ('gt', 'hyper', 'wedge', 'muscle', 'ev'):
+        for x in (-0.42, -0.21, 0.0, 0.21, 0.42):
+            add(box((x, S['clr'] - 0.02, -fz + 0.2), (0.014, 0.1, 0.32), M['trim'], (0, 0, 0), 0.003))
     # ---- für alle geschlossenen Autos: Türgriffe, Embleme
     if style not in OPEN:
         sg = sh.seams[1] - 0.22 if len(sh.seams) > 1 else -0.2
@@ -618,24 +681,30 @@ def details(S, style, sh, M, full=False, body=None):
 def build_wheel(S, M):
     r, w = S['wR'], S['tireW']
     parts = []
-    bpy.ops.mesh.primitive_cylinder_add(vertices=24, radius=r, depth=w)
-    t = active()
-    place(t, (0, 0, 0), (0, 0, math.pi / 2))
-    finish(t, M['tire'], 0, 2, True)
-    bv = t.modifiers.new('bev', 'BEVEL')
-    bv.width = r * 0.2
-    bv.segments = 2
-    parts.append(t)
     rim = S['rim']
     if rim == 'beadlock':
         rim = 'offroad'
     rr = r * (0.66 if rim != 'offroad' else 0.58)
+    # Reifen als Wulst (hohl): Felge und Bremse sind sichtbar
+    bpy.ops.mesh.primitive_torus_add(major_radius=(r + rr) / 2, minor_radius=(r - rr) / 2, major_segments=44, minor_segments=14)
+    t = active()
+    sc = w / (r - rr)  # Torus-Achse ist lokal Z → auf Reifenbreite strecken
+    for v in t.data.vertices:
+        v.co.z *= sc
+    place(t, (0, 0, 0), (0, 0, math.pi / 2))
+    parts.append(finish(t, M['tire'], 0, 2, True))
+    # Felgenbett (innen sichtbar zwischen den Speichen)
+    bpy.ops.mesh.primitive_cylinder_add(vertices=36, radius=rr * 0.99, depth=w * 0.86, end_fill_type='NOTHING')
+    bed = active(); place(bed, (0, 0, 0), (0, 0, math.pi / 2)); parts.append(finish(bed, M['rim'], 0, 2, True))
     if rim == 'wire':  # Weißwand
         parts.append(cyl((w / 2 - 0.005, 0, 0), r * 0.84, 0.012, M['accent'], (0, 0, math.pi / 2), 24))
     out = w / 2 - 0.02
-    parts.append(cyl((out - 0.035, 0, 0), rr, 0.05, M['trim'], (0, 0, math.pi / 2), 24))
-    parts.append(cyl((out, 0, 0), rr, 0.025, M['rim'], (0, 0, math.pi / 2), 24))
-    bpy.ops.mesh.primitive_torus_add(major_radius=rr - 0.012, minor_radius=0.022, major_segments=24, minor_segments=6)
+    closed = rim in ('steel', 'dish')
+    if closed:
+        parts.append(cyl((out, 0, 0), rr, 0.025, M['rim'], (0, 0, math.pi / 2), 36))
+    else:
+        parts.append(cyl((out - 0.06, 0, 0), rr * 0.36, 0.06, M['trim'], (0, 0, math.pi / 2), 16))  # Nabe
+    bpy.ops.mesh.primitive_torus_add(major_radius=rr - 0.012, minor_radius=0.022, major_segments=36, minor_segments=6)
     tor = active()
     place(tor, (out + 0.012, 0, 0), (0, 0, math.pi / 2))
     parts.append(finish(tor, M['rim'], 0, 2, True))
@@ -657,8 +726,11 @@ def build_wheel(S, M):
     for k in range(5):  # Radmuttern
         a = k / 5 * math.pi * 2
         parts.append(cyl((out + 0.03, math.sin(a) * rr * 0.32, math.cos(a) * rr * 0.32), 0.014, 0.03, M['chrome'], (0, 0, math.pi / 2), 6))
-    parts.append(cyl((-0.02, 0, 0), rr * 0.82, 0.03, M['disc'], (0, 0, math.pi / 2), 20))
-    parts.append(box((0.0, rr * 0.55, -rr * 0.35), (0.07, rr * 0.38, rr * 0.3), M['caliper'], (0.6, 0, 0), 0.015))
+    parts.append(cyl((-0.02, 0, 0), rr * 0.82, 0.03, M['disc'], (0, 0, math.pi / 2), 28))
+    parts.append(cyl((-0.02, 0, 0), rr * 0.4, 0.034, M['trim'], (0, 0, math.pi / 2), 16))
+    for k in range(12):  # Bohrungen in der Bremsscheibe
+        a = k / 12 * math.pi * 2
+        parts.append(cyl((-0.004, math.sin(a) * rr * 0.62, math.cos(a) * rr * 0.62), rr * 0.035, 0.004, M['trim'], (0, 0, math.pi / 2), 6))
     if rim == 'offroad':
         for k in range(20):
             a = k / 20 * math.pi * 2

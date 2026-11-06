@@ -16,6 +16,9 @@ Dann läuft das Spiel auch unter  http://localhost:8765/spiele/nova-drive/
 
 Steuerung Handy: ◀ ▶ lenken, ▲ Gas, ▼ Bremse, HB Handbremse (driften), N₂O Nitro.
 
+Grafik: Einstellungen → Grafik. „Hyper ✦“ ist die höchste Stufe (Spiegelungen, Schattierung, mehr Detail)
+– für starke Grafikkarten. Wird beim nächsten Start aktiv.
+
 PC-Modus (automatisch am PC, sonst Einstellungen → Gerät → PC, oder Adresse mit ?pc):
   Tastatur: W/↑ Gas, S/↓ Bremse, A D/← → lenken (baut sich weich auf), Leertaste Handbremse,
             Shift Nitro, X Rückblick, C Kamera, Enter Event starten, M Karte, N Navi zum nächsten Rennen,

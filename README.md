@@ -118,6 +118,8 @@ Foto-Texturen (Poly Haven, CC0) neu laden: `python werkstatt/texturen.py` → `m
 fotografierte Felsen: `python werkstatt/felsen.py` → `models/welt/prock_*.glb`.
 **PC-Modus**: am PC automatisch (oder `index.html?pc`, Einstellungen → Gerät): Tastatur mit weicher Lenkung,
 Maus zum Umsehen/Zoomen, Gamepad auch im Menü, Tastenhilfe (H). Alle Tasten stehen in `LIES-MICH.txt`.
+**Grafik Hyper ✦** (über Ultra): GTAO-Umgebungsverdeckung, Echtzeit-Spiegelungen am eigenen Auto, Supersampling,
+mehr Gras/Detail/Sichtweite – für starke GPUs (`lib/postprocessing/GTAOPass.js` aus three.js r170, MIT).
 Ohne Server am Handy spielen: `node werkstatt/handy-datei.mjs` (braucht esbuild) baut `NovaDrive-Handy.html` – eine einzige
 Datei mit allem drin; aufs Handy laden und in Chrome öffnen. Lokal mit Handy-QR-Code: `Nova Drive starten.cmd`.
 
