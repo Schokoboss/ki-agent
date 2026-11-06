@@ -165,6 +165,25 @@ export function makeTextures(aniso) {
   return T;
 }
 
+// Echte Foto-Oberflächen (Poly Haven, CC0) aus models/tex – aufbereitet von werkstatt/texturen.py.
+// _d = Detail (Mittel 50 %, wird mit der Bodenfarbe multipliziert), _n = Normal-Map (OpenGL).
+export const PHOTO_SETS = ['grass', 'rock', 'sand', 'asphalt', 'gravel'];
+export async function loadPhotoTextures(T, aniso, url = p => p, prog = () => {}) {
+  const L = new THREE.TextureLoader();
+  const flat = new THREE.DataTexture(new Uint8Array([128, 128, 255, 255]), 1, 1, THREE.RGBAFormat);
+  flat.needsUpdate = true;
+  T.flatN = flat;
+  T.photo = {};
+  let done = 0;
+  const jobs = PHOTO_SETS.flatMap(n => ['d', 'n'].map(k => L.loadAsync(url(`models/tex/${n}_${k}.webp`)).then(t => {
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = aniso;
+    if (k === 'd') t.colorSpace = THREE.SRGBColorSpace;
+    T.photo[`${n}_${k}`] = t;
+  }).catch(e => console.warn('Foto-Textur fehlt', n, k, e)).finally(() => prog(++done / (PHOTO_SETS.length * 2)))));
+  await Promise.all(jobs);
+}
+
 // Wolkenrauschen + Bodendetails (nahtlos kachelbar); hi = doppelte Auflösung
 export async function makeDetailTextures(T, aniso, hi, prog = () => {}) {
   const rnd = mulberry32(99), S = hi ? 1024 : 512;

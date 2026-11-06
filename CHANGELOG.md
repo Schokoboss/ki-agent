@@ -10,6 +10,8 @@ Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
   Innenraum mit Sitzen und Lenkrad hinter durchsichtigen Scheiben (eigenes Auto), saubere A-/B-/C-Säulen,
   Grill und Kennzeichen exakt auf die Karosserie gesetzt. Drei Detailstufen (voll · mittel für Gegner · LOD).
 - Garage nach Preis sortiert. Motorsound je nach Autotyp.
+- Echte Foto-Oberflächen von Poly Haven (CC0): Wiese, Fels, Sand, Asphalt und Schotter mit Normal-Maps – Boden und
+  Straßen haben jetzt Relief im Licht (Felshänge dreiseitig projiziert). Laden/Aufbereiten: `werkstatt/texturen.py`.
 - Navigation: Route zu jedem Ziel über das Straßennetz (Karte → „🧭 Navi starten“, Pause → Navi), Pfeile auf der Straße,
   Abbiegehinweise mit Entfernung, Sprachansagen, Neuberechnung beim Verfahren; Rennstrecke wird vorab angezeigt.
 - Grafik Ultra, Ladebildschirm mit Fortschritt, vorberechnetes Licht (siehe frühere Commits).

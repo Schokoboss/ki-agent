@@ -2,9 +2,9 @@
 import * as THREE from '../lib/three.module.min.js';
 import { World, FESTIVAL, HALF } from './terrain.js';
 import { Scenery } from './world.js';
-import { makeTextures, makeDetailTextures } from './textures.js';
+import { makeTextures, makeDetailTextures, loadPhotoTextures } from './textures.js';
 import { buildCar, styleDims, loadCarModels, setTailGlow, setCarDetail } from './carmodel.js';
-import { loadWorldModels } from './models.js';
+import { loadWorldModels, modelUrl } from './models.js';
 import { Vehicle, carContact } from './physics.js';
 import { Traffic } from './ai.js';
 import { Events, Skills, TYPE_NAMES } from './events.js';
@@ -85,7 +85,8 @@ class Game {
     this.world = new World(this.quality);
     this.world.events = EVENTS;
     await this.world.generate(sec(0.02, 0.62)); // meldet 0…0.6
-    await makeDetailTextures(this.T, aniso, this.quality >= 3, sec(0.38, 0.45));
+    await makeDetailTextures(this.T, aniso, this.quality >= 3, sec(0.38, 0.43));
+    await loadPhotoTextures(this.T, aniso, modelUrl, sec(0.43, 0.45));
     prog(0.45, 'Modelle aus der Werkstatt laden');
     await loadWorldModels(sec(0.45, 0.5));
     setCarDetail(this.quality);

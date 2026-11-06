@@ -318,29 +318,55 @@ export class Scenery {
   // Boden mit echten Oberflächen: Gras, Fels (Hänge, dreiseitig projiziert), Sand – gemischt nach Neigung & Höhe
   terrainSplat() {
     const T = this.T;
-    this.splatU = { tGrass: { value: T.dGrass }, tRock: { value: T.dRock }, tSand: { value: T.dSand }, uWet: { value: 0 } };
+    // Foto-Oberflächen von Poly Haven, falls geladen – sonst die gemalten Detailtexturen ohne Relief
+    const P = T.photo || {}, ph = !!(P.grass_d && P.rock_d && P.sand_d);
+    const flat = T.flatN;
+    this.splatU = {
+      tGrass: { value: ph ? P.grass_d : T.dGrass }, tRock: { value: ph ? P.rock_d : T.dRock }, tSand: { value: ph ? P.sand_d : T.dSand },
+      nGrass: { value: (ph && P.grass_n) || flat }, nRock: { value: (ph && P.rock_n) || flat }, nSand: { value: (ph && P.sand_n) || flat },
+      uWet: { value: 0 }, uNStr: { value: ph && flat ? (this.q >= 3 ? 1.0 : 0.8) : 0 },
+    };
+    // Kachelgrößen (Wiederholungen pro Meter): Foto-Gras ≈ 3 m, Fels ≈ 7 m, Sand ≈ 4 m
+    const S = ph ? { g1: '0.33', g2: '0.047', r: '0.14', s1: '0.25', s2: '0.04' } : { g1: '0.21', g2: '0.037', r: '0.09', s1: '0.16', s2: '0.03' };
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0, envMapIntensity: 0.35 });
     mat.onBeforeCompile = sh => {
       Object.assign(sh.uniforms, this.splatU);
       sh.vertexShader = 'varying vec3 vTW; varying vec3 vTN;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
         vTW = (modelMatrix * vec4(transformed, 1.0)).xyz; vTN = normalize(mat3(modelMatrix) * objectNormal);`);
-      sh.fragmentShader = 'uniform sampler2D tGrass, tRock, tSand; uniform float uWet; varying vec3 vTW; varying vec3 vTN;\n' + sh.fragmentShader
+      sh.fragmentShader = 'uniform sampler2D tGrass, tRock, tSand, nGrass, nRock, nSand; uniform float uWet, uNStr; varying vec3 vTW; varying vec3 vTN;\n' + sh.fragmentShader
         .replace('#include <map_fragment>', `
           float dist = length(vTW - cameraPosition);
           float far = smoothstep(60.0, 380.0, dist);
-          vec3 g1 = texture2D(tGrass, vTW.xz * 0.21).rgb, g2 = texture2D(tGrass, vTW.xz * 0.037).rgb;
+          vec2 uG1 = vTW.xz * ${S.g1}, uG2 = vTW.xz * ${S.g2};
+          vec3 g1 = texture2D(tGrass, uG1).rgb, g2 = texture2D(tGrass, uG2).rgb;
           vec3 grass = mix(mix(g1, g2, 0.35), g2, far);
           vec3 an = abs(normalize(vTN)); an /= (an.x + an.y + an.z);
-          vec3 rk = texture2D(tRock, vTW.zy * 0.09).rgb * an.x + texture2D(tRock, vTW.xz * 0.09).rgb * an.y + texture2D(tRock, vTW.xy * 0.09).rgb * an.z;
-          vec3 sand = mix(texture2D(tSand, vTW.xz * 0.16).rgb, texture2D(tSand, vTW.xz * 0.03).rgb, far);
+          vec3 rk = texture2D(tRock, vTW.zy * ${S.r}).rgb * an.x + texture2D(tRock, vTW.xz * ${S.r}).rgb * an.y + texture2D(tRock, vTW.xy * ${S.r}).rgb * an.z;
+          vec3 sand = mix(texture2D(tSand, vTW.xz * ${S.s1}).rgb, texture2D(tSand, vTW.xz * ${S.s2}).rgb, far);
           float slope = 1.0 - clamp(normalize(vTN).y, 0.0, 1.0);
           float wRock = smoothstep(0.3, 0.52, slope);
           float wSand = smoothstep(3.4, 1.7, vTW.y) * (1.0 - wRock);
           vec3 det = mix(grass, sand, wSand);
           det = mix(det, rk, wRock);
-          diffuseColor.rgb *= det * 1.85 * (1.0 - uWet * 0.22);`)
+          diffuseColor.rgb *= det * 1.85 * (1.0 - uWet * 0.22);
+          // Relief: Normal-Maps in Weltkoordinaten (oben: xz, Hänge: dreiseitig)
+          vec3 wN = normalize(vTN);
+          float nK = uNStr * (1.0 - far);
+          if (nK > 0.001) {
+            vec3 nG = texture2D(nGrass, uG1).xyz * 2.0 - 1.0;
+            vec3 nS = texture2D(nSand, vTW.xz * ${S.s1}).xyz * 2.0 - 1.0;
+            vec3 nRx = texture2D(nRock, vTW.zy * ${S.r}).xyz * 2.0 - 1.0;
+            vec3 nRy = texture2D(nRock, vTW.xz * ${S.r}).xyz * 2.0 - 1.0;
+            vec3 nRz = texture2D(nRock, vTW.xy * ${S.r}).xyz * 2.0 - 1.0;
+            vec3 pert = mix(vec3(nG.x, 0.0, nG.y) * 0.8, vec3(nS.x, 0.0, nS.y), wSand);
+            vec3 pr = vec3(0.0, nRx.y, nRx.x) * an.x + vec3(nRy.x, 0.0, nRy.y) * an.y + vec3(nRz.x, nRz.y, 0.0) * an.z;
+            pert = mix(pert, pr * 1.3, wRock);
+            wN = normalize(wN + pert * nK);
+          }`)
         .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
-          roughnessFactor = mix(roughnessFactor, 0.82, wRock * 0.6) * (1.0 - uWet * 0.3);`);
+          roughnessFactor = mix(roughnessFactor, 0.82, wRock * 0.6) * (1.0 - uWet * 0.3);`)
+        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+          normal = normalize((viewMatrix * vec4(wN, 0.0)).xyz);`);
     };
     return mat;
   }
@@ -376,6 +402,7 @@ export class Scenery {
       }
       const mat = mats[r.def.type].clone();
       mat.userData.dirt = r.def.type === 'dirt';
+      this.roadDetail(mat, mat.userData.dirt);
       this.roadMats.push(mat);
       mat.polygonOffset = true; mat.polygonOffsetFactor = -1; mat.polygonOffsetUnits = -2 - order * 2;
       const m = new THREE.Mesh(b.build(), mat);
@@ -394,6 +421,33 @@ export class Scenery {
     plaza.receiveShadow = true;
     plaza.renderOrder = 20;
     this.scene.add(plaza);
+  }
+
+  // Foto-Körnung + Relief für Straßen (Asphalt bzw. Schotter von Poly Haven), in Weltkoordinaten gekachelt
+  roadDetail(mat, dirt) {
+    const P = this.T.photo || {}, d = P[dirt ? 'gravel_d' : 'asphalt_d'], n = P[dirt ? 'gravel_n' : 'asphalt_n'];
+    if (!d || this.q < 1) return;
+    const U = { tDet: { value: d }, tNor: { value: n || this.T.flatN }, uNStr: { value: n && this.q >= 2 ? (dirt ? 1.1 : 0.7) : 0 } };
+    const k = dirt ? '0.3' : '0.32', mixK = dirt ? '0.85' : '0.7';
+    mat.onBeforeCompile = sh => {
+      Object.assign(sh.uniforms, U);
+      sh.vertexShader = 'varying vec3 vRW;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+        vRW = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
+      sh.fragmentShader = 'uniform sampler2D tDet, tNor; uniform float uNStr; varying vec3 vRW;\n' + sh.fragmentShader
+        .replace('#include <map_fragment>', `#include <map_fragment>
+          float rFar = smoothstep(25.0, 220.0, length(vRW - cameraPosition));
+          vec2 rUv = vRW.xz * ${k};
+          vec3 rd = mix(texture2D(tDet, rUv).rgb, texture2D(tDet, rUv * 0.21).rgb, 0.3 + rFar * 0.4) * 2.0;
+          diffuseColor.rgb *= mix(vec3(1.0), rd, ${mixK});`)
+        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+          if (uNStr > 0.001) {
+            vec3 rn = texture2D(tNor, rUv).xyz * 2.0 - 1.0;
+            vec3 rg = normalize((vec4(normal, 0.0) * viewMatrix).xyz); // Sicht → Welt (Rotation transponiert)
+            vec3 rw = normalize(rg + vec3(rn.x, 0.0, rn.y) * uNStr * (1.0 - rFar));
+            normal = normalize((viewMatrix * vec4(rw, 0.0)).xyz);
+          }`);
+    };
+    mat.customProgramCacheKey = () => 'road-' + (dirt ? 'd' : 'a');
   }
 
   // ---------------------------------------------------------------- Wasser
