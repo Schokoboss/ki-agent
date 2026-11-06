@@ -116,7 +116,7 @@ mit `gltf-transform meshopt` komprimieren (je Auto `<id>.glb` voll, `<id>_mid.gl
 Vorschau aller Modelle: `werkstatt/vorschau.html?cars=sundog,atlas` (16 Autos, Navigation über die Karte).
 Foto-Texturen (Poly Haven, CC0) neu laden: `python werkstatt/texturen.py` → `models/tex/` (Quellen in `QUELLEN.txt`);
 fotografierte Felsen und Unterholz: `python werkstatt/felsen.py` → `models/welt/prock_*.glb`, `pv_*.glb`;
-HD-Paket (2K + Rauheit): `python werkstatt/texturen.py --hd` → `models/tex-hd/` (nicht in der Einzeldatei).
+HD-Paket (2K + Rauheit): `python werkstatt/texturen.py --hd` → `models/tex-hd/`; Einzeldatei mit HD: `node werkstatt/handy-datei.mjs --hd` → `NovaDrive-HD.html` (~29 MB).
 Offline: `sw.js` im Spielordner speichert alles Geladene (nur über http/https, z. B. Starter oder GitHub Pages).
 **PC-Modus**: am PC automatisch (oder `index.html?pc`, Einstellungen → Gerät): Tastatur mit weicher Lenkung,
 Maus zum Umsehen/Zoomen, Gamepad auch im Menü, Tastenhilfe (H). Alle Tasten stehen in `LIES-MICH.txt`.

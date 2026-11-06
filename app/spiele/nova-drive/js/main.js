@@ -98,7 +98,9 @@ class Game {
     await makeDetailTextures(this.T, aniso, this.quality >= 3, sec(0.38, 0.43));
     // HD-Paket (2K-Texturen mit Rauheit): automatisch auf Hyper und am PC ab Ultra – nicht in der Einzeldatei
     const s = this.settings;
-    this.hd = !globalThis.__NOVA_MODELS && (s.hd === 'on' || (s.hd === 'auto' && (this.quality >= 4 || (this.quality >= 3 && this.pc))));
+    // Einzeldatei: HD nur, wenn das HD-Paket eingebettet ist (NovaDrive-HD.html) – dann schon ab „Hoch“ automatisch
+    const emb = globalThis.__NOVA_MODELS, embHD = !!(emb && emb['models/tex-hd/grass_d.webp']);
+    this.hd = (!emb || embHD) && (s.hd === 'on' || (s.hd === 'auto' && (embHD ? this.quality >= 2 : this.quality >= 4 || (this.quality >= 3 && this.pc))));
     await loadPhotoTextures(this.T, aniso, modelUrl, sec(0.43, 0.45), this.hd);
     // offline spielbar: Dateien werden beim ersten Laden zwischengespeichert (nur über http/https)
     if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol) && !globalThis.__NOVA_MODELS) navigator.serviceWorker.register('sw.js').catch(() => {});
