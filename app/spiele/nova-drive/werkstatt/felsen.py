@@ -18,20 +18,19 @@ from mathutils import Vector
 
 # Spielname: (Poly-Haven-ID, Objekt im Set oder None = alle, Ziel-Dreiecke, Breite in m oder None = echte Größe, Texturgröße)
 ROCKS = {
-    'prock_a': ('boulder_01', None, 1100, 2.2, 512),
-    'prock_b': ('namaqualand_boulder_02', None, 1100, 2.2, 512),
-    'prock_c': ('rock_moss_set_01', 'largest', 900, 2.2, 512),
-    'prock_d': ('rock_moss_set_02', 'largest', 900, 2.2, 512),
-    'prock_e': ('namaqualand_boulder_04', None, 1100, 2.2, 512),
+    'prock_a': ('boulder_01', None, 1100, 2.2, 1024),
+    'prock_b': ('namaqualand_boulder_02', None, 1100, 2.2, 1024),
+    'prock_c': ('rock_moss_set_01', 'largest', 900, 2.2, 1024),
+    'prock_d': ('rock_moss_set_02', 'largest', 900, 2.2, 1024),
+    'prock_e': ('namaqualand_boulder_04', None, 1100, 2.2, 1024),
     # Pflanzen & Holz in echter Größe (Meter)
     # Pflanzen-Dateien enthalten mehrere Varianten nebeneinander → einzeln herauslösen (größte, zweitgrößte)
-    'pv_fern': ('fern_02', 'largest', 3000, None, 512),
-    'pv_fern_b': ('fern_02', 'second', 3000, None, 512),
-    'pv_shrub_a': ('shrub_03', 'largest', 4000, None, 512),
-    'pv_shrub_b': ('shrub_04', 'largest', 5000, None, 512),
-    'pv_sorrel': ('shrub_sorrel_01', 'largest', 1500, None, 512),
-    'pv_stump': ('tree_stump_01', None, 1600, None, 512),
-    'pv_log': ('dead_tree_trunk', None, 2400, None, 512),
+    'pv_fern': ('fern_02', 'largest', 3000, None, 1024),
+    'pv_fern_b': ('fern_02', 'second', 3000, None, 1024),
+    'pv_shrub_a': ('shrub_03', 'largest', 4000, None, 1024),
+    'pv_shrub_b': ('shrub_04', 'largest', 5000, None, 1024),
+    'pv_stump': ('tree_stump_01', None, 1600, None, 1024),
+    'pv_log': ('dead_tree_trunk', None, 2400, None, 1024),
 }
 ONLY = [a for a in sys.argv[1:] if not a.startswith('-')]
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')

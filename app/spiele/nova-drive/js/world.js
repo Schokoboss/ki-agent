@@ -9,6 +9,26 @@ import { has, merged, clone, nodeGeometry, meshOf, scene as modelScene } from '.
 const lin = v => Math.pow(v, 2.2);
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
 const _c = new THREE.Color();
+// GLSL-Baustein gegen sichtbare Textur-Kacheln (Gelände & Straßen)
+const AT_GLSL = `
+// Gegen sichtbare Kacheln: zwei versetzte Lesungen, gemischt über eine weiche Rauschkarte (wechselt alle paar Meter)
+uniform sampler2D tNoiseAT; uniform float uAT;
+vec3 atTex(sampler2D t, vec2 uv) {
+  if (uAT < 0.5) return texture2D(t, uv).rgb;
+  float l = texture2D(tNoiseAT, uv * 0.0071).x * 8.0, i = floor(l), f = fract(l);
+  vec2 oa = sin(vec2(3.0, 7.0) * i), ob = sin(vec2(3.0, 7.0) * (i + 1.0));
+  vec2 dx = dFdx(uv), dy = dFdy(uv);
+  vec3 a = textureGrad(t, uv + oa, dx, dy).rgb, b = textureGrad(t, uv + ob, dx, dy).rgb;
+  return mix(a, b, smoothstep(0.2, 0.8, f - 0.1 * dot(a - b, vec3(1.0))));
+}
+vec3 atNrm(sampler2D t, vec2 uv) {
+  if (uAT < 0.5) return texture2D(t, uv).xyz;
+  float l = texture2D(tNoiseAT, uv * 0.0071).x * 8.0, i = floor(l), f = fract(l);
+  vec2 oa = sin(vec2(3.0, 7.0) * i), ob = sin(vec2(3.0, 7.0) * (i + 1.0));
+  vec2 dx = dFdx(uv), dy = dFdy(uv);
+  return mix(textureGrad(t, uv + oa, dx, dy).xyz, textureGrad(t, uv + ob, dx, dy).xyz, smoothstep(0.2, 0.8, f));
+}
+`;
 
 const AO_DIST = [5, 12, 26, 55];
 export const EVENT_COLORS = { race: '#7a6bff', trap: '#ff9a1f', drift: '#ff3d9a', jump: '#ffd400' };
@@ -317,6 +337,33 @@ export class Scenery {
   }
 
   // Boden mit echten Oberflächen: Gras, Fels (Hänge, dreiseitig projiziert), Sand – gemischt nach Neigung & Höhe
+  // Walddichte (0…1) als Textur über die ganze Insel: aus den Baumstandorten, weich geglättet
+  forestDensity() {
+    const N = 256, cnt = new Float32Array(N * N), cell = (2 * HALF) / N;
+    for (const t of this.world.trees) {
+      if (t.type === 2) continue; // Strandbäume: kein Waldboden
+      const i = Math.floor((t.x + HALF) / cell), j = Math.floor((t.z + HALF) / cell);
+      if (i >= 0 && j >= 0 && i < N && j < N) cnt[j * N + i] += 1;
+    }
+    let a = cnt, b = new Float32Array(N * N);
+    for (let pass = 0; pass < 3; pass++) {
+      for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+        let s = 0, n = 0;
+        for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+          const x = i + di, z = j + dj;
+          if (x >= 0 && z >= 0 && x < N && z < N) { s += a[z * N + x]; n++; }
+        }
+        b[j * N + i] = s / n;
+      }
+      [a, b] = [b, a];
+    }
+    const d = new Uint8Array(N * N * 4);
+    for (let k = 0; k < N * N; k++) { const v = Math.round(255 * (1 - Math.exp(-a[k] * 1.3))); d[k * 4] = d[k * 4 + 1] = d[k * 4 + 2] = v; d[k * 4 + 3] = 255; }
+    const t = new THREE.DataTexture(d, N, N, THREE.RGBAFormat);
+    t.magFilter = t.minFilter = THREE.LinearFilter; t.needsUpdate = true;
+    return t;
+  }
+
   terrainSplat() {
     const T = this.T;
     // Foto-Oberflächen von Poly Haven, falls geladen – sonst die gemalten Detailtexturen ohne Relief
@@ -326,6 +373,9 @@ export class Scenery {
       tGrass: { value: ph ? P.grass_d : T.dGrass }, tRock: { value: ph ? P.rock_d : T.dRock }, tSand: { value: ph ? P.sand_d : T.dSand },
       nGrass: { value: (ph && P.grass_n) || flat }, nRock: { value: (ph && P.rock_n) || flat }, nSand: { value: (ph && P.sand_n) || flat },
       rGrass: { value: P.grass_r || T.flatR || flat }, rRock: { value: P.rock_r || T.flatR || flat }, rSand: { value: P.sand_r || T.flatR || flat },
+      tForest: { value: P.forest_d || (ph ? P.grass_d : T.dGrass) }, nForest: { value: P.forest_n || flat }, rForest: { value: P.forest_r || T.flatR || flat },
+      tDens: { value: this.forestDensity() }, uIsl: { value: HALF },
+      tNoiseAT: { value: T.noise }, uAT: { value: this.q >= 3 && T.noise ? 1 : 0 },
       uWet: { value: 0 }, uNStr: { value: ph && flat ? (this.q >= 3 ? 1.0 : 0.8) : 0 },
     };
     // Kachelgrößen (Wiederholungen pro Meter): Foto-Gras ≈ 3 m, Fels ≈ 7 m, Sand ≈ 4 m
@@ -335,32 +385,39 @@ export class Scenery {
       Object.assign(sh.uniforms, this.splatU);
       sh.vertexShader = 'varying vec3 vTW; varying vec3 vTN;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
         vTW = (modelMatrix * vec4(transformed, 1.0)).xyz; vTN = normalize(mat3(modelMatrix) * objectNormal);`);
-      sh.fragmentShader = 'uniform sampler2D tGrass, tRock, tSand, nGrass, nRock, nSand, rGrass, rRock, rSand; uniform float uWet, uNStr; varying vec3 vTW; varying vec3 vTN;\n' + sh.fragmentShader
+      sh.fragmentShader = 'uniform sampler2D tGrass, tRock, tSand, nGrass, nRock, nSand, rGrass, rRock, rSand, tForest, nForest, rForest, tDens; uniform float uWet, uNStr, uIsl; varying vec3 vTW; varying vec3 vTN;\n' + AT_GLSL + sh.fragmentShader
         .replace('#include <map_fragment>', `
           float dist = length(vTW - cameraPosition);
           float far = smoothstep(60.0, 380.0, dist);
-          vec2 uG1 = vTW.xz * ${S.g1}, uG2 = vTW.xz * ${S.g2};
-          vec3 g1 = texture2D(tGrass, uG1).rgb, g2 = texture2D(tGrass, uG2).rgb;
+          vec2 uG1 = vTW.xz * ${S.g1}, uG2 = vTW.xz * ${S.g2}, uF1 = vTW.xz * 0.3;
+          vec3 g1 = atTex(tGrass, uG1), g2 = atTex(tGrass, uG2);
           vec3 grass = mix(mix(g1, g2, 0.35), g2, far);
+          // Waldboden (Laub, Nadeln, Moos) unter den Bäumen – Dichte aus den Baumstandorten
+          float dens = texture2D(tDens, (vTW.xz + uIsl) / (2.0 * uIsl)).r;
+          vec3 forest = mix(atTex(tForest, uF1), texture2D(tForest, vTW.xz * 0.045).rgb, far * 0.8) * vec3(1.22, 0.98, 0.8);
           vec3 an = abs(normalize(vTN)); an /= (an.x + an.y + an.z);
           vec3 rk = texture2D(tRock, vTW.zy * ${S.r}).rgb * an.x + texture2D(tRock, vTW.xz * ${S.r}).rgb * an.y + texture2D(tRock, vTW.xy * ${S.r}).rgb * an.z;
-          vec3 sand = mix(texture2D(tSand, vTW.xz * ${S.s1}).rgb, texture2D(tSand, vTW.xz * ${S.s2}).rgb, far);
+          vec3 sand = mix(atTex(tSand, vTW.xz * ${S.s1}), texture2D(tSand, vTW.xz * ${S.s2}).rgb, far);
           float slope = 1.0 - clamp(normalize(vTN).y, 0.0, 1.0);
           float wRock = smoothstep(0.3, 0.52, slope);
           float wSand = smoothstep(3.4, 1.7, vTW.y) * (1.0 - wRock);
+          float wForest = smoothstep(0.16, 0.55, dens) * (1.0 - wRock) * (1.0 - wSand);
           vec3 det = mix(grass, sand, wSand);
+          det = mix(det, forest, wForest);
           det = mix(det, rk, wRock);
           diffuseColor.rgb *= det * 1.85 * (1.0 - uWet * 0.22);
           // Relief: Normal-Maps in Weltkoordinaten (oben: xz, Hänge: dreiseitig)
           vec3 wN = normalize(vTN);
           float nK = uNStr * (1.0 - far);
           if (nK > 0.001) {
-            vec3 nG = texture2D(nGrass, uG1).xyz * 2.0 - 1.0;
-            vec3 nS = texture2D(nSand, vTW.xz * ${S.s1}).xyz * 2.0 - 1.0;
+            vec3 nG = atNrm(nGrass, uG1) * 2.0 - 1.0;
+            vec3 nS = atNrm(nSand, vTW.xz * ${S.s1}) * 2.0 - 1.0;
+            vec3 nF = atNrm(nForest, uF1) * 2.0 - 1.0;
             vec3 nRx = texture2D(nRock, vTW.zy * ${S.r}).xyz * 2.0 - 1.0;
             vec3 nRy = texture2D(nRock, vTW.xz * ${S.r}).xyz * 2.0 - 1.0;
             vec3 nRz = texture2D(nRock, vTW.xy * ${S.r}).xyz * 2.0 - 1.0;
             vec3 pert = mix(vec3(nG.x, 0.0, nG.y) * 0.8, vec3(nS.x, 0.0, nS.y), wSand);
+            pert = mix(pert, vec3(nF.x, 0.0, nF.y) * 1.1, wForest);
             vec3 pr = vec3(0.0, nRx.y, nRx.x) * an.x + vec3(nRy.x, 0.0, nRy.y) * an.y + vec3(nRz.x, nRz.y, 0.0) * an.z;
             pert = mix(pert, pr * 1.3, wRock);
             wN = normalize(wN + pert * nK);
@@ -368,6 +425,7 @@ export class Scenery {
         .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
           // HD-Paket: echte Rauheit (Mittel 0,5 → Faktor 1), sonst neutral
           float rr = mix(texture2D(rGrass, uG1).r, texture2D(rSand, vTW.xz * ${S.s1}).r, wSand);
+          rr = mix(rr, texture2D(rForest, uF1).r, wForest);
           rr = mix(rr, texture2D(rRock, vTW.xz * ${S.r}).r, wRock);
           roughnessFactor *= clamp(mix(1.0, rr * 2.0, 1.0 - far), 0.55, 1.35);
           roughnessFactor = mix(roughnessFactor, 0.82, wRock * 0.6) * (1.0 - uWet * 0.3);`)
@@ -434,23 +492,24 @@ export class Scenery {
     const P = this.T.photo || {}, d = P[dirt ? 'gravel_d' : 'asphalt_d'], n = P[dirt ? 'gravel_n' : 'asphalt_n'];
     if (!d || this.q < 1) return;
     const r = P[dirt ? 'gravel_r' : 'asphalt_r'];
-    const U = { tDet: { value: d }, tNor: { value: n || this.T.flatN }, tRough: { value: r || this.T.flatR || this.T.flatN }, uNStr: { value: n && this.q >= 2 ? (dirt ? 1.1 : 0.7) : 0 } };
+    const U = { tDet: { value: d }, tNor: { value: n || this.T.flatN }, tRough: { value: r || this.T.flatR || this.T.flatN }, uNStr: { value: n && this.q >= 2 ? (dirt ? 1.1 : 0.7) : 0 },
+      tNoiseAT: { value: this.T.noise }, uAT: { value: this.q >= 3 && this.T.noise ? 1 : 0 } };
     const k = dirt ? '0.3' : '0.32', mixK = dirt ? '0.85' : '0.7';
     mat.onBeforeCompile = sh => {
       Object.assign(sh.uniforms, U);
       sh.vertexShader = 'varying vec3 vRW;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
         vRW = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
-      sh.fragmentShader = 'uniform sampler2D tDet, tNor, tRough; uniform float uNStr; varying vec3 vRW;\n' + sh.fragmentShader
+      sh.fragmentShader = 'uniform sampler2D tDet, tNor, tRough; uniform float uNStr; varying vec3 vRW;\n' + AT_GLSL + sh.fragmentShader
         .replace('#include <map_fragment>', `#include <map_fragment>
           float rFar = smoothstep(25.0, 220.0, length(vRW - cameraPosition));
           vec2 rUv = vRW.xz * ${k};
-          vec3 rd = mix(texture2D(tDet, rUv).rgb, texture2D(tDet, rUv * 0.21).rgb, 0.3 + rFar * 0.4) * 2.0;
+          vec3 rd = mix(atTex(tDet, rUv), texture2D(tDet, rUv * 0.21).rgb, 0.3 + rFar * 0.4) * 2.0;
           diffuseColor.rgb *= mix(vec3(1.0), rd, ${mixK});`)
         .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
           roughnessFactor *= clamp(mix(1.0, texture2D(tRough, rUv).r * 2.0, 1.0 - rFar), 0.6, 1.3);`)
         .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
           if (uNStr > 0.001) {
-            vec3 rn = texture2D(tNor, rUv).xyz * 2.0 - 1.0;
+            vec3 rn = atNrm(tNor, rUv) * 2.0 - 1.0;
             vec3 rg = normalize((vec4(normal, 0.0) * viewMatrix).xyz); // Sicht → Welt (Rotation transponiert)
             vec3 rw = normalize(rg + vec3(rn.x, 0.0, rn.y) * uNStr * (1.0 - rFar));
             normal = normalize((viewMatrix * vec4(rw, 0.0)).xyz);
@@ -1211,14 +1270,47 @@ export class Scenery {
     }
   }
 
+  plasterMaterial(P) {
+    const U = { tPl: { value: P.wall_d }, nPl: { value: P.wall_n || this.T.flatN }, uNStr: { value: P.wall_n ? 0.9 : 0 } };
+    const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, envMapIntensity: 0.4 });
+    m.onBeforeCompile = sh => {
+      Object.assign(sh.uniforms, U);
+      sh.vertexShader = 'varying vec3 vPW; varying vec3 vPN;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+        #ifdef USE_INSTANCING
+          vPW = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz; vPN = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * objectNormal);
+        #else
+          vPW = (modelMatrix * vec4(transformed, 1.0)).xyz; vPN = normalize(mat3(modelMatrix) * objectNormal);
+        #endif`);
+      sh.fragmentShader = 'uniform sampler2D tPl, nPl; uniform float uNStr; varying vec3 vPW; varying vec3 vPN;\n' + sh.fragmentShader
+        .replace('#include <map_fragment>', `#include <map_fragment>
+          vec3 pa = abs(normalize(vPN)); pa /= (pa.x + pa.y + pa.z);
+          vec2 ux = vPW.zy * 0.45, uy = vPW.xz * 0.45, uz = vPW.xy * 0.45;
+          vec3 pd = texture2D(tPl, ux).rgb * pa.x + texture2D(tPl, uy).rgb * pa.y + texture2D(tPl, uz).rgb * pa.z;
+          float pFar = smoothstep(40.0, 260.0, length(vPW - cameraPosition));
+          diffuseColor.rgb *= mix(mix(vec3(1.0), pd * 2.0, 0.6), vec3(1.0), pFar * 0.6);`)
+        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+          if (uNStr > 0.001) {
+            vec3 nx = texture2D(nPl, ux).xyz * 2.0 - 1.0, nz = texture2D(nPl, uz).xyz * 2.0 - 1.0;
+            vec3 wn = normalize(normalize(vPN) + (vec3(0.0, nx.y, nx.x) * pa.x + vec3(nz.x, nz.y, 0.0) * pa.z) * uNStr * (1.0 - pFar));
+            normal = normalize((viewMatrix * vec4(wn, 0.0)).xyz);
+          }`);
+    };
+    m.customProgramCacheKey = () => 'plaster';
+    return m;
+  }
+
   buildBuildingsM() {
     if (!has('house_a')) return this.buildBuildings();
     const byV = {};
     for (const b of this.world.buildings) (byV[b.variant] ||= []).push(b);
-    const wallMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    // Wände: Putz-Foto (Poly Haven, CC0) dreiseitig in Weltkoordinaten + Relief; Fenster: spiegelndes Glas
+    const P = this.T.photo || {};
+    const wallMat = P.wall_d && this.q >= 2 ? this.plasterMaterial(P) : new THREE.MeshLambertMaterial({ vertexColors: true });
     const restMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
-    this.winLitMat = new THREE.MeshLambertMaterial({ vertexColors: true, emissive: 0xffc46a, emissiveIntensity: 0 });
-    const winDark = new THREE.MeshLambertMaterial({ vertexColors: true });
+    const glass = this.q >= 2;
+    this.winLitMat = glass ? new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.12, metalness: 0.1, envMapIntensity: 1.3, emissive: 0xffc46a, emissiveIntensity: 0 })
+      : new THREE.MeshLambertMaterial({ vertexColors: true, emissive: 0xffc46a, emissiveIntensity: 0 });
+    const winDark = glass ? new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.08, metalness: 0.15, envMapIntensity: 1.5 }) : new THREE.MeshLambertMaterial({ vertexColors: true });
     const rnd = mulberry32(3);
     for (const v in byV) {
       const list = byV[v];

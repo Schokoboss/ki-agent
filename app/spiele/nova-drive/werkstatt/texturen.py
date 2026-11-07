@@ -22,6 +22,8 @@ SETS = {
     'sand': ('sand_01', 0.6, 1.1, 1024),
     'asphalt': ('asphalt_track', 0.2, 1.3, 512),
     'gravel': ('rocky_trail_02', 0.6, 1.1, 1024),
+    'forest': ('forest_leaves_02', 0.7, 1.05, 1024),  # Waldboden: Laub, Nadeln, Moos – unter den Bäumen
+    'wall': ('white_rough_plaster', 0.25, 1.2, 1024),   # rauer Außenputz für die Hauswände (Farbe kommt vom Haus)
 }
 HD = '--hd' in sys.argv
 RES = '2k' if HD else '1k'

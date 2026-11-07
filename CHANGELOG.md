@@ -51,6 +51,12 @@ Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 - „📲 Als App installieren“ ist am Handy immer sichtbar (außer das Spiel läuft schon als App); bietet der Browser es nicht
   direkt an, zeigt der Knopf eine Anleitung (Chrome / Samsung Internet).
 - Grafik „Auto“ = **Hyper** (GPU-lastig); die Auflösung regelt bei Bedarf herunter, bei Dauer-Ruckeln kommt ein Ultra-Tipp.
+- **Alle Texturen verbessert**: Waldboden aus Laub, Nadeln und Moos unter den Bäumen (Poly Haven, CC0; Dichtekarte aus
+  den Baumstandorten), keine sichtbaren Kachelmuster mehr bei Gras, Sand, Waldboden und Straßen (zwei versetzte Lesungen,
+  weich gemischt), gemalte Texturen in 4-facher Auflösung mit mehr Details (abgefahrene Fahrbahnmarkierungen, Reifenspuren,
+  Flickstellen; Fassaden mit Rahmen, Sprossen, Spiegelung, Gardinen, Fensterbänken; Festivalplatz mit Pflaster und
+  Schriftzug; Plakate, Banner, Warnstreifen, Zeltstoff), fotografierte Felsen/Farne/Holz mit 1K-Texturen,
+  Häuser mit rauem Außenputz (Foto, dreiseitig projiziert, mit Relief) und spiegelnden Glasfenstern.
 - Navigation: Route zu jedem Ziel über das Straßennetz (Karte → „🧭 Navi starten“, Pause → Navi), Pfeile auf der Straße,
   Abbiegehinweise mit Entfernung, Sprachansagen, Neuberechnung beim Verfahren; Rennstrecke wird vorab angezeigt.
 - Grafik Ultra, Ladebildschirm mit Fortschritt, vorberechnetes Licht (siehe frühere Commits).
