@@ -1,5 +1,13 @@
-NOVA DRIVE – lokal spielen
-==========================
+NOVA DRIVE
+==========
+
+Am einfachsten (Handy oder PC, ohne Installation):
+  https://schokoboss.github.io/ki-agent/spiele/nova-drive/
+  Einmal geöffnet, bleibt das Spiel gespeichert und läuft auch offline.
+  Am Handy im Browser-Menü „Zum Startbildschirm hinzufügen“ → startet wie eine App im Vollbild.
+
+Lokal spielen
+-------------
 
 1. Ordner entpacken (z. B. auf den Desktop).
 2. Doppelklick auf „Nova Drive starten.cmd“.

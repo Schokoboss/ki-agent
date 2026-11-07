@@ -108,8 +108,9 @@ Nova kann auch **direkt auf dem Handy** laufen – ganz ohne Laptop, sogar ohne 
 
 ## Nova Drive (Spiel)
 
-Open-World-Festival-Rennspiel fürs Handy in `app/spiele/nova-drive/` – mit der App auf GitHub Pages unter
-`…/ki-agent/spiele/nova-drive/` (Querformat, „Zum Startbildschirm hinzufügen“ macht eine App daraus).
+Open-World-Festival-Rennspiel fürs Handy in `app/spiele/nova-drive/` – auf GitHub Pages:
+https://schokoboss.github.io/ki-agent/spiele/nova-drive/ (Querformat, „Zum Startbildschirm hinzufügen“ macht eine App daraus,
+offline spielbar). Veröffentlicht als eigener Ordner `spiele/nova-drive/` im Zweig `gh-pages` (ohne `werkstatt/`).
 Lokal testen: `python -m http.server` im Ordner `app` und `http://localhost:8000/spiele/nova-drive/` öffnen.
 Automodelle neu bauen: `python werkstatt/autos.py -- ../models` (braucht Blender bzw. `pip install bpy`), danach
 mit `gltf-transform meshopt` komprimieren (je Auto `<id>.glb` voll, `<id>_mid.glb` für Gegner, `<id>_lod.glb`).
