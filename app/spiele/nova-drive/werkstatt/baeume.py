@@ -27,6 +27,10 @@ TREES = {
     'tanne': ('fir_tree_01', 0),
     'laub': ('tree_small_02', 1),
     'insel': ('island_tree_02', 2),
+    'jaca': ('jacaranda_tree', 1),      # blüht lila – rund ums Festival
+    'jung': ('fir_sapling', 0),         # junge Tannen im Wald
+    'strand_a': ('island_tree_01', 2),  # Strandbäume statt Palmen
+    'strand_b': ('island_tree_03', 2),
 }
 VIEWS, COLS, ROWS = 8, 4, 2
 ARGS = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else sys.argv[1:]

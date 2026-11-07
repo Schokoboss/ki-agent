@@ -44,6 +44,8 @@ Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 - **Querformat ohne Drehen**: Handy hochkant mit Drehsperre → das Spiel legt sich selbst quer (90° gedreht, Tasten, Wischen,
   Karte, Fotokamera und Neigen rechnen mit). „Als App installieren“ auf dem Startbildschirm (Chrome): eigene App mit Symbol,
   startet immer quer im Vollbild.
+- Weitere Fotobäume: junge Tannen zwischen den großen, breite Jacarandas rund ums Festival, zwei Strandbäume (rund und
+  windschief) statt der Low-Poly-Palmen – jetzt 7 Baumarten aus Fotomodellen.
 - Navigation: Route zu jedem Ziel über das Straßennetz (Karte → „🧭 Navi starten“, Pause → Navi), Pfeile auf der Straße,
   Abbiegehinweise mit Entfernung, Sprachansagen, Neuberechnung beim Verfahren; Rennstrecke wird vorab angezeigt.
 - Grafik Ultra, Ladebildschirm mit Fortschritt, vorberechnetes Licht (siehe frühere Commits).
