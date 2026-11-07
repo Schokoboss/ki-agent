@@ -106,6 +106,28 @@ Nova kann auch **direkt auf dem Handy** laufen – ganz ohne Laptop, sogar ohne 
 - **Gesprächsmodus** (Kopfhörer oben rechts): sprechen, Nova antwortet laut, hört wieder zu.
 - **Neu erzeugen / Bearbeiten** unter der letzten Antwort, **Chat-Suche** in der Chatliste.
 
+## Nova Drive (Spiel)
+
+Open-World-Festival-Rennspiel fürs Handy in `app/spiele/nova-drive/` – auf GitHub Pages:
+https://schokoboss.github.io/ki-agent/spiele/nova-drive/ (Querformat, „Zum Startbildschirm hinzufügen“ macht eine App daraus,
+offline spielbar). Veröffentlicht als eigener Ordner `spiele/nova-drive/` im Zweig `gh-pages` (ohne `werkstatt/`).
+Lokal testen: `python -m http.server` im Ordner `app` und `http://localhost:8000/spiele/nova-drive/` öffnen.
+Automodelle neu bauen: `python werkstatt/autos.py -- ../models` (braucht Blender bzw. `pip install bpy`), danach
+mit `gltf-transform meshopt` komprimieren (je Auto `<id>.glb` voll, `<id>_mid.glb` für Gegner, `<id>_lod.glb`).
+Vorschau aller Modelle: `werkstatt/vorschau.html?cars=sundog,atlas` (16 Autos, Navigation über die Karte).
+Foto-Texturen (Poly Haven, CC0) neu laden: `python werkstatt/texturen.py` → `models/tex/` (Quellen in `QUELLEN.txt`);
+fotografierte Felsen und Unterholz: `python werkstatt/felsen.py` → `models/welt/prock_*.glb`, `pv_*.glb`;
+HD-Paket (2K + Rauheit): `python werkstatt/texturen.py --hd` → `models/tex-hd/`; Einzeldatei mit HD: `node werkstatt/handy-datei.mjs --hd` → `NovaDrive-HD.html` (~29 MB).
+Offline: `sw.js` im Spielordner speichert alles Geladene (nur über http/https, z. B. Starter oder GitHub Pages).
+Fotobäume (Imposter): `python werkstatt/baeume.py [--cache ORDNER] [tanne laub insel]` → `models/baum/` (lädt 50–500 MB je Baum).
+**PC-Modus**: am PC automatisch (oder `index.html?pc`, Einstellungen → Gerät): Tastatur mit weicher Lenkung,
+Maus zum Umsehen/Zoomen, Gamepad auch im Menü, Tastenhilfe (H). Alle Tasten stehen in `LIES-MICH.txt`.
+**Grafik Hyper ✦** (über Ultra): GTAO-Umgebungsverdeckung, Echtzeit-Spiegelungen am eigenen Auto, Supersampling,
+mehr Gras/Detail/Sichtweite – für starke GPUs (`lib/postprocessing/GTAOPass.js` aus three.js r170, MIT).
+Kino & Zeit (`js/cine.js`): Kamerafahrt vor dem Rennen, Wiederholung mit TV-Kameras, Zurückspulen (Q/⌫/⏪ halten).
+Ohne Server am Handy spielen: `node werkstatt/handy-datei.mjs` (braucht esbuild) baut `NovaDrive-Handy.html` – eine einzige
+Datei mit allem drin; aufs Handy laden und in Chrome öffnen. Lokal mit Handy-QR-Code: `Nova Drive starten.cmd`.
+
 ## Laptop-Modelle
 
 Einstellungen → **Laptop-Modell** – umschalten dauert ein paar Sekunden:

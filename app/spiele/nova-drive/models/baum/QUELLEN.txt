@@ -1,0 +1,8 @@
+Bäume von Poly Haven – Lizenz CC0 (gemeinfrei), als Imposter gerendert mit werkstatt/baeume.py
+insel: https://polyhaven.com/a/island_tree_02 (CC0)
+tanne: https://polyhaven.com/a/fir_tree_01 (CC0)
+laub: https://polyhaven.com/a/tree_small_02 (CC0)
+jaca: https://polyhaven.com/a/jacaranda_tree (CC0)
+jung: https://polyhaven.com/a/fir_sapling (CC0)
+strand_a: https://polyhaven.com/a/island_tree_01 (CC0)
+strand_b: https://polyhaven.com/a/island_tree_03 (CC0)

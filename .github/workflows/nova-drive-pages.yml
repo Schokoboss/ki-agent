@@ -1,0 +1,47 @@
+# Veröffentlicht das Spiel Nova Drive automatisch auf GitHub Pages (Zweig gh-pages, Ordner spiele/nova-drive/).
+# Läuft bei jeder Änderung am Spielordner. Andere Dateien in gh-pages (die Nova-App) werden nie angefasst.
+name: Nova Drive auf GitHub Pages
+
+on:
+  push:
+    branches: [main, claude/forza-horizon-6-mobile-7eyycv]
+    paths: ['app/spiele/nova-drive/**', '.github/workflows/nova-drive-pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nova-drive-pages
+  cancel-in-progress: false
+
+jobs:
+  veroeffentlichen:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Quelle holen
+        uses: actions/checkout@v4
+        with:
+          path: quelle
+      - name: gh-pages holen
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: seite
+      - name: Nur den Spielordner ersetzen (ohne Werkstatt-Werkzeuge)
+        run: |
+          rm -rf seite/spiele/nova-drive
+          mkdir -p seite/spiele/nova-drive
+          tar -C quelle/app/spiele/nova-drive \
+            --exclude=./werkstatt --exclude=./starten.py --exclude='./*.cmd' \
+            --exclude=./handy.html --exclude='./NovaDrive-*.html' -cf - . \
+            | tar -C seite/spiele/nova-drive -xf -
+      - name: Veröffentlichen
+        working-directory: seite
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A spiele/nova-drive
+          if git diff --cached --quiet; then echo "Keine Änderungen am Spiel."; exit 0; fi
+          git commit -m "Nova Drive automatisch veröffentlicht (${GITHUB_REF_NAME} @ ${GITHUB_SHA::7})"
+          git push origin gh-pages
