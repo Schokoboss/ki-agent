@@ -46,6 +46,11 @@ Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
   startet immer quer im Vollbild.
 - Weitere Fotobäume: junge Tannen zwischen den großen, breite Jacarandas rund ums Festival, zwei Strandbäume (rund und
   windschief) statt der Low-Poly-Palmen – jetzt 7 Baumarten aus Fotomodellen.
+- Fehler behoben: Im gedrehten Modus (Handy hochkant) ließen sich Menüs nicht scrollen – das Spiel scrollt jetzt selbst in
+  Spielrichtung, mit Nachlauf (Einstellungen, Tagesaufgaben, Garage, Autoliste). Wischgesten nur noch im Fahrbild gesperrt.
+- „📲 Als App installieren“ ist am Handy immer sichtbar (außer das Spiel läuft schon als App); bietet der Browser es nicht
+  direkt an, zeigt der Knopf eine Anleitung (Chrome / Samsung Internet).
+- Grafik „Auto“ = **Hyper** (GPU-lastig); die Auflösung regelt bei Bedarf herunter, bei Dauer-Ruckeln kommt ein Ultra-Tipp.
 - Navigation: Route zu jedem Ziel über das Straßennetz (Karte → „🧭 Navi starten“, Pause → Navi), Pfeile auf der Straße,
   Abbiegehinweise mit Entfernung, Sprachansagen, Neuberechnung beim Verfahren; Rennstrecke wird vorab angezeigt.
 - Grafik Ultra, Ladebildschirm mit Fortschritt, vorberechnetes Licht (siehe frühere Commits).

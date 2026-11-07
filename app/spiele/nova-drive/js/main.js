@@ -50,7 +50,8 @@ class Game {
     updateView(this.allowTurn);
     this.orbit = { yaw: 0, pitch: 0, zoom: 1, drag: false, t: 0 };
     this.tm = new TimeMachine(); this.replay = null; this.rewinding = false;
-    this.quality = this.settings.quality === 'auto' ? 3 : +this.settings.quality;
+    // „Auto“ = Hyper (GPU-lastig); die dynamische Auflösung fängt schwächere Geräte ab, bei Dauer-Ruckeln kommt ein Tipp
+    this.quality = this.settings.quality === 'auto' ? 4 : +this.settings.quality;
     this.state = 'loading';
     this.screen = null;
     this.camMode = this.settings.cam || 0;
@@ -151,6 +152,7 @@ class Game {
     this.updateEnv(true);
     this.bindUI();
     this.bindMouseCam();
+    this.bindTurnedScroll();
     this.hud.money();
     this.updatePosters();
     // Shader vorbereiten und die Welt einmal von mehreren Orten aus rendern → kein Ruckeln beim Losfahren
@@ -176,7 +178,7 @@ class Game {
     addEventListener('resize', () => this.resize());
     addEventListener('orientationchange', () => setTimeout(() => this.resize(), 250));
     // „Als App installieren“ (Chrome/Android): eigene App mit Symbol, startet immer quer und im Vollbild
-    addEventListener('beforeinstallprompt', e => { e.preventDefault(); this.installEvt = e; $('t-install').hidden = false; });
+    addEventListener('beforeinstallprompt', e => { e.preventDefault(); this.installEvt = e; this.updateInstallBtn(); });
     addEventListener('appinstalled', () => { this.installEvt = null; $('t-install').hidden = true; this.hud.toast('Nova Drive ist installiert – Symbol auf dem Startbildschirm', 'info'); });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) { this.audio.suspend(); if (this.state === 'free' || this.state === 'race') this.pause(); }
@@ -660,7 +662,12 @@ class Game {
     });
     click('t-garage', () => { if (!this.save.current) { this.showScreen('starter'); this.renderStarter(); return; } this.backTo = 'title'; this.showScreen('garage'); });
     click('t-map', () => { this.backTo = 'title'; this.showScreen('map'); });
-    click('t-install', async () => { const e = this.installEvt; if (!e) return; e.prompt(); try { await e.userChoice; } catch {} this.installEvt = null; $('t-install').hidden = true; });
+    click('t-install', async () => {
+      const e = this.installEvt;
+      if (!e) { this.backTo = 'title'; this.showScreen('install'); return; } // Browser bietet es nicht direkt an → Anleitung
+      e.prompt(); try { await e.userChoice; } catch {} this.installEvt = null; this.updateInstallBtn();
+    });
+    this.updateInstallBtn();
     click('t-settings', () => { this.backTo = 'title'; this.showScreen('settings'); });
     click('t-daily', () => { this.backTo = 'title'; this.showScreen('daily'); });
     click('t-wheel', () => { this.backTo = 'title'; this.showScreen('wheel'); });
@@ -709,7 +716,7 @@ class Game {
   back() {
     const to = this.backTo;
     if (this.wheelBusy) return;
-    if (['settings', 'map', 'garage', 'daily', 'wheel'].includes(this.screen)) {
+    if (['settings', 'map', 'garage', 'daily', 'wheel', 'install'].includes(this.screen)) {
       if (to === 'title') this.showScreen('title');
       else if (to === 'pause') this.showScreen('pause');
       else { this.setState(this.prevState === 'race' && this.events.race ? 'race' : 'free'); this.last = performance.now(); }
@@ -1004,6 +1011,12 @@ class Game {
       try { for (const k of Object.keys(localStorage)) if (k.startsWith('novadrive-')) localStorage.removeItem(k); } catch {}
       location.reload();
     };
+  }
+  // Installieren-Knopf: am Handy immer (außer das Spiel läuft schon als App), am PC nur, wenn der Browser es anbietet
+  updateInstallBtn() {
+    const installed = matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches || navigator.standalone;
+    const el = $('t-install'); if (!el) return;
+    el.hidden = !!installed || globalThis.__NOVA_MODELS ? true : !(this.installEvt || this.mobile);
   }
   // PC-Modus: Tastatur/Maus/Gamepad, keine Touch-Tasten, Tastenhilfe. „Auto“ erkennt Maus vs. Touchscreen.
   get pc() {
@@ -1339,6 +1352,51 @@ class Game {
     }
     if (best) { best.focus(); best.scrollIntoView({ block: 'nearest', inline: 'nearest' }); this.audio.play('ui'); }
   }
+  // Gedreht (Handy hochkant, Spiel quer): Chrome scrollt Menüs nur in Bildschirmrichtung – hier selbst scrollen,
+  // in Spielrichtung, mit Nachlauf. Tippen bleibt Tippen; nach echtem Wischen wird der Klick verschluckt.
+  bindTurnedScroll() {
+    let st = null, swallow = false, fling = 0;
+    const scrollable = (el, ax) => {
+      const cs = getComputedStyle(el);
+      return ax === 'y' ? el.scrollHeight > el.clientHeight + 2 && /auto|scroll/.test(cs.overflowY)
+        : el.scrollWidth > el.clientWidth + 2 && /auto|scroll/.test(cs.overflowX);
+    };
+    const find = (el, horiz) => {
+      for (const ax of horiz ? ['x', 'y'] : ['y', 'x']) for (let e = el; e && e !== document.body; e = e.parentElement) if (scrollable(e, ax)) return { el: e, ax };
+      return null;
+    };
+    addEventListener('pointerdown', e => {
+      if (!view.turned || e.pointerType === 'mouse' || !e.target.closest('.screen')) return;
+      if (e.target.closest('input[type=range], textarea, #map-canvas, #photo')) return;
+      cancelAnimationFrame(fling);
+      const p = logicalPoint(e);
+      st = { id: e.pointerId, x0: p.x, y0: p.y, x: p.x, y: p.y, t: performance.now(), v: 0, target: e.target, sc: null };
+    }, true);
+    addEventListener('pointermove', e => {
+      if (!st || e.pointerId !== st.id) return;
+      const p = logicalPoint(e);
+      if (!st.sc && Math.hypot(p.x - st.x0, p.y - st.y0) > 8) st.sc = find(st.target, Math.abs(p.x - st.x0) > Math.abs(p.y - st.y0)) || { el: null };
+      if (st.sc && st.sc.el) {
+        const d = st.sc.ax === 'y' ? st.y - p.y : st.x - p.x, now = performance.now();
+        if (st.sc.ax === 'y') st.sc.el.scrollTop += d; else st.sc.el.scrollLeft += d;
+        st.v = d / Math.max(1, now - st.t) * 16; st.t = now;
+      }
+      st.x = p.x; st.y = p.y;
+    }, true);
+    const end = e => {
+      if (!st || e.pointerId !== st.id) return;
+      const s = st; st = null;
+      if (!s.sc) return;
+      swallow = true; setTimeout(() => { swallow = false; }, 350);
+      if (!s.sc.el) return;
+      let v = s.v;
+      const step = () => { if (Math.abs(v) < 0.4) return; if (s.sc.ax === 'y') s.sc.el.scrollTop += v; else s.sc.el.scrollLeft += v; v *= 0.93; fling = requestAnimationFrame(step); };
+      fling = requestAnimationFrame(step);
+    };
+    addEventListener('pointerup', end, true); addEventListener('pointercancel', end, true);
+    addEventListener('click', e => { if (swallow) { e.stopPropagation(); e.preventDefault(); swallow = false; } }, true);
+  }
+
   bindMouseCam() {
     const c = $('c'), o = this.orbit;
     let px = 0, py = 0;
@@ -1823,6 +1881,9 @@ class Game {
     if (fps < 42 && pr > 0.6) pr = Math.max(0.6, pr - 0.15);
     else if (fps > 57 && pr < this.maxPR) pr = Math.min(this.maxPR, pr + 0.1);
     if (pr !== this.pr) { this.pr = pr; this.renderer.setPixelRatio(pr); this.resize(); }
+    // schon auf kleinster Auflösung und trotzdem unter 28 Bildern/s → einmal Ultra vorschlagen
+    this.slowN = fps < 28 && pr <= 0.61 ? (this.slowN || 0) + 1 : 0;
+    if (this.slowN >= 5 && this.quality >= 4 && !this.slowTipped) { this.slowTipped = true; this.hud.toast('Tipp: Einstellungen → Grafik „Ultra“ läuft hier flüssiger', 'info'); }
     const el = $('fps'); if (el && !el.hidden) el.textContent = `${fps.toFixed(0)} fps · ${pr.toFixed(2)}x`;
   }
 
