@@ -94,7 +94,7 @@ class Game {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(62, view.w / view.h, 0.3, 3000);
     const aniso = Math.min(16, R.capabilities.getMaxAnisotropy());
-    this.T = makeTextures(aniso);
+    this.T = makeTextures(aniso, this.quality >= 2);
     // Welt
     this.world = new World(this.quality);
     this.world.events = EVENTS;
