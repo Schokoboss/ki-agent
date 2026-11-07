@@ -4,7 +4,9 @@ NOVA DRIVE
 Am einfachsten (Handy oder PC, ohne Installation):
   https://schokoboss.github.io/ki-agent/spiele/nova-drive/
   Einmal geöffnet, bleibt das Spiel gespeichert und läuft auch offline.
-  Am Handy im Browser-Menü „Zum Startbildschirm hinzufügen“ → startet wie eine App im Vollbild.
+  Am Handy auf dem Startbildschirm „📲 Als App installieren“ (oder Browser-Menü → „App installieren“)
+  → eigene App mit Symbol, startet immer quer im Vollbild.
+  Dreht sich der Bildschirm nicht (Drehsperre), legt sich das Spiel selbst quer: Handy einfach seitlich halten.
 
 Lokal spielen
 -------------

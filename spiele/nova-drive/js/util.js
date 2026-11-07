@@ -232,3 +232,25 @@ export async function breathe(ms = 30) {
   const n = performance.now();
   if (n - _lastBreath > ms) { await new Promise(r => setTimeout(r, 0)); _lastBreath = performance.now(); }
 }
+
+// ---------------------------------------------------------------- Bildschirm (logisch)
+// Handy hochkant, aber Bildschirm dreht nicht mit (Drehsperre): das Spiel liegt gedreht (html.turned) und rechnet
+// mit logischen Maßen (Breite = lange Seite). view.w/h statt innerWidth/innerHeight verwenden.
+export const view = { w: innerWidth, h: innerHeight, turned: false };
+export function updateView(allowTurn) {
+  const el = document.documentElement, W = innerWidth, H = innerHeight;
+  const turn = !!allowTurn && H > W;
+  view.turned = turn; view.w = turn ? H : W; view.h = turn ? W : H;
+  el.classList.toggle('turned', turn);
+  el.style.setProperty('--tw', view.w + 'px'); el.style.setProperty('--th', view.h + 'px');
+  el.style.setProperty('--lvw', view.w / 100 + 'px'); el.style.setProperty('--lvh', view.h / 100 + 'px');
+  el.classList.toggle('portrait', view.h > view.w); el.classList.toggle('land', view.w >= view.h);
+  el.classList.toggle('h430', view.h <= 430); el.classList.toggle('h520', view.h <= 520);
+  return view;
+}
+// Fingerposition im (ggf. gedrehten) Spielbild
+export function logicalPoint(e) { return view.turned ? { x: e.clientY, y: innerWidth - e.clientX } : { x: e.clientX, y: e.clientY }; }
+export function localPoint(e, el) {
+  const r = el.getBoundingClientRect();
+  return view.turned ? { x: e.clientY - r.top, y: r.right - e.clientX } : { x: e.clientX - r.left, y: e.clientY - r.top };
+}

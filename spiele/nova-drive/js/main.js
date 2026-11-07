@@ -14,7 +14,7 @@ import { TimeMachine, introCam, INTRO, Replay, REPLAY_FRAMES } from './cine.js';
 import { Input } from './input.js';
 import { Particles, Smoke, Skids, Rain } from './effects.js';
 import { CARS, UPGRADES, carStats, rating, carClass, CLASS_COLORS, EVENTS, RADIO, TIPS } from './data.js';
-import { clamp, lerp, damp, fmtNum, fmtTime, wrapAngle, breathe } from './util.js';
+import { clamp, lerp, damp, fmtNum, fmtTime, wrapAngle, breathe, view, updateView, logicalPoint, localPoint } from './util.js';
 import { EVENT_COLORS } from './world.js';
 import { Economy, PRIZES } from './economy.js';
 import { RoadGraph, NavRibbon, say, fmtDist, TURN_ICON, turnText } from './nav.js';
@@ -45,6 +45,9 @@ class Game {
     if (q.has('handy')) this.settings.device = 'phone';
     const mobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && innerWidth < 1100);
     this.mobile = mobile;
+    // Handy hochkant mit Drehsperre: Spiel selbst quer legen (nicht im PC-Modus)
+    this.allowTurn = mobile && this.settings.device !== 'pc';
+    updateView(this.allowTurn);
     this.orbit = { yaw: 0, pitch: 0, zoom: 1, drag: false, t: 0 };
     this.tm = new TimeMachine(); this.replay = null; this.rewinding = false;
     this.quality = this.settings.quality === 'auto' ? 3 : +this.settings.quality;
@@ -81,14 +84,14 @@ class Game {
       : Math.min(window.devicePixelRatio || 1, this.quality >= 3 ? 3 : this.quality >= 2 ? 2 : this.quality >= 1 ? 1.5 : 1);
     this.pr = this.maxPR;
     R.setPixelRatio(this.pr);
-    R.setSize(innerWidth, innerHeight);
+    R.setSize(view.w, view.h);
     R.toneMapping = THREE.ACESFilmicToneMapping;
     R.toneMappingExposure = 1.05;
     R.outputColorSpace = THREE.SRGBColorSpace;
     R.shadowMap.enabled = this.quality >= 1;
     R.shadowMap.type = this.quality >= 3 ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.3, 3000);
+    this.camera = new THREE.PerspectiveCamera(62, view.w / view.h, 0.3, 3000);
     const aniso = Math.min(16, R.capabilities.getMaxAnisotropy());
     this.T = makeTextures(aniso);
     // Welt
@@ -171,6 +174,10 @@ class Game {
     this.showScreen('title');
     requestAnimationFrame(t => this.loop(t));
     addEventListener('resize', () => this.resize());
+    addEventListener('orientationchange', () => setTimeout(() => this.resize(), 250));
+    // „Als App installieren“ (Chrome/Android): eigene App mit Symbol, startet immer quer und im Vollbild
+    addEventListener('beforeinstallprompt', e => { e.preventDefault(); this.installEvt = e; $('t-install').hidden = false; });
+    addEventListener('appinstalled', () => { this.installEvt = null; $('t-install').hidden = true; this.hud.toast('Nova Drive ist installiert – Symbol auf dem Startbildschirm', 'info'); });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) { this.audio.suspend(); if (this.state === 'free' || this.state === 'race') this.pause(); }
       else this.audio.resume();
@@ -218,7 +225,7 @@ class Game {
   setupComposer() {
     const R = this.renderer;
     const hdr = R.extensions.has('EXT_color_buffer_half_float') || R.extensions.has('EXT_color_buffer_float');
-    const rt = new THREE.WebGLRenderTarget(innerWidth * this.pr, innerHeight * this.pr, { type: hdr ? THREE.HalfFloatType : THREE.UnsignedByteType, samples: 4 });
+    const rt = new THREE.WebGLRenderTarget(view.w * this.pr, view.h * this.pr, { type: hdr ? THREE.HalfFloatType : THREE.UnsignedByteType, samples: 4 });
     const c = this.composer = new EffectComposer(R, rt);
     c.addPass(new RenderPass(this.scene, this.camera));
     // Schutzfilter: ungültige Pixel (NaN/Unendlich) durch Schwarz ersetzen und extreme Helligkeit begrenzen,
@@ -233,7 +240,7 @@ class Game {
     }));
     // Hyper: Umgebungsverdeckung (GTAO) – Kontaktschatten unter Autos, in Ecken, zwischen Bäumen und Häusern
     if (this.quality >= 4) {
-      const ao = this.ao = new GTAOPass(this.scene, this.camera, innerWidth, innerHeight);
+      const ao = this.ao = new GTAOPass(this.scene, this.camera, view.w, view.h);
       ao.updateGtaoMaterial({ radius: 1.6, distanceExponent: 1.2, thickness: 1.5, scale: 1.1, samples: 12, distanceFallOff: 1, screenSpaceRadius: false });
       ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 5, rings: 2, samples: 12 });
       ao.blendIntensity = 0.85;
@@ -252,7 +259,7 @@ class Game {
       };
       c.addPass(ao);
     }
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.42, 0.55, 1.0);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(view.w, view.h), 0.42, 0.55, 1.0);
     c.addPass(this.bloom);
     c.addPass(new OutputPass());
     this.grade = new ShaderPass({
@@ -312,7 +319,7 @@ class Game {
     });
     c.addPass(this.grade);
     c.setPixelRatio(this.pr);
-    c.setSize(innerWidth, innerHeight);
+    c.setSize(view.w, view.h);
   }
   draw() {
     if (this.composer) {
@@ -331,7 +338,7 @@ class Game {
       // Tropfen nur in Außenkameras beim Fahren (nicht in Menüs/Motorhaube) – Fahrtwind lässt sie seltener haften
       const wet = this.weather ? clamp((this.weather.rain - 0.35) / 0.6, 0, 1) : 0;
       G.rain.value = drive && this.camMode !== 2 && !this.replay ? wet * (1 - clamp(this.car.speedKmh / 260, 0, 0.6)) : 0;
-      G.time.value = this.time; G.aspect.value = innerWidth / innerHeight;
+      G.time.value = this.time; G.aspect.value = view.w / view.h;
       this.updateReflections();
       this.composer.render();
     } else this.renderer.render(this.scene, this.camera);
@@ -653,6 +660,7 @@ class Game {
     });
     click('t-garage', () => { if (!this.save.current) { this.showScreen('starter'); this.renderStarter(); return; } this.backTo = 'title'; this.showScreen('garage'); });
     click('t-map', () => { this.backTo = 'title'; this.showScreen('map'); });
+    click('t-install', async () => { const e = this.installEvt; if (!e) return; e.prompt(); try { await e.userChoice; } catch {} this.installEvt = null; $('t-install').hidden = true; });
     click('t-settings', () => { this.backTo = 'title'; this.showScreen('settings'); });
     click('t-daily', () => { this.backTo = 'title'; this.showScreen('daily'); });
     click('t-wheel', () => { this.backTo = 'title'; this.showScreen('wheel'); });
@@ -895,7 +903,7 @@ class Game {
     if (!cv._bound) {
       cv._bound = true;
       cv.addEventListener('click', e => {
-        const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+        const { x, y } = localPoint(e, cv);
         let best = null, bd = 30;
         for (const h of this.mapHits || []) { const d = Math.hypot(h.x - x, h.y - y); if (d < bd) { bd = d; best = h.ev; } }
         if (best) this.mapSelect(best); else $('map-info').hidden = true;
@@ -961,7 +969,7 @@ class Game {
     seg('s-tiltinv', s.tiltInvert ? '1' : '0', v => { s.tiltInvert = v === '1'; this.applyControlMode(); });
     seg('s-ctl', s.ctl, v => { s.ctl = +v; this.resize(); });
     seg('s-hd', s.hd, v => { s.hd = v; this.hud.toast('HD-Texturen: wird beim nächsten Start aktiv', 'info'); });
-    seg('s-device', s.device, v => { s.device = v; this.applyControlMode(); this.hud.toast(this.pc ? 'PC-Modus: Tastatur, Maus & Gamepad' : 'Handy-Modus: Touch-Steuerung', 'info'); });
+    seg('s-device', s.device, v => { s.device = v; this.applyControlMode(); this.resize(); this.hud.toast(this.pc ? 'PC-Modus: Tastatur, Maus & Gamepad' : 'Handy-Modus: Touch-Steuerung', 'info'); });
     seg('s-haptic', s.haptic ? '1' : '0', v => { s.haptic = v === '1'; this.applyControlMode(); });
     $('s-calib').onclick = () => { this.input.calibrate(); this.audio.play('ui'); this.hud.toast(this.input.tiltOk ? 'Neigung: aktuelle Haltung ist jetzt geradeaus' : 'Erst „Lenkung: Neigen“ wählen', 'info'); };
     const sens = $('s-sens');
@@ -1135,19 +1143,20 @@ class Game {
       let pinch0 = 0, dist0 = 0;
       sec.addEventListener('pointerdown', e => {
         if (e.target.closest('button, input, label')) return;
-        pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        pts.set(e.pointerId, logicalPoint(e));
         try { sec.setPointerCapture(e.pointerId); } catch {}
         if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch0 = Math.hypot(a.x - b.x, a.y - b.y); dist0 = this.photo.dist; }
       });
       sec.addEventListener('pointermove', e => {
         const p = pts.get(e.pointerId);
         if (!p) return;
+        const q = logicalPoint(e);
         if (pts.size === 1) {
-          this.photo.yaw -= (e.clientX - p.x) * 0.008;
-          this.photo.pitch = clamp(this.photo.pitch + (e.clientY - p.y) * 0.005, -0.08, 1.25);
+          this.photo.yaw -= (q.x - p.x) * 0.008;
+          this.photo.pitch = clamp(this.photo.pitch + (q.y - p.y) * 0.005, -0.08, 1.25);
           $('ph-height').value = this.photo.pitch;
         }
-        p.x = e.clientX; p.y = e.clientY;
+        p.x = q.x; p.y = q.y;
         if (pts.size === 2 && pinch0) {
           const [a, b] = [...pts.values()];
           this.photo.dist = clamp(dist0 * pinch0 / Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)), 2.8, 26);
@@ -1387,8 +1396,8 @@ class Game {
     this.audio.tick(dt);
     const cp = this.camera.position;
     this.scenery.update(dt, this.time, cp, this.audio.beat, this.car.pos);
-    this.smoke.update(dt, innerHeight * this.pr * 0.9);
-    this.sparks.update(dt, innerHeight * this.pr * 0.9);
+    this.smoke.update(dt, view.h * this.pr * 0.9);
+    this.sparks.update(dt, view.h * this.pr * 0.9);
     this.fireworks(dt);
     this.envT = (this.envT || 0) + dt;
     if (this.envT > 2.5) { this.envT = 0; this.updateEnv(); }
@@ -1771,7 +1780,7 @@ class Game {
     if (this.state === 'garage' && this.previewModel) { c = this.previewModel.position; this.previewModel.rotation.y += dt * 0.35; R = 7; }
     else { c = this.car.pos; this.syncCar(dt); }
     const a = this.titleT * 0.18 + 0.6;
-    const portrait = innerHeight > innerWidth;
+    const portrait = view.h > view.w;
     const off = this.state === 'garage' && !portrait ? 2.0 : 0;
     cam.position.set(c.x + Math.sin(a) * R, c.y + 2.0, c.z + Math.cos(a) * R);
     cam.lookAt(c.x + Math.cos(a) * off, c.y + 0.6, c.z - Math.sin(a) * off);
@@ -1818,7 +1827,9 @@ class Game {
   }
 
   resize() {
-    const w = innerWidth, h = innerHeight;
+    this.allowTurn = this.mobile && this.settings.device !== 'pc';
+    updateView(this.allowTurn);
+    const w = view.w, h = view.h;
     this.renderer.setSize(w, h);
     if (this.composer) { this.composer.setPixelRatio(this.pr); this.composer.setSize(w, h); }
     this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
