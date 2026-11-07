@@ -1,5 +1,5 @@
 // Steuerung: Touch-Tasten (Handy), Wischen, Neigen, Tastatur, Gamepad.
-import { clamp } from './util.js';
+import { clamp, view, logicalPoint } from './util.js';
 
 export class Input {
   constructor() {
@@ -39,8 +39,8 @@ export class Input {
     const zone = root.querySelector('#c-slider');
     if (zone) {
       let id = null, x0 = 0;
-      zone.addEventListener('pointerdown', e => { id = e.pointerId; x0 = e.clientX; zone.setPointerCapture(id); this.sliderVal = 0; this.moveKnob(zone, 0); });
-      zone.addEventListener('pointermove', e => { if (e.pointerId !== id) return; this.sliderVal = clamp((e.clientX - x0) / 70, -1, 1); this.moveKnob(zone, this.sliderVal); });
+      zone.addEventListener('pointerdown', e => { id = e.pointerId; x0 = logicalPoint(e).x; zone.setPointerCapture(id); this.sliderVal = 0; this.moveKnob(zone, 0); });
+      zone.addEventListener('pointermove', e => { if (e.pointerId !== id) return; this.sliderVal = clamp((logicalPoint(e).x - x0) / 70, -1, 1); this.moveKnob(zone, this.sliderVal); });
       const end = e => { if (e.pointerId !== id) return; id = null; this.sliderVal = 0; this.moveKnob(zone, 0); };
       zone.addEventListener('pointerup', end); zone.addEventListener('pointercancel', end);
     }
@@ -59,7 +59,8 @@ export class Input {
       window.addEventListener('devicemotion', e => {
         const a = e.accelerationIncludingGravity;
         if (!a || a.y === null) return;
-        const ang = (screen.orientation && screen.orientation.angle) ?? window.orientation ?? 90;
+        // gedreht (Handy quer, Bildschirm hochkant) entspricht Querformat mit Oberkante links (90°)
+        const ang = view.turned ? 90 : (screen.orientation && screen.orientation.angle) ?? window.orientation ?? 90;
         const sgn = ang === 90 ? 1 : ang === 270 || ang === -90 ? -1 : 0;
         let v = (sgn ? a.y * sgn : a.x) / 9.81;
         this.tiltRaw = v;

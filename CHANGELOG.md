@@ -39,6 +39,11 @@ Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
   Dreiecke) als Imposter – 8 vorab gerenderte Ansichten je Baum (Farbe + Normalen), im Spiel eine Fläche je Baum, die zur
   Kamera zeigt, richtig beleuchtet zur Tageszeit und mit Schatten aus Sicht der Sonne. Über 7.700 Bäume für je 2 Dreiecke.
   `werkstatt/baeume.py`. Einzeldatei mit HD jetzt ~31 MB.
+- **Online**: https://schokoboss.github.io/ki-agent/spiele/nova-drive/ – GitHub Actions veröffentlicht jede Änderung am
+  Spielordner automatisch (nur `spiele/nova-drive/` im Zweig `gh-pages`, die Nova-App bleibt unberührt).
+- **Querformat ohne Drehen**: Handy hochkant mit Drehsperre → das Spiel legt sich selbst quer (90° gedreht, Tasten, Wischen,
+  Karte, Fotokamera und Neigen rechnen mit). „Als App installieren“ auf dem Startbildschirm (Chrome): eigene App mit Symbol,
+  startet immer quer im Vollbild.
 - Navigation: Route zu jedem Ziel über das Straßennetz (Karte → „🧭 Navi starten“, Pause → Navi), Pfeile auf der Straße,
   Abbiegehinweise mit Entfernung, Sprachansagen, Neuberechnung beim Verfahren; Rennstrecke wird vorab angezeigt.
 - Grafik Ultra, Ladebildschirm mit Fortschritt, vorberechnetes Licht (siehe frühere Commits).
