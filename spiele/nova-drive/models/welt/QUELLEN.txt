@@ -1,0 +1,14 @@
+prock_* / pv_*: fotografierte Felsen, Pflanzen und Holz von Poly Haven – Lizenz CC0 (gemeinfrei),
+aufbereitet mit werkstatt/felsen.py
+prock_a: https://polyhaven.com/a/boulder_01 (CC0)
+prock_b: https://polyhaven.com/a/namaqualand_boulder_02 (CC0)
+prock_c: https://polyhaven.com/a/rock_moss_set_01 (CC0)
+prock_d: https://polyhaven.com/a/rock_moss_set_02 (CC0)
+prock_e: https://polyhaven.com/a/namaqualand_boulder_04 (CC0)
+pv_fern: https://polyhaven.com/a/fern_02 (CC0)
+pv_fern_b: https://polyhaven.com/a/fern_02 (CC0)
+pv_shrub_a: https://polyhaven.com/a/shrub_03 (CC0)
+pv_shrub_b: https://polyhaven.com/a/shrub_04 (CC0)
+pv_sorrel: https://polyhaven.com/a/shrub_sorrel_01 (CC0)
+pv_stump: https://polyhaven.com/a/tree_stump_01 (CC0)
+pv_log: https://polyhaven.com/a/dead_tree_trunk (CC0)

@@ -1,0 +1,41 @@
+{
+ "insel": {
+  "pid": "island_tree_02",
+  "kind": 2,
+  "H": 3.407,
+  "scale": 5.548,
+  "width": 5.548,
+  "base": -0.0555,
+  "cw": 512,
+  "ch": 512,
+  "cols": 4,
+  "rows": 2,
+  "views": 8
+ },
+ "tanne": {
+  "pid": "fir_tree_01",
+  "kind": 0,
+  "H": 18.925,
+  "scale": 19.851,
+  "width": 8.685,
+  "base": -0.1985,
+  "cw": 224,
+  "ch": 512,
+  "cols": 4,
+  "rows": 2,
+  "views": 8
+ },
+ "laub": {
+  "pid": "tree_small_02",
+  "kind": 1,
+  "H": 4.557,
+  "scale": 4.918,
+  "width": 4.918,
+  "base": -0.0492,
+  "cw": 512,
+  "ch": 512,
+  "cols": 4,
+  "rows": 2,
+  "views": 8
+ }
+}
