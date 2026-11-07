@@ -35,6 +35,10 @@ Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
   und am PC ab Ultra), Unterholz aus Fotomodellen (Farne, Büsche, Baumstümpfe mit Kollision, liegende Stämme) und zwei
   weitere fotografierte Felsarten (Poly Haven, CC0). Offline spielbar: eigener Service Worker speichert alles Geladene.
 - Fehler behoben: Beim Festival-Rundkurs stand die Bühne auf der Straße – der Nordbogen führt jetzt hinter der Bühne vorbei.
+- **Fotografierte Bäume**: Tannen, Laubbäume und knorrige Inselbäume von Poly Haven (CC0, Originale bis 487 MB und Millionen
+  Dreiecke) als Imposter – 8 vorab gerenderte Ansichten je Baum (Farbe + Normalen), im Spiel eine Fläche je Baum, die zur
+  Kamera zeigt, richtig beleuchtet zur Tageszeit und mit Schatten aus Sicht der Sonne. Über 7.700 Bäume für je 2 Dreiecke.
+  `werkstatt/baeume.py`. Einzeldatei mit HD jetzt ~31 MB.
 - Navigation: Route zu jedem Ziel über das Straßennetz (Karte → „🧭 Navi starten“, Pause → Navi), Pfeile auf der Straße,
   Abbiegehinweise mit Entfernung, Sprachansagen, Neuberechnung beim Verfahren; Rennstrecke wird vorab angezeigt.
 - Grafik Ultra, Ladebildschirm mit Fortschritt, vorberechnetes Licht (siehe frühere Commits).

@@ -2,7 +2,7 @@
 import * as THREE from '../lib/three.module.min.js';
 import { World, FESTIVAL, HALF } from './terrain.js';
 import { Scenery } from './world.js';
-import { makeTextures, makeDetailTextures, loadPhotoTextures } from './textures.js';
+import { makeTextures, makeDetailTextures, loadPhotoTextures, loadTreeImpostors } from './textures.js';
 import { buildCar, styleDims, loadCarModels, setTailGlow, setCarDetail } from './carmodel.js';
 import { loadWorldModels, modelUrl } from './models.js';
 import { Vehicle, carContact } from './physics.js';
@@ -106,6 +106,7 @@ class Game {
     if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol) && !globalThis.__NOVA_MODELS) navigator.serviceWorker.register('sw.js').catch(() => {});
     prog(0.45, 'Modelle aus der Werkstatt laden');
     await loadWorldModels(sec(0.45, 0.5));
+    await loadTreeImpostors(this.T, aniso, modelUrl);
     setCarDetail(this.quality);
     this.scenery = new Scenery(this.scene, this.world, this.T, this.quality);
     await this.scenery.buildAsync(sec(0.5, 0.78));
@@ -242,7 +243,7 @@ class Game {
         const cache = this._visibilityCache;
         this.scene.traverse(o => {
           cache.set(o, o.visible);
-          if (o.isPoints || o.isLine || o.isSprite) { o.visible = false; return; }
+          if (o.isPoints || o.isLine || o.isSprite || o.userData.noAO) { o.visible = false; return; }
           if (o.isMesh) {
             const m = Array.isArray(o.material) ? o.material[0] : o.material;
             if (!o.geometry.attributes.normal || (m && (m.transparent || m.isShaderMaterial || m.isMeshBasicMaterial))) o.visible = false;

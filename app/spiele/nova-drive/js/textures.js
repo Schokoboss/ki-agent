@@ -191,6 +191,22 @@ export async function loadPhotoTextures(T, aniso, url = p => p, prog = () => {},
   await Promise.all(jobs);
 }
 
+// Fotografierte Bäume als Imposter (werkstatt/baeume.py): Farb- und Normalen-Atlas je Baum + Maße (baeume.json)
+export async function loadTreeImpostors(T, aniso, url = p => p) {
+  T.trees = {};
+  let meta;
+  try { meta = await (await fetch(url('models/baum/baeume.json'))).json(); } catch { return; }
+  const L = new THREE.TextureLoader();
+  await Promise.all(Object.entries(meta).map(async ([name, info]) => {
+    try {
+      const [c, n] = await Promise.all(['c', 'n'].map(k => L.loadAsync(url(`models/baum/${name}_${k}.webp`))));
+      c.colorSpace = THREE.SRGBColorSpace; c.anisotropy = aniso;
+      for (const t of [c, n]) { t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; }
+      T.trees[name] = { info, c, n };
+    } catch (e) { console.warn('Baum fehlt', name, e); }
+  }));
+}
+
 // Wolkenrauschen + Bodendetails (nahtlos kachelbar); hi = doppelte Auflösung
 export async function makeDetailTextures(T, aniso, hi, prog = () => {}) {
   const rnd = mulberry32(99), S = hi ? 1024 : 512;

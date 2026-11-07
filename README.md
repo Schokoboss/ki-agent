@@ -118,6 +118,7 @@ Foto-Texturen (Poly Haven, CC0) neu laden: `python werkstatt/texturen.py` → `m
 fotografierte Felsen und Unterholz: `python werkstatt/felsen.py` → `models/welt/prock_*.glb`, `pv_*.glb`;
 HD-Paket (2K + Rauheit): `python werkstatt/texturen.py --hd` → `models/tex-hd/`; Einzeldatei mit HD: `node werkstatt/handy-datei.mjs --hd` → `NovaDrive-HD.html` (~29 MB).
 Offline: `sw.js` im Spielordner speichert alles Geladene (nur über http/https, z. B. Starter oder GitHub Pages).
+Fotobäume (Imposter): `python werkstatt/baeume.py [--cache ORDNER] [tanne laub insel]` → `models/baum/` (lädt 50–500 MB je Baum).
 **PC-Modus**: am PC automatisch (oder `index.html?pc`, Einstellungen → Gerät): Tastatur mit weicher Lenkung,
 Maus zum Umsehen/Zoomen, Gamepad auch im Menü, Tastenhilfe (H). Alle Tasten stehen in `LIES-MICH.txt`.
 **Grafik Hyper ✦** (über Ultra): GTAO-Umgebungsverdeckung, Echtzeit-Spiegelungen am eigenen Auto, Supersampling,

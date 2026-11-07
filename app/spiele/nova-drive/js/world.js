@@ -951,14 +951,107 @@ export class Scenery {
     return [pine, leaf, palm];
   }
 
+  // ---------------------------------------------------------------- Fotobäume (Imposter)
+  // Eine Fläche je Baum, dreht sich zur Kamera und zeigt die passende von 8 gerenderten Ansichten.
+  // Licht aus dem Normalen-Atlas (Tageszeit stimmt), Schatten aus Sicht der Sonne (gleicher Trick im Schattenpass).
+  impostorMaterial(tree, depth = false) {
+    const I = tree.info;
+    const U = {
+      uSize: { value: new THREE.Vector3(I.width, I.scale, I.base) },
+      uGrid: { value: new THREE.Vector3(I.cols, I.rows, I.views) },
+      tNrm: { value: tree.n },
+    };
+    if (this.windU) Object.assign(U, this.windU);
+    const m = depth
+      ? new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: tree.c, alphaTest: 0.45 })
+      : new THREE.MeshStandardMaterial({ map: tree.c, alphaTest: 0.45, roughness: 0.92, metalness: 0, envMapIntensity: 0.35, side: THREE.DoubleSide });
+    m.onBeforeCompile = sh => {
+      Object.assign(sh.uniforms, U);
+      sh.vertexShader = `uniform vec3 uSize, uGrid; uniform float uTime; varying float vYaw;\n` + sh.vertexShader
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+          vec3 iPos = instanceMatrix[3].xyz;
+          float iScale = length(instanceMatrix[0].xyz);
+          float iYaw = atan(-instanceMatrix[0].z, instanceMatrix[0].x);
+          vec3 toCam = cameraPosition - iPos; toCam.y = 0.0;
+          toCam = length(toCam) > 0.001 ? normalize(toCam) : vec3(0.0, 0.0, 1.0);
+          vec3 right = vec3(toCam.z, 0.0, -toCam.x);
+          float h = position.y;
+          vec3 wp = iPos + right * position.x * uSize.x * iScale + vec3(0.0, (h * uSize.y + uSize.z) * iScale, 0.0);
+          float ph = iPos.x * 0.043 + iPos.z * 0.061;
+          wp.x += sin(uTime * 1.1 + ph) * 0.05 * h * h * iScale;
+          wp.z += cos(uTime * 0.9 + ph) * 0.035 * h * h * iScale;
+          float ang = atan(toCam.x, toCam.z) - iYaw;
+          float vw = mod(floor(ang / 6.2831853 * uGrid.z + 0.5), uGrid.z);
+          float col = mod(vw, uGrid.x), row = floor(vw / uGrid.x);
+          vec2 aUv = vec2((col + uv.x) / uGrid.x, 1.0 - (row + 1.0 - uv.y) / uGrid.y);
+          vYaw = iYaw;`)
+        .replace('#include <uv_vertex>', '#include <uv_vertex>')
+        .replace('#include <project_vertex>', `vec4 mvPosition = viewMatrix * vec4(wp, 1.0);
+          gl_Position = projectionMatrix * mvPosition;
+          #ifdef USE_MAP
+            vMapUv = aUv;
+          #endif`)
+        .replace('#include <worldpos_vertex>', 'vec4 worldPosition = vec4(wp, 1.0);');
+      if (!depth) {
+        sh.fragmentShader = 'uniform sampler2D tNrm; varying float vYaw;\n' + sh.fragmentShader
+          .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+            {
+              vec3 on = texture2D(tNrm, vMapUv).xyz * 2.0 - 1.0;
+              float cy = cos(vYaw), sy = sin(vYaw);
+              vec3 wn = normalize(vec3(on.x * cy + on.z * sy, on.y, -on.x * sy + on.z * cy));
+              normal = normalize((viewMatrix * vec4(wn, 0.0)).xyz);
+            }`)
+          .replace('#include <map_fragment>', '#include <map_fragment>\n diffuseColor.rgb *= 1.12;');
+      }
+    };
+    m.customProgramCacheKey = () => 'impostor-' + (depth ? 'd' : 'c');
+    return m;
+  }
+  buildTreesPhoto() {
+    const T = this.T.trees || {};
+    const kinds = { 0: T.tanne, 1: T.laub }, extra = T.insel;
+    if (!kinds[0] && !kinds[1]) return null;
+    this.windU = this.windU || { uTime: { value: 0 }, uAmp: { value: 1 } };
+    // Zielhöhen im Spiel (Meter) – die Vorlagen werden passend skaliert
+    const TARGET = { tanne: 15, laub: 10.5, insel: 7 };
+    const lists = new Map(), rnd = mulberry32(5);
+    const rest = [];
+    for (const t of this.world.trees) {
+      let name = t.type === 0 ? 'tanne' : t.type === 1 ? (extra && t.y < 14 && rnd() < 0.45 ? 'insel' : 'laub') : null;
+      if (name && !T[name]) name = T.laub ? 'laub' : T.tanne ? 'tanne' : null;
+      if (!name) { rest.push(t); continue; }
+      let a = lists.get(name); if (!a) lists.set(name, a = []);
+      a.push(t);
+    }
+    const geo = new THREE.PlaneGeometry(1, 1); geo.translate(0, 0.5, 0);
+    for (const [name, list] of lists) {
+      const tree = T[name], im = new THREE.InstancedMesh(geo, this.impostorMaterial(tree), list.length);
+      im.customDepthMaterial = this.impostorMaterial(tree, true);
+      const k = TARGET[name] / tree.info.H;
+      list.forEach((t, i) => {
+        const sc = k * t.s * (0.9 + rnd() * 0.25);
+        _m.compose(_p.set(t.x, t.y - 0.1, t.z), _q.setFromEuler(_e.set(0, t.rot, 0)), _s.set(sc, sc, sc));
+        im.setMatrixAt(i, _m);
+        const c = 0.88 + rnd() * 0.22;
+        im.setColorAt(i, _c.setRGB(c * (0.96 + rnd() * 0.08), c, c * (0.94 + rnd() * 0.1)));
+      });
+      im.frustumCulled = false;
+      im.castShadow = this.q >= 1; im.receiveShadow = true;
+      im.userData.noAO = true;
+      this.scene.add(im);
+    }
+    return rest; // Bäume ohne Fotovorlage (Palmen) – bleiben Blender-Modelle
+  }
+
   buildTreesM() {
     if (!has('pine_a')) { this.treeLod = []; return this.buildTrees(); }
+    const photoRest = this.q >= 1 ? this.buildTreesPhoto() : null;
     const hi = ['pine_a', 'pine_b', 'leaf_a', 'leaf_b', 'palm'].map(n => volumeAO(merged(n), 0.55, 1.12));
     const lo = this.procTreeGeos().map(g => volumeAO(g, 0.6, 1.08));
     const loOf = [0, 0, 1, 1, 2], loScale = [1.25, 1.62, 1.35, 1.3, 1.08];
     const matHi = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
     const matLo = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
-    this.windU = { uTime: { value: 0 }, uAmp: { value: 1 } };
+    this.windU = this.windU || { uTime: { value: 0 }, uAmp: { value: 1 } };
     for (const m of [matHi, matLo]) {
       m.onBeforeCompile = sh => {
         Object.assign(sh.uniforms, this.windU);
@@ -973,7 +1066,7 @@ export class Scenery {
     }
     const C = 8, size = (2 * HALF) / C;
     const buckets = new Map(), rnd = mulberry32(5);
-    for (const t of this.world.trees) {
+    for (const t of photoRest || this.world.trees) {
       const v = t.type === 0 ? (rnd() < 0.55 ? 0 : 1) : t.type === 1 ? (rnd() < 0.7 ? 2 : 3) : 4;
       const k = (Math.floor((t.x + HALF) / size) * C + Math.floor((t.z + HALF) / size)) * 5 + v;
       let a = buckets.get(k); if (!a) buckets.set(k, a = []);
