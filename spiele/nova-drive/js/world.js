@@ -1009,16 +1009,21 @@ export class Scenery {
   }
   buildTreesPhoto() {
     const T = this.T.trees || {};
-    const kinds = { 0: T.tanne, 1: T.laub }, extra = T.insel;
-    if (!kinds[0] && !kinds[1]) return null;
+    if (!T.tanne && !T.laub) return null;
     this.windU = this.windU || { uTime: { value: 0 }, uAmp: { value: 1 } };
     // Zielhöhen im Spiel (Meter) – die Vorlagen werden passend skaliert
-    const TARGET = { tanne: 15, laub: 10.5, insel: 7 };
+    const TARGET = { tanne: 15, jung: 5, laub: 10.5, insel: 7, jaca: 11, strand_a: 8, strand_b: 7 };
     const lists = new Map(), rnd = mulberry32(5);
     const rest = [];
+    const strand = ['strand_a', 'strand_b'].filter(n => T[n]);
     for (const t of this.world.trees) {
-      let name = t.type === 0 ? 'tanne' : t.type === 1 ? (extra && t.y < 14 && rnd() < 0.45 ? 'insel' : 'laub') : null;
-      if (name && !T[name]) name = T.laub ? 'laub' : T.tanne ? 'tanne' : null;
+      let name = null;
+      if (t.type === 0) name = T.jung && rnd() < 0.22 ? 'jung' : 'tanne';
+      else if (t.type === 1) {
+        const fest = Math.hypot(t.x - FESTIVAL.x, t.z - FESTIVAL.z) < 420;
+        name = fest && T.jaca && rnd() < 0.65 ? 'jaca' : T.insel && t.y < 14 && rnd() < 0.45 ? 'insel' : 'laub';
+      } else if (strand.length) name = strand[Math.floor(rnd() * strand.length)];
+      if (name && !T[name]) name = t.type === 0 ? (T.tanne ? 'tanne' : 'laub') : t.type === 1 ? (T.laub ? 'laub' : 'tanne') : null;
       if (!name) { rest.push(t); continue; }
       let a = lists.get(name); if (!a) lists.set(name, a = []);
       a.push(t);

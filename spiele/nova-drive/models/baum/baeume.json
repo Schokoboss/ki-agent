@@ -37,5 +37,57 @@
   "cols": 4,
   "rows": 2,
   "views": 8
+ },
+ "jaca": {
+  "pid": "jacaranda_tree",
+  "kind": 1,
+  "H": 19.469,
+  "scale": 29.408,
+  "width": 29.408,
+  "base": -0.2941,
+  "cw": 512,
+  "ch": 512,
+  "cols": 4,
+  "rows": 2,
+  "views": 8
+ },
+ "jung": {
+  "pid": "fir_sapling",
+  "kind": 0,
+  "H": 1.301,
+  "scale": 1.34,
+  "width": 1.13,
+  "base": -0.0134,
+  "cw": 432,
+  "ch": 512,
+  "cols": 4,
+  "rows": 2,
+  "views": 8
+ },
+ "strand_a": {
+  "pid": "island_tree_01",
+  "kind": 2,
+  "H": 5.027,
+  "scale": 6.414,
+  "width": 6.414,
+  "base": -0.0641,
+  "cw": 512,
+  "ch": 512,
+  "cols": 4,
+  "rows": 2,
+  "views": 8
+ },
+ "strand_b": {
+  "pid": "island_tree_03",
+  "kind": 2,
+  "H": 2.615,
+  "scale": 3.944,
+  "width": 3.944,
+  "base": -0.0394,
+  "cw": 512,
+  "ch": 512,
+  "cols": 4,
+  "rows": 2,
+  "views": 8
  }
 }
