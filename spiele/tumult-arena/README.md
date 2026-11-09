@@ -12,6 +12,13 @@ Eigene Helden, Karten und Grafik; der Server ist reines Python (nur Standardbibl
 Beim ersten Start fragt die Windows-Firewall, ob Python ins Netz darf → **„Private Netzwerke“ erlauben**, sonst können
 Handys im WLAN nicht mitspielen.
 
+## Ohne Server (gegen Bots)
+
+`python spiele/tumult-arena/offline_bauen.py` baut `tumult-arena-offline.html` – eine einzige Datei, in der die ganze
+Spiellogik im Browser läuft (du gegen Bots, kein Server, kein Internet). Die Datei kann man z. B. aufs Handy kopieren.
+Die Logik steckt dafür zusätzlich in `web/lokal.js` (JavaScript-Fassung von `spiel.py`; Helden, Modi und Karten
+übernimmt das Build-Skript direkt aus `spiel.py`). Regeländerungen in `spiel.py` dort nachziehen.
+
 ## Mit Freunden spielen
 
 | Wo sind die anderen? | So geht's |
@@ -62,7 +69,9 @@ Das rote Team sieht die Karte gedreht – die eigene Basis ist immer links.
 ```
 server.py      HTTP + WebSocket (RFC 6455) + Räume + Spielschleife (30 Takte/s), optional cloudflared-Tunnel
 spiel.py       Spiellogik ohne Netzwerk: Helden, Karten, Treffer, Modi, Bots (Pfadsuche, Zielvorhersage)
-web/           Browser-Client: spiel.js (Netz, Vorhersage, Steuerung, Darstellung), grafik.js (Figuren), ton.js (Sound)
+web/           Browser-Client: spiel.js (Netz, Vorhersage, Steuerung, Darstellung), grafik.js (Figuren), ton.js (Sound),
+               lokal.js (Spiellogik in JavaScript für die Offline-Version)
+offline_bauen.py  baut die Offline-Version als eine HTML-Datei
 ```
 
 - Der Server rechnet alles selbst (Schüsse, Treffer, Sicht im Busch); Browser schicken nur Eingaben. Gegner im Busch

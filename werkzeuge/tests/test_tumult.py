@@ -70,6 +70,45 @@ for mode, mdef in spiel.MODES.items():
         winners.add(g.result and g.result["winner"])
     check(min(durations) > 20, f"{mdef['name']}: Partien dauern nicht zu kurz (min {min(durations):.0f} s)")
 
+# ---------------------------------------------------------------- Offline-Version (Logik in JavaScript)
+
+import shutil  # noqa: E402
+import tempfile  # noqa: E402
+import offline_bauen  # noqa: E402
+
+page = offline_bauen.build()
+check("const TUMULT_DATA" in page and "const Lokal" in page and "<script src" not in page,
+      f"Offline-Datei baut ({len(page) // 1024} KB, alles eingebettet)")
+node = shutil.which("node")
+if node:
+    js = r'''
+const fs = require('fs'), vm = require('vm');
+const html = fs.readFileSync(process.argv[2], 'utf8');
+const s = [...html.matchAll(/<script>\n([\s\S]*?)\n<\/script>/g)].map(m => m[1]);
+const ctx = { console, setTimeout, setInterval, clearInterval, performance, Math, JSON };
+vm.createContext(ctx);
+vm.runInContext(s[2] + '\n' + s[3] + '\nthis.Lokal = Lokal;', ctx);
+const { Game, MODES, HEROES } = ctx.Lokal, heroes = Object.keys(HEROES), out = [];
+for (const mode of Object.keys(MODES)) {
+  const m = MODES[mode];
+  const ents = Array.from({ length: m.max }, (_, i) => ({ id: i + 1, name: 'B' + i, hero: heroes[i % 6], team: i % 2, bot: true }));
+  const g = new Game(mode, ents, 4242);
+  let n = 0;
+  while (!g.over && n < (m.time + 5) * 30) { g.step(); g.snapshot(1); g.events = []; n++; }
+  out.push(mode + ':' + (g.over ? Math.round(g.t) : 'X'));
+}
+console.log(out.join(' '));
+'''
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "t.html").write_text(page, encoding="utf-8")
+        (Path(tmp) / "t.js").write_text(js, encoding="utf-8")
+        r = subprocess.run([node, str(Path(tmp) / "t.js"), str(Path(tmp) / "t.html")], capture_output=True, text=True,
+                           encoding="utf-8", timeout=120)
+    ok = r.returncode == 0 and "X" not in r.stdout and r.stdout.count(":") == 3
+    check(ok, f"JavaScript-Logik spielt alle Modi zu Ende ({(r.stdout or r.stderr).strip()[:120]})")
+else:
+    print("HINWEIS JavaScript-Logik nicht geprüft (Node fehlt)")
+
 # ---------------------------------------------------------------- Netzwerk
 
 

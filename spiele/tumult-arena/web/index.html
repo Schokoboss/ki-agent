@@ -39,15 +39,19 @@
         <button id="btnQuick" class="big go">▶ Spielen</button>
         <p class="hint">Sofort los – freie Plätze füllen Bots, echte Spieler übernehmen sie jederzeit.</p>
 
-        <h2>Mit Freunden</h2>
-        <div class="row">
-          <button id="btnCreate" class="mid">🏠 Privater Raum</button>
+        <div class="online-only">
+          <h2>Mit Freunden</h2>
+          <div class="row">
+            <button id="btnCreate" class="mid">🏠 Privater Raum</button>
+          </div>
+          <div class="row">
+            <input id="inCode" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false" class="code-in">
+            <button id="btnJoin" class="mid">Beitreten</button>
+          </div>
+          <div id="invite" class="invite"></div>
         </div>
-        <div class="row">
-          <input id="inCode" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false" class="code-in">
-          <button id="btnJoin" class="mid">Beitreten</button>
-        </div>
-        <div id="invite" class="invite"></div>
+        <p class="hint lokal-only">Diese Version läuft komplett in deinem Browser, du spielst gegen Bots.
+          Mit Freunden spielst du, wenn der Tumult-Arena-Server auf deinem Laptop läuft (<kbd>Tumult Arena starten.cmd</kbd>).</p>
       </div>
 
       <div class="card help">
@@ -67,7 +71,7 @@
     <header class="lobby-head">
       <button id="btnLeaveLobby" class="small ghost">← Verlassen</button>
       <div class="room-code"><small id="roomKind">Raum</small><b id="roomCode">----</b></div>
-      <button id="btnShare" class="small">🔗 Einladen</button>
+      <button id="btnShare" class="small online-only">🔗 Einladen</button>
     </header>
     <div class="grid">
       <div class="card">
@@ -85,7 +89,7 @@
       <div class="card">
         <h2>Dein Held</h2>
         <div id="heroGridLobby" class="hero-grid small"></div>
-        <div id="lobbyInvite" class="invite"></div>
+        <div id="lobbyInvite" class="invite online-only"></div>
         <button id="btnStart" class="big go">▶ Start</button>
         <p id="lobbyWait" class="hint center"></p>
       </div>

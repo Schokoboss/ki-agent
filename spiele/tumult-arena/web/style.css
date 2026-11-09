@@ -9,6 +9,8 @@
 html, body { margin: 0; height: 100%; background: var(--bg1); color: var(--text); overflow: hidden; }
 body { overscroll-behavior: none; user-select: none; -webkit-user-select: none; }
 [hidden] { display: none !important; }
+.lokal .online-only, .lokal-only { display: none !important; }
+.lokal .lokal-only { display: block !important; }
 
 #cv { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; display: block; touch-action: none; }
 #ui { position: fixed; inset: 0; pointer-events: none; }

@@ -28,6 +28,7 @@ try { S.touch = matchMedia('(pointer: coarse)').matches; } catch (e) { /* alt */
 }
 
 let G = null;                         // laufende Partie
+if (typeof Lokal !== 'undefined') document.body.classList.add('lokal');
 let W = 0, H = 0, DPR = 1;
 const V = { s: 40, cx: 0, cy: 0, flip: false };
 
@@ -82,6 +83,12 @@ function goFullscreen() {
 function send(o) { if (S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify(o)); }
 
 function connect() {
+  if (typeof Lokal !== 'undefined') {          // Offline-Version: Spiellogik läuft hier im Browser
+    S.ws = Lokal.socket(onMsg);
+    setStatus('Läuft in deinem Browser – du spielst gegen Bots', 'ok');
+    send({ t: 'hello', name: S.name, hero: S.hero, token: S.token });
+    return;
+  }
   setStatus('Verbinde …');
   let ws;
   const url = new URL('ws', location.href);          // relativ: funktioniert auch hinter Vorschau-/Proxy-Pfaden
@@ -136,6 +143,7 @@ function onWelcome(m) {
 }
 
 async function refreshInfo() {
+  if (typeof Lokal !== 'undefined') return;
   try {
     const r = await fetch('info', { cache: 'no-store' });
     S.info = await r.json();
