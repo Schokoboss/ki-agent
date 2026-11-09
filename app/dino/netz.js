@@ -29,16 +29,25 @@ export class Netz {
     this.onLost = null;
   }
 
-  // Server suchen: ?s=…, dann dieselbe Adresse, dann der gekoppelte Nova-Laptop (aus der Nova-App)
+  // Server suchen: ?s=…, dann dieselbe Adresse, dann der gekoppelte Nova-Laptop (aus der Nova-App –
+  // die Tunnel-Adresse wechselt bei jedem Laptop-Neustart, darum frisch aus dem Gist wie in go.html)
   async detect() {
     const cands = [];
     const q = new URLSearchParams(location.search).get('s');
     if (q && validUrl(q)) cands.push(validUrl(q));
     if (/^https?:$/.test(location.protocol)) cands.push(location.origin);
-    try {
-      const conn = JSON.parse(localStorage.getItem('nova.conn') || 'null');
-      if (conn?.u && validUrl(conn.u)) cands.push(validUrl(conn.u));
-    } catch { /* egal */ }
+    let conn = null;
+    try { conn = JSON.parse(localStorage.getItem('nova.conn') || 'null'); } catch { /* egal */ }
+    if (conn?.g && /^[a-f0-9]{20,40}$/.test(conn.g)) {
+      const owner = conn.o || (location.hostname.endsWith('.github.io') ? location.hostname.split('.')[0] : 'schokoboss');
+      try {
+        const r = await fetch(`https://gist.githubusercontent.com/${encodeURIComponent(owner)}/${conn.g}/raw/agent-endpoint.json?t=${Date.now()}`,
+          { cache: 'no-store', signal: AbortSignal.timeout(6000) });
+        const u = r.ok ? (await r.json()).url : null;
+        if (/^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/.test(u || '')) cands.push(u);
+      } catch { /* dann die gespeicherte Adresse */ }
+    }
+    if (conn?.u && validUrl(conn.u)) cands.push(validUrl(conn.u));
     for (const c of [...new Set(cands)]) {
       this.server = c;
       try {

@@ -10,6 +10,8 @@ Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
   Gegner als Geister, Meteor-Angriffe, Ergebnis mit Bonus-Münzen. Im Nova-Server unter `/mp/dino` (ohne Schlüssel, nur
   Spielräume) oder allein fürs WLAN. `/dino` leitet jetzt auf `/dino/` um (Ordner unter `app/` mit `index.html`).
 - Tests: `werkzeuge/tests/test_dino.py` (Räume) und `werkzeuge/dinotest.mjs` (Chrome: Solo-Bot, Shop, Rennen PC gegen Handy).
+- Spielen unter https://schokoboss.github.io/ki-agent/dino/ – GitHub Action `dino-pages.yml` veröffentlicht `app/dino/`
+  nach `gh-pages/dino/`. Von dort findet das Spiel den gekoppelten Nova-Laptop für den Mehrspieler über den Gist.
 
 ## 04.11.2026
 - Startseite: Karte „Zum Startbildschirm hinzufügen“ (Installieren-Knopf, wo der Browser ihn anbietet).

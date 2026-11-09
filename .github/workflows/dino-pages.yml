@@ -1,0 +1,49 @@
+# Veröffentlicht Dino-Sprint 3D automatisch auf GitHub Pages (Zweig gh-pages, Ordner dino/):
+#   https://schokoboss.github.io/ki-agent/dino/
+# Läuft bei jeder Änderung am Spielordner. Andere Dateien in gh-pages (Nova-App, andere Spiele) werden nie angefasst.
+name: Dino-Sprint 3D auf GitHub Pages
+
+on:
+  push:
+    branches: [main, ccr-d2106680-82htq8]
+    paths: ['app/dino/**', '.github/workflows/dino-pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gh-pages-veroeffentlichen
+  cancel-in-progress: false
+
+jobs:
+  veroeffentlichen:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Quelle holen
+        uses: actions/checkout@v4
+        with:
+          path: quelle
+      - name: gh-pages holen
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: seite
+      - name: Nur den Spielordner ersetzen
+        run: |
+          rm -rf seite/dino
+          mkdir -p seite/dino
+          cp -R quelle/app/dino/. seite/dino/
+      - name: Veröffentlichen
+        working-directory: seite
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A dino
+          if git diff --cached --quiet; then echo "Keine Änderungen am Spiel."; exit 0; fi
+          git commit -m "Dino-Sprint 3D automatisch veröffentlicht (${GITHUB_REF_NAME} @ ${GITHUB_SHA::7})"
+          for i in 1 2 3; do
+            git push origin gh-pages && exit 0
+            git pull --rebase origin gh-pages   # gleichzeitig hat z. B. Nova Drive veröffentlicht
+          done
+          exit 1

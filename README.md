@@ -86,7 +86,8 @@ Nova kann auch **direkt auf dem Handy** laufen – ganz ohne Laptop, sogar ohne 
   Ton, Highscore, Level, Pause, Effekte und Emoji-Figuren schon mit, Nova schreibt nur das eigentliche Spiel.
   Jede Version wird im unsichtbaren Chrome ~4 s echt durchgespielt (Fehler mit Zeile, läuft die Schleife,
   bewegt sich was, reagiert die Steuerung) und erst bei „OK“ veröffentlicht – mit Vorschaubild im Chat.
-- **Dino-Sprint 3D:** Chatliste → „Dino-Sprint 3D spielen“. Endlos-Rennen in 3D über drei Spuren: springen,
+- **Dino-Sprint 3D:** Chatliste → „Dino-Sprint 3D spielen“ oder direkt **https://schokoboss.github.io/ki-agent/dino/**
+  (wird bei jeder Änderung an `app/dino/` automatisch veröffentlicht). Endlos-Rennen in 3D über drei Spuren: springen,
   ducken, ausweichen – Kakteen, Felsen, Baumstämme, hängende Äste, Flugsaurier, dazu Tag und Nacht.
   **8 Dinos** mit Spezialfähigkeit (Rex; Raptor mit Doppelsprung; Stegosaurus +30 % Münzen; Triceratops-Hornstoß;
   Ankylosaurus mit Schild; Brachiosaurus sammelt aus allen Spuren; Spinosaurus mit Turbo-Start; Gold-Rex ×2 Münzen),
