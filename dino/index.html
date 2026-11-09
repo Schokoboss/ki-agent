@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#20123a">
+<meta name="description" content="Dino-Sprint 3D – Endlos-Rennen mit Dinos, Power-ups, Münzen, Shop und Mehrspieler.">
+<title>Dino-Sprint 3D</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E🦖%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="dino.css">
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.min.js" } }</script>
+</head>
+<body>
+<canvas id="c" aria-label="Spielfeld"></canvas>
+
+<div id="loading" class="loading"><div class="egg">🦖</div><p id="loadMsg">Lade die Urzeit …</p></div>
+
+<div id="hud" hidden>
+  <div class="hud-top">
+    <div class="stat"><b id="hDist">0</b><small>m</small></div>
+    <div class="stat coin"><span aria-hidden="true">🪙</span><b id="hCoins">0</b></div>
+    <button id="btnPause" class="round dark" type="button" aria-label="Pause"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1.2" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1.2" fill="currentColor"/></svg></button>
+  </div>
+  <div id="hPowers" class="powers"></div>
+  <ol id="hBoard" class="board" hidden></ol>
+  <div id="hSpect" class="spect" hidden>💀 Ausgeschieden – du schaust den anderen zu …</div>
+  <div id="hHint" class="hint"></div>
+</div>
+<div id="big" class="bigtext" aria-live="polite"></div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<section id="scrMenu" class="screen side-left" hidden>
+  <div class="panel">
+    <h1 class="title">DINO<span>SPRINT</span><em>3D</em></h1>
+    <div class="wallet"><span>🪙 <b class="vCoins">0</b></span><span>🏆 <b id="mBest">0</b> m</span></div>
+    <div class="cur">Dein Dino: <b id="mDinoName">Rexi</b> <small id="mDinoArt">T-Rex</small></div>
+    <button class="btn primary big" id="bSolo" type="button">▶ Solo laufen</button>
+    <button class="btn mp" id="bMulti" type="button">👥 Mehrspieler</button>
+    <div class="row"><button class="btn" id="bShop" type="button">🛒 Shop</button><button class="btn" id="bHelp" type="button">❓ Anleitung</button></div>
+    <div class="row"><button class="chip" data-toggle="sfx" type="button">🔊 Ton</button><button class="chip" data-toggle="musik" type="button">🎵 Musik</button></div>
+    <a class="chip nova" id="bNova" href="../" hidden>← Zurück zu Nova</a>
+  </div>
+</section>
+
+<section id="scrShop" class="screen side-right" hidden>
+  <div class="panel wide">
+    <header class="bar"><button class="round" data-back type="button" aria-label="Zurück">←</button><h2>Shop</h2><div class="wallet"><span>🪙 <b class="vCoins">0</b></span></div></header>
+    <nav class="tabs" role="tablist"><button class="tab on" data-tab="dinos" type="button" role="tab">🦖 Dinos</button><button class="tab" data-tab="ups" type="button" role="tab">⚡ Upgrades</button></nav>
+    <div id="shopDinos" class="cards"></div>
+    <div id="shopUps" class="ups" hidden></div>
+  </div>
+</section>
+
+<section id="scrMp" class="screen" hidden>
+  <div class="panel">
+    <header class="bar"><button class="round" data-back type="button" aria-label="Zurück">←</button><h2>Mehrspieler</h2></header>
+    <label class="field">Dein Name<input id="mpName" maxlength="14" autocomplete="nickname" placeholder="z. B. Dino-Max"></label>
+    <p id="mpStatus" class="muted">Suche Server …</p>
+    <button class="btn primary" id="bCreate" type="button" disabled>➕ Raum erstellen</button>
+    <div class="join"><input id="mpCode" maxlength="4" placeholder="CODE" autocapitalize="characters" autocomplete="off" spellcheck="false" aria-label="Raum-Code"><button class="btn mp" id="bJoin" type="button" disabled>Beitreten</button></div>
+    <p class="muted small">Alle laufen dieselbe Strecke – wer am weitesten kommt, gewinnt. ☄️ Meteore treffen die Gegner vor dir!</p>
+  </div>
+</section>
+
+<section id="scrLobby" class="screen side-left" hidden>
+  <div class="panel">
+    <header class="bar"><button class="round" id="bLeave" type="button" aria-label="Raum verlassen">←</button><h2>Raum <span id="lCode" class="code">----</span></h2></header>
+    <div class="row"><button class="btn" id="bShare" type="button">📨 Einladen</button><button class="btn" id="bCopy" type="button">📋 Link kopieren</button></div>
+    <ul id="lPlayers" class="players"></ul>
+    <p id="lInfo" class="muted"></p>
+    <div class="row"><button class="btn" id="bLDino" type="button">🦖 Dino</button><button class="btn primary" id="bStart" type="button">🏁 Starten</button></div>
+  </div>
+</section>
+
+<section id="scrOver" class="screen" hidden>
+  <div class="panel">
+    <h2 id="oTitle" class="center">Autsch!</h2>
+    <div class="result"><div><b id="oDist">0</b><small>Meter</small></div><div><b id="oCoins">0</b><small>Münzen</small></div></div>
+    <p id="oBest" class="best"></p>
+    <button class="btn gold" id="bRevive" type="button">💖 Weiterlaufen · 🪙 <span id="oRevCost">100</span></button>
+    <button class="btn primary big" id="bAgain" type="button">🔁 Nochmal</button>
+    <div class="row"><button class="btn" id="bOverShop" type="button">🛒 Shop</button><button class="btn" id="bOverMenu" type="button">🏠 Menü</button></div>
+  </div>
+</section>
+
+<section id="scrResults" class="screen" hidden>
+  <div class="panel">
+    <h2 class="center">🏁 Ergebnis</h2>
+    <ol id="rList" class="podium"></ol>
+    <p id="rReward" class="best"></p>
+    <div class="row"><button class="btn" id="bRLobby" type="button">👥 Lobby</button><button class="btn primary" id="bRAgain" type="button">🏁 Nochmal</button></div>
+  </div>
+</section>
+
+<section id="scrPause" class="screen" hidden>
+  <div class="panel">
+    <h2 class="center">Pause</h2>
+    <button class="btn primary big" id="bResume" type="button">▶ Weiter</button>
+    <div class="row"><button class="chip" data-toggle="sfx" type="button">🔊 Ton</button><button class="chip" data-toggle="musik" type="button">🎵 Musik</button></div>
+    <button class="btn" id="bQuit" type="button">🏠 Aufgeben</button>
+  </div>
+</section>
+
+<dialog id="help" class="help">
+  <form method="dialog">
+    <div class="bar"><h2>So geht's</h2><button class="round" value="close" aria-label="Schließen">✕</button></div>
+    <table>
+      <tr><td>⬅️ ➡️</td><td>Spur wechseln – Pfeiltasten / A D oder zur Seite wischen</td></tr>
+      <tr><td>⬆️</td><td>Springen – ↑ / W / Leertaste, nach oben wischen oder tippen</td></tr>
+      <tr><td>⬇️</td><td>Ducken (in der Luft: schnell landen) – ↓ / S oder nach unten wischen</td></tr>
+      <tr><td>⏸</td><td>Pause – P oder Esc</td></tr>
+    </table>
+    <h3>Power-ups</h3>
+    <ul id="helpPu"></ul>
+    <h3>Hindernisse</h3>
+    <p>🌵 Kakteen und 🪨 Felsen: drüberspringen oder ausweichen. 🪵 Baumstamm über alle Spuren: springen. 🌿 Hängender Ast: ducken. 🦅 Flugsaurier: ducken oder ausweichen. 🔴 Roter Ring auf dem Boden: Da schlägt gleich ein Meteor ein!</p>
+    <h3>Geld</h3>
+    <p>Münzen 🪙 und Kristalle 💎 (10 Münzen) sammeln, im Shop neue Dinos mit Spezialfähigkeit kaufen und Power-ups verbessern. Mit Münzen kannst du nach einem Unfall auch weiterlaufen. Im Mehrspieler gibt es Bonus-Münzen für die Plätze 1 bis 3.</p>
+    <button class="btn primary" value="ok">Los geht's!</button>
+  </form>
+</dialog>
+
+<script>
+  // Lädt three.js nicht (kein Internet), sagen wir das, statt ewig zu laden
+  setTimeout(function () {
+    if (!window.__dinoReady) document.getElementById('loadMsg').textContent = 'Die 3D-Grafik lädt nicht – ist das Internet an? Dann Seite neu laden.';
+  }, 15000);
+</script>
+<script type="module" src="spiel.js"></script>
+</body>
+</html>
