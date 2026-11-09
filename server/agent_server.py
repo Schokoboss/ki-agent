@@ -25,6 +25,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import dino_mp
 import games
 import minecraft
 import remote
@@ -2548,13 +2549,34 @@ class Handler(BaseHTTPRequestHandler):
     def _static(self, path: str) -> None:
         rel = urllib.parse.unquote(path).lstrip("/") or "index.html"
         target = (APP_DIR / rel).resolve()
+        if APP_DIR.resolve() in target.parents and target.is_dir():  # z. B. /dino/ → Dino-Sprint 3D
+            if not path.endswith("/"):
+                self.send_response(301)
+                self.send_header("Location", path + "/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            target = target / "index.html"
         if APP_DIR.resolve() not in target.parents or not target.is_file():
             target = APP_DIR / "index.html"
         return self._file(target)
 
+    def _dino(self) -> None:
+        """Dino-Sprint 3D Mehrspieler: ohne Nova-Schlüssel, damit Freunde mitspielen – hier gibt es nur Spielräume."""
+        if int(self.headers.get("Content-Length") or 0) > dino_mp.MAX_BODY:
+            self.close_connection = True  # Rest der Anfrage bleibt ungelesen → Verbindung nicht weiterverwenden
+            return self._json(413, {"error": "zu groß"})
+        try:
+            body = self._body()
+        except ValueError:
+            return self._json(400, {"error": "Ungültige Anfrage"})
+        return self._json(*DINO.handle(body))
+
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
         try:
+            if path == "/mp/dino":
+                return self._dino()
             if not self._authed():
                 return
             body = self._body()
@@ -2798,6 +2820,9 @@ def local_info() -> dict:
         "pair_link": CFG["app_url"] + "#" + urllib.parse.urlencode(frag),
         "local_link": f"http://localhost:{CFG['port']}/#" + urllib.parse.urlencode(local_frag),
     }
+
+
+DINO = dino_mp.Rooms()  # Räume für Dino-Sprint 3D (app/dino), nur im Speicher
 
 
 class Server(ThreadingHTTPServer):

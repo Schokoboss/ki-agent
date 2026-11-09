@@ -86,6 +86,18 @@ Nova kann auch **direkt auf dem Handy** laufen – ganz ohne Laptop, sogar ohne 
   Ton, Highscore, Level, Pause, Effekte und Emoji-Figuren schon mit, Nova schreibt nur das eigentliche Spiel.
   Jede Version wird im unsichtbaren Chrome ~4 s echt durchgespielt (Fehler mit Zeile, läuft die Schleife,
   bewegt sich was, reagiert die Steuerung) und erst bei „OK“ veröffentlicht – mit Vorschaubild im Chat.
+- **Dino-Sprint 3D:** Chatliste → „Dino-Sprint 3D spielen“ oder direkt **https://schokoboss.github.io/ki-agent/dino/**
+  (wird bei jeder Änderung an `app/dino/` automatisch veröffentlicht). Endlos-Rennen in 3D über drei Spuren: springen,
+  ducken, ausweichen – Kakteen, Felsen, Baumstämme, hängende Äste, Flugsaurier, dazu Tag und Nacht.
+  **8 Dinos** mit Spezialfähigkeit (Rex; Raptor mit Doppelsprung; Stegosaurus +30 % Münzen; Triceratops-Hornstoß;
+  Ankylosaurus mit Schild; Brachiosaurus sammelt aus allen Spuren; Spinosaurus mit Turbo-Start; Gold-Rex ×2 Münzen),
+  **6 Power-ups** (Magnet, Schild, Turbo, Doppel-Geld, Supersprung, Meteor), Münzen und Kristalle, **Shop** für Dinos und
+  Power-up-Upgrades, Weiterlaufen gegen Münzen. Steuerung: Wischen/Tippen am Handy, Pfeiltasten/WASD/Leertaste am PC.
+  **Mehrspieler** bis 8: „Raum erstellen“ → Link teilen. Alle laufen dieselbe Strecke, ein ☄️ Meteor trifft die Gegner
+  vor dir, die Plätze 1–3 bekommen Bonus-Münzen. Läuft über den Nova-Laptop (Freunde spielen über den Tunnel-Link mit)
+  oder ganz ohne Nova im WLAN: `python server/dino_mp.py` und die angezeigte Adresse öffnen. Der Mehrspieler-Teil
+  (`/mp/dino`) braucht keinen Nova-Schlüssel – dort gibt es nur Spielräume im Speicher (höchstens 40 Räume à
+  8 Spieler, 8 KB pro Anfrage), nichts vom Laptop. Spielstand und Münzen bleiben im Browser des Geräts.
 - **Apps & Webseiten:** Nova programmiert sie und gibt dir einen **festen Link** (über GitHub Pages
   `go.html`, findet den Laptop nach jedem Neustart wieder; dieselbe Datei behält ihren Link auch nach
   Verbesserungen). Teilbar – funktioniert, solange der Laptop läuft. Wer den Link hat, sieht auch, wann
@@ -192,7 +204,7 @@ Rechnen, Gedächtnis, Notizen und Erinnerungen laufen immer ohne Nachfrage.
 engine\      llama.cpp (KI-Engine) + cloudflared (Tunnel)
 models\      das KI-Modell (2,6 GB) + Bildverständnis (0,6 GB)
 server\      der Agent (Python, nur Standardbibliothek)
-app\         die Handy-App (liegt auch auf GitHub Pages)
+app\         die Handy-App (liegt auch auf GitHub Pages), app\dino\ = Dino-Sprint 3D
 workspace\   Arbeitsordner des Agenten – hier landen seine Dateien
 werkzeuge\   Testserver mit Fake-KI, Handy-Test (6 Handy-Profile), MCP-Testserver
 data\        Chats, Gedächtnis, Schlüssel, Logs (privat, nicht auf GitHub)
@@ -205,6 +217,10 @@ data\        Chats, Gedächtnis, Schlüssel, Logs (privat, nicht auf GitHub)
   mit Pause und Abschlussbericht auf 6 Handy-Profilen durch und prüft Überstand, Tippflächen (mind. 40 px), Schrift,
   abgeschnittene Platzhalter, Dialoge und JavaScript-Fehler. Bericht mit Bildschirmfotos:
   `werkzeuge/handytest-ergebnis/index.html`.
+- **Dino-Sprint 3D:** `python werkzeuge/tests/test_dino.py` prüft die Mehrspieler-Räume (ohne Browser).
+  `node werkzeuge/dinotest.mjs` startet den Dino-Server selbst und spielt im unsichtbaren Chrome: ein Bot läuft Solo
+  (Strecke fair?), Power-ups, Unfall + Weiterlaufen, Shop, dann ein Rennen PC gegen Handy mit Meteor und Ergebnis.
+  Fotos in `werkzeuge/dinotest-ergebnis/index.html`. Beides auch über `python werkzeuge/tests/alle_tests.py --dino`.
 
 ## Wenn was nicht geht
 
