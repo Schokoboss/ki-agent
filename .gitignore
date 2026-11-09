@@ -6,3 +6,4 @@ workspace/
 __pycache__/
 *.pyc
 werkzeuge/handytest-ergebnis/
+werkzeuge/dinotest-ergebnis/

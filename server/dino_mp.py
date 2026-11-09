@@ -109,17 +109,15 @@ class Rooms:
         try:
             with self.lock:
                 now = self.clock()
-                self._cleanup(now)
-                if action == "ping":
-                    return 200, {"ok": True, "now": now}
-                if action == "create":
-                    room, player = self._create(body, now)
-                    return 200, {**self._view(room, player, now), "key": player.key}
-                if action == "join":
-                    room, player = self._join(body, now)
+                if action in ("ping", "create", "join"):
+                    self._cleanup(now)
+                    if action == "ping":
+                        return 200, {"ok": True, "now": now}
+                    room, player = (self._create if action == "create" else self._join)(body, now)
                     return 200, {**self._view(room, player, now), "key": player.key}
                 room, player = self._auth(body)
-                player.seen = room.seen = now
+                player.seen = room.seen = now  # erst vermerken, dann aufräumen: wer fragt, ist offensichtlich da
+                self._cleanup(now)
                 if action == "sync":
                     self._sync(room, player, body, now)
                 elif action == "start":
@@ -319,6 +317,7 @@ class DinoHandler(BaseHTTPRequestHandler):
             return self._json(404, {"error": "nicht gefunden"})
         n = int(self.headers.get("Content-Length") or 0)
         if n > MAX_BODY:
+            self.close_connection = True
             return self._json(413, {"error": "zu groß"})
         try:
             body = json.loads(self.rfile.read(n).decode("utf-8") or "{}")
@@ -345,11 +344,12 @@ def main() -> None:
     args = ap.parse_args()
     httpd = ThreadingHTTPServer((args.host, args.port), DinoHandler)
     httpd.daemon_threads = True
+    port = httpd.server_address[1]  # bei --port 0 sucht das System einen freien aus
     print("=" * 58)
     print("  Dino-Sprint 3D – Mehrspieler-Server")
-    print(f"  Hier:         http://localhost:{args.port}/dino/")
+    print(f"  Hier:         http://localhost:{port}/dino/")
     if args.host == "0.0.0.0":
-        print(f"  Im WLAN:      http://{lan_ip()}:{args.port}/dino/")
+        print(f"  Im WLAN:      http://{lan_ip()}:{port}/dino/")
     print("  Fenster schließen = Server aus")
     print("=" * 58, flush=True)
     try:

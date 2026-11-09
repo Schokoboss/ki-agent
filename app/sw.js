@@ -47,8 +47,9 @@ self.addEventListener('fetch', e => {
     return;
   }
   if (e.request.method !== 'GET') return;
-  // WebLLM-Bibliothek (versioniert, ändert sich nie) – Cache zuerst, damit der Handy-Modus offline startet
-  if (url.hostname === 'esm.run' || (url.hostname === 'cdn.jsdelivr.net' && url.pathname.includes('@mlc-ai/web-llm'))) {
+  // WebLLM- und three.js-Bibliothek (versioniert, ändern sich nie) – Cache zuerst, damit Handy-Modus und
+  // Dino-Sprint 3D offline starten
+  if (url.hostname === 'esm.run' || (url.hostname === 'cdn.jsdelivr.net' && /@mlc-ai\/web-llm|\/npm\/three@/.test(url.pathname))) {
     e.respondWith(caches.open(LIB_CACHE).then(async c => {
       const hit = await c.match(e.request);
       if (hit) return hit;

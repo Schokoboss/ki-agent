@@ -2564,6 +2564,7 @@ class Handler(BaseHTTPRequestHandler):
     def _dino(self) -> None:
         """Dino-Sprint 3D Mehrspieler: ohne Nova-Schlüssel, damit Freunde mitspielen – hier gibt es nur Spielräume."""
         if int(self.headers.get("Content-Length") or 0) > dino_mp.MAX_BODY:
+            self.close_connection = True  # Rest der Anfrage bleibt ungelesen → Verbindung nicht weiterverwenden
             return self._json(413, {"error": "zu groß"})
         try:
             body = self._body()

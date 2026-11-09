@@ -64,6 +64,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #8fd3ff; col
 .chip { appearance: none; border: 0; border-radius: 999px; padding: 8px 12px; font: inherit; font-weight: 700; font-size: 14px; min-height: 42px;
   background: var(--soft); color: var(--text); cursor: pointer; }
 .chip.aus { opacity: .5; text-decoration: line-through; }
+.chip.nova { display: grid; place-items: center; text-decoration: none; background: transparent; color: var(--muted); }
 .round { appearance: none; width: 44px; height: 44px; flex: none; border-radius: 50%; border: 0; background: var(--soft); color: var(--text);
   font: 800 20px/1 system-ui, sans-serif; display: grid; place-items: center; cursor: pointer; }
 .round.dark { background: var(--hud); color: #fff; }
@@ -143,9 +144,9 @@ input:focus { border-color: var(--mp); }
 .hint { position: absolute; left: 12px; right: 12px; bottom: max(28px, env(safe-area-inset-bottom)); text-align: center; color: #fff; font-weight: 800; font-size: 17px;
   text-shadow: 0 2px 6px rgba(0, 0, 0, .55); transition: opacity .6s; }
 .hint.weg { opacity: 0; }
-.big { position: fixed; inset: 0; display: grid; place-items: center; font-size: min(120px, 26vw); font-weight: 900; color: #fff; pointer-events: none; z-index: 3;
+.bigtext { position: fixed; inset: 0; display: grid; place-items: center; font-size: min(120px, 26vw); font-weight: 900; color: #fff; pointer-events: none; z-index: 3;
   text-shadow: 0 6px 0 rgba(60, 20, 90, .35), 0 0 32px rgba(0, 0, 0, .28); }
-.big.pop { animation: pop .7s ease-out both; }
+.bigtext.pop { animation: pop .7s ease-out both; }
 @keyframes pop { 0% { transform: scale(1.9); opacity: 0; } 30% { opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
 .toasts { position: fixed; left: 50%; top: 20%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; z-index: 3; width: max-content; max-width: 92vw; }
 .toast { background: rgba(22, 12, 48, .8); color: #fff; padding: 8px 16px; border-radius: 999px; font-weight: 800; animation: toast 2.4s ease forwards; text-align: center; }

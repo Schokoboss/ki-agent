@@ -129,7 +129,7 @@ for (let i = 0; i < 26; i++) {
   const m = M.buildMountain([0xc27b52, 0xb0694a, 0xd29266][i % 3], 22 + Math.random() * 38, 20 + Math.random() * 22);
   m.position.x = Math.cos(a) * r;
   m.position.z = Math.sin(a) * r;
-  bg.add(hazy(m, 0.5));
+  bg.add(hazy(m, 0.38));
 }
 const volcano = hazy(M.buildVolcano(), 0.42);
 volcano.position.set(-95, 0, -300);
@@ -193,7 +193,8 @@ function updateSky(cyc) {
   sunSprite.position.set(Math.cos(ang) * 260, 30 + Math.sin(ang) * 110, -320);
   sunSprite.material.color.setHex(night > 0.5 ? 0xdfe8ff : 0xfff0a8);
   sunSprite.scale.setScalar(night > 0.5 ? 55 : 95);
-  document.querySelector('meta[name=theme-color]')?.setAttribute('content', '#' + skyCol.getHexString());
+  const th = '#' + skyCol.getHexString();
+  if (th !== G.theme) { G.theme = th; document.querySelector('meta[name=theme-color]')?.setAttribute('content', th); }
 }
 
 // Deko am Rand – wird immer wieder nach vorne gesetzt
@@ -479,6 +480,7 @@ function meteorShower() {   // Solo: räumt die Strecke vor dir frei
 
 function incomingMeteor(from) {
   if (G.phase !== 'run' || !P.alive) return;
+  G.meteorsIn = (G.meteorsIn || 0) + 1;
   const d = P.d + Math.max(34, P.speed * 2.4), lane = P.lane;
   toast(`☄️ ${from} schickt dir einen Meteor!`, 'warn');
   ton.play('meteor');
@@ -572,6 +574,7 @@ function hitObstacle(o) {
 
 function crash() {
   P.alive = false;
+  P.vy = Math.max(P.vy, 5);
   G.phase = 'dying';
   G.dieT = 0;
   ton.play('crash');
@@ -719,12 +722,14 @@ function updateBackground(dt) {
 const ghosts = new Map();
 function ghostFor(p) {
   const mesh = M.makeGhost(p.dino, 0.5);
+  const mats = [];
+  mesh.traverse(o => { if (o.isMesh) mats.push(o.material); });
   const tag = M.buildNameTag(p.name, hex(M.dinoById(p.dino).farbe));
   tag.position.y = 2.75;
   mesh.add(tag);
   mesh.add(makeShadow());
   scene.add(mesh);
-  return { pid: p.pid, dino: p.dino, name: p.name, mesh, d: p.d, snapD: p.d, snapT: performance.now() / 1000, x: p.lane * LANE_W, y: 0, ty: 0,
+  return { pid: p.pid, dino: p.dino, name: p.name, mesh, mats, tag, op: 0.5, d: p.d, snapD: p.d, snapT: performance.now() / 1000, x: p.lane * LANE_W, y: 0, ty: 0,
     lane: p.lane, duck: false, alive: p.alive, tomb: null, tombD: 0 };
 }
 function dropGhost(g) {
@@ -777,6 +782,13 @@ function updateGhosts(dt) {
       const z = -(g.d - G.viewD);
       g.mesh.visible = z > -170 && z < 20;
       g.mesh.position.set(g.x, g.y, z);
+      // Geist direkt bei/hinter mir: fast durchsichtig, ohne Schild – sonst verdeckt er die Sicht
+      const op = Math.round(lerp(0.5, 0.14, clamp((z + 2) / 3, 0, 1)) * 50) / 50;
+      if (op !== g.op) { g.op = op; for (const m of g.mats) m.opacity = op; }
+      g.tag.visible = z < -3;
+      const f = clamp(-z / 16, 1, 3.2);
+      g.tag.scale.set(2.2 * f, 0.55 * f, 1);
+      g.tag.position.y = 2.75 + (f - 1) * 0.35;
       M.animateDino(g.mesh, dt, { speed: speedAt(g.d), air: g.y > 0.08, duck: g.duck });
     } else g.mesh.visible = false;
     if (g.tomb) g.tomb.position.z = -(g.tombD - G.viewD);
@@ -835,9 +847,9 @@ function updateCamera(dt) {
     G.turboK = damp(G.turboK || 0, turbo, 4, dt);
     const tx = G.viewX * 0.55;
     camera.position.x = damp(camera.position.x, tx, 8, dt);
-    camera.position.y = damp(camera.position.y, (portrait ? 4.5 : 3.7) + (P.y || 0) * 0.3, 6, dt);
-    camera.position.z = damp(camera.position.z, portrait ? 8.0 : 6.6, 4, dt);
-    _look.set(G.viewX * 0.8, 1.15 + (P.y || 0) * 0.2, -10);
+    camera.position.y = damp(camera.position.y, (portrait ? 5.0 : 4.1) + (P.y || 0) * 0.3, 6, dt);
+    camera.position.z = damp(camera.position.z, portrait ? 8.6 : 7.2, 4, dt);
+    _look.set(G.viewX * 0.8, 1.0 + (P.y || 0) * 0.2, -12);
     fov = (portrait ? 72 : 58) + G.turboK * 12;
   }
   if (Math.abs(camera.fov - fov) > 0.05) { camera.fov = damp(camera.fov, fov, 5, dt); camera.updateProjectionMatrix(); }
@@ -871,11 +883,16 @@ function tick(dt) {
       dino.position.set(0, 0, 0);
       break;
     case 'countdown': countdown(); break;
-    case 'run': stepRun(dt); break;
+    case 'run':
+      stepRun(dt);
+      if (G.hintT > 0) G.hintT -= dt;
+      break;
     case 'dying':
       G.dieT += dt;
+      P.vy -= GRAV * dt;                      // kleiner Hüpfer, dann auf die Seite fallen
+      P.y = Math.max(0, P.y + P.vy * dt);
+      dino.position.set(P.x, P.y, 0);
       dino.rotation.z = damp(dino.rotation.z, Math.PI / 2, 8, dt);
-      dino.position.y = Math.max(0.25, P.y - G.dieT * 6) * 0 + 0.3 * Math.max(0, 1 - G.dieT * 3);
       if (G.dieT > 1.1) afterDeath();
       break;
     case 'spect': {
@@ -934,7 +951,7 @@ function startGame(seed, mp) {
   G.lastCount = null;
   G.countEnd = performance.now() / 1000 + 2.4;
   G.hintT = save.runs < 3 ? 6 : 0;
-  ton.unlock();
+  if (ton.ctx) ton.unlock();
   ton.music(true);
   aimMenuCam();
 }
@@ -1004,8 +1021,12 @@ function revive() {
   ton.music(true);
 }
 
+function forgetInvite() {
+  if (/[?&]raum=/.test(location.search)) history.replaceState(null, '', location.pathname);
+}
+
 function toMenu() {
-  if (G.mp) { netz.leave(); G.mp = false; }
+  if (G.mp) { netz.leave(); G.mp = false; forgetInvite(); }
   clearGhosts();
   clearWorld();
   G.phase = 'idle';
@@ -1066,7 +1087,6 @@ function hud() {
   }
   // Tipp für Neulinge
   if (G.hintT > 0 && G.phase === 'run') {
-    G.hintT -= 1 / 60;
     setText('hHint', matchMedia('(pointer: coarse)').matches ? 'Wischen: ← → Spur · ↑ springen · ↓ ducken' : '← → Spur · ↑/Leertaste springen · ↓ ducken');
   }
   $('#hHint').classList.toggle('weg', !(G.hintT > 0));
@@ -1109,6 +1129,7 @@ addEventListener('keydown', e => {
 addEventListener('keyup', e => { if (KEYS[e.code] === 'duck') keysDown.delete('duck'); });
 addEventListener('blur', () => keysDown.clear());
 
+document.addEventListener('pointerdown', () => ton.unlock(), true);
 let swipe = null;
 canvas.addEventListener('pointerdown', e => {
   ton.unlock();
@@ -1264,7 +1285,6 @@ $('#bOverShop').onclick = () => { toMenu(); openShop('scrMenu'); };
 // ================================================================ Mehrspieler-Bildschirme
 let serverOk = false;
 async function openMp() {
-  ton.unlock();
   ton.play('click');
   show('scrMp');
   $('#mpName').value = save.name || '';
@@ -1279,7 +1299,7 @@ async function openMp() {
     : '❌ Kein Mehrspieler-Server gefunden. Öffne das Spiel über deinen Nova-Laptop (Nova-App → Dino-Sprint) oder starte am PC <code>python server/dino_mp.py</code> und öffne die angezeigte WLAN-Adresse.';
   return serverOk;
 }
-$('#bMulti').onclick = openMp;
+$('#bMulti').onclick = () => { ton.unlock(); openMp(); };
 
 function readName() {
   const n = $('#mpName').value.replace(/[<>&"'`\\]/g, '').trim().slice(0, 14);
@@ -1308,6 +1328,7 @@ netz.getMe = () => ({ name: save.name, dino: save.dino, d: P.d || 0, lane: P.lan
 netz.onInbox = items => items.forEach(i => { if (i.t === 'meteor') incomingMeteor(i.from || 'Jemand'); });
 netz.onLost = msg => {
   toast('Raum verlassen: ' + msg, 'warn');
+  forgetInvite();
   G.mp = false;
   clearGhosts();
   if (G.phase !== 'idle') toMenu(); else show('scrMenu');
@@ -1377,6 +1398,7 @@ $('#bLeave').onclick = async () => {
   await netz.leave();
   G.mp = false;
   G.round = 0;
+  forgetInvite();
   clearGhosts();
   show('scrMp');
 };
@@ -1439,6 +1461,7 @@ function boot() {
   window.__dinoReady = true;
   $('#loading').classList.add('weg');
   setTimeout(() => $('#loading').remove(), 500);
+  try { $('#bNova').hidden = !localStorage.getItem('nova.conn'); } catch { /* egal */ }  // aus der Nova-App geöffnet
   show('scrMenu');
   if (!save.help) {
     save.help = true;
@@ -1460,13 +1483,16 @@ function boot() {
 window.dino = {
   get phase() { return G.phase; }, get screen() { return G.screen; }, get d() { return P.d; }, get coins() { return P.coins; },
   get frames() { return G.frames; }, get objs() { return objs.length; }, get ghosts() { return ghosts.size; }, get lane() { return P.lane; },
-  get save() { return save; }, netz,
+  get calls() { return renderer.info.render.calls; }, get tris() { return renderer.info.render.triangles; },
+  get save() { return save; }, get meteorsIn() { return G.meteorsIn || 0; }, netz,
   debug: {
     kill: () => { if (G.phase === 'run') crash(); },
     give: n => { save.coins += n; store(); refreshCoins(); },
     meteor: from => incomingMeteor(from || 'Test'),
     power: k => activate(k),
     act,
+    ahead: () => ({ d: P.d, lane: P.lane, y: P.y, air: P.air, speed: P.speed, objs: objs.filter(o => o.kind === 'obs' && !o.dead && !o.doomed && o.d > P.d - 1 && o.d < P.d + 60)
+      .map(o => ({ type: o.type, d: o.d, x: o.x, full: !!o.full, y0: o.y0, y1: o.y1, w: o.w, len: o.len })) }),
   },
 };
 

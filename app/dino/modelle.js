@@ -12,7 +12,7 @@ export const DINOS = [
   { id: 'ankylo', name: 'Panzer', art: 'Ankylosaurus', preis: 2500, farbe: 0x9a7058, bauch: 0xdccdc4, akzent: 0xf2efe8, perk: 'Startet mit Schild, Power-ups halten 40 % länger.' },
   { id: 'brachio', name: 'Langhals', art: 'Brachiosaurus', preis: 4000, farbe: 0x2fa89b, bauch: 0xb8e2db, akzent: 0x1d6f66, perk: 'Holt Münzen auch aus den Nachbarspuren.' },
   { id: 'spino', name: 'Segel', art: 'Spinosaurus', preis: 6000, farbe: 0x8c4ab0, bauch: 0xe6c6f2, akzent: 0xff5a5a, perk: 'Turbo-Start (300 m) und Turbo hält doppelt so lange.' },
-  { id: 'gold', name: 'Goldi', art: 'Gold-Rex', preis: 12000, farbe: 0xffc21a, bauch: 0xfff0b8, gold: true, perk: 'Doppelte Münzen – für immer.' },
+  { id: 'gold', name: 'Goldi', art: 'Gold-Rex', preis: 12000, farbe: 0xffcf2e, bauch: 0xfff3c4, gold: true, perk: 'Doppelte Münzen – für immer.' },
 ];
 export const dinoById = id => DINOS.find(d => d.id === id) || DINOS[0];
 
@@ -63,6 +63,61 @@ export function mat(color, o = {}) {
   return MATS.get(key);
 }
 
+// ------------------------------------------------------------------ Verschmelzen: viele starre Teile → ein Mesh pro Material
+// (weniger Zeichenaufrufe = flüssiger auf schwachen Handys)
+function merged(list) {   // list: [{ geo, matrix }] → eine BufferGeometry
+  const geos = list.map(({ geo, matrix }) => {
+    const g = geo.index ? geo.toNonIndexed() : geo.clone();
+    g.applyMatrix4(matrix);
+    return g;
+  });
+  const n = geos.reduce((a, g) => a + g.attributes.position.count, 0);
+  const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3);
+  let k = 0;
+  for (const g of geos) {
+    pos.set(g.attributes.position.array, k * 3);
+    nor.set(g.attributes.normal.array, k * 3);
+    k += g.attributes.position.count;
+    g.dispose();
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  out.computeBoundingSphere();
+  return out;
+}
+
+// Ganzes starres Objekt in den Raum der Wurzel backen
+export function bake(root) {
+  root.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const byMat = new Map();
+  root.traverse(o => {
+    if (!o.isMesh) return;
+    if (!byMat.has(o.material)) byMat.set(o.material, []);
+    byMat.get(o.material).push({ geo: o.geometry, matrix: new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld) });
+  });
+  const out = new THREE.Group();
+  for (const [m, list] of byMat) out.add(new THREE.Mesh(merged(list), m));
+  return out;
+}
+
+// Bewegliche Figur: nur Geschwister-Teile innerhalb jeder Gruppe verschmelzen, Gruppen (Gelenke) bleiben
+function bakeTree(node) {
+  const byMat = new Map();
+  for (const c of node.children) {
+    if (!c.isMesh) continue;
+    if (!byMat.has(c.material)) byMat.set(c.material, []);
+    byMat.get(c.material).push(c);
+  }
+  for (const [m, list] of byMat) {
+    if (list.length < 2) continue;
+    list.forEach(c => { c.updateMatrix(); node.remove(c); });
+    node.add(new THREE.Mesh(merged(list.map(c => ({ geo: c.geometry, matrix: c.matrix }))), m));
+  }
+  node.children.filter(c => !c.isMesh).forEach(bakeTree);
+}
+
 function part(geo, material, pos, scale, rot) {
   const m = new THREE.Mesh(geo, material);
   if (pos) m.position.set(pos[0], pos[1], pos[2]);
@@ -78,7 +133,7 @@ function group(pos, ...kids) {
 }
 
 function skinOf(d) {
-  const o = d.gold ? { metal: 0.85, rough: 0.28, emissive: 0x4a3300, ei: 0.6 } : {};
+  const o = d.gold ? { metal: 0.35, rough: 0.25, emissive: 0x9a6c00, ei: 0.75 } : {};
   return { C: mat(d.farbe, o), B: mat(d.bauch, d.gold ? o : {}), A: mat(d.akzent ?? d.bauch, d.gold ? o : {}),
     dark: mat(0x2a2320), white: mat(0xffffff, { rough: 0.4 }), eye: mat(0x16110f, { rough: 0.3 }) };
 }
@@ -259,6 +314,7 @@ export function buildDino(id) {
   const d = dinoById(id);
   const inner = ['rex', 'raptor', 'spino', 'gold'].includes(d.id) ? biped(d) : quad(d);
   const outer = new THREE.Group();  // äußere Gruppe: Lage im Spiel; innere: Ducken/Umfallen
+  bakeTree(inner);
   outer.add(inner);
   outer.userData = { ...inner.userData, inner, id: d.id, phase: Math.random() * 6, duckK: 0, jawK: 0 };
   if (d.id === 'brachio') inner.scale.setScalar(0.92);
@@ -337,7 +393,14 @@ function cactus(h, arms = 2, flower = true) {
   return g;
 }
 
+const BAKED = {};
+const STATIC = ['cactusS', 'cactusL', 'cactusG', 'boulder', 'log', 'branch'];
 export function buildObstacle(type) {
+  if (STATIC.includes(type)) return (BAKED[type] ||= bake(rawObstacle(type))).clone();
+  return rawObstacle(type);
+}
+
+function rawObstacle(type) {
   switch (type) {
     case 'cactusS': return cactus(1.0, 1);
     case 'cactusL': return cactus(1.55, 2);
@@ -427,11 +490,16 @@ export function buildObstacle(type) {
 }
 
 // ------------------------------------------------------------------ Sammelsachen
+let COIN = null;
 export function buildCoin() {
-  const g = new THREE.Group();
-  g.add(part(G.coin, mat(0xffc928, { metal: 0.75, rough: 0.3, emissive: 0x7a5200, ei: 0.55 }), [0, 0, 0], [1, 1, 1], [Math.PI / 2, 0, 0]));
-  g.add(part(G.box, mat(0xfff1a8, { metal: 0.6, rough: 0.3, emissive: 0x806000, ei: 0.5 }), [0, 0, 0], [0.1, 0.32, 0.11]));
-  return g;
+  if (!COIN) {
+    const g = new THREE.Group();
+    const m = mat(0xffc928, { metal: 0.3, rough: 0.35, emissive: 0x9a6400, ei: 0.7 });
+    g.add(part(G.coin, m, [0, 0, 0], [1, 1, 1], [Math.PI / 2, 0, 0]));
+    g.add(part(G.box, m, [0, 0, 0], [0.1, 0.32, 0.12]));
+    COIN = bake(g);
+  }
+  return COIN.clone();
 }
 export function buildGem() {
   const g = new THREE.Group();
@@ -560,7 +628,9 @@ export function buildTomb() {
 }
 
 // ------------------------------------------------------------------ Landschaft
-export function buildDecor(kind) {
+export function buildDecor(kind) { return bake(rawDecor(kind)); }
+
+function rawDecor(kind) {
   const g = new THREE.Group();
   switch (kind) {
     case 'palm': {
@@ -620,7 +690,9 @@ export function buildMountain(color, h, r) {
   return m;
 }
 
-export function buildVolcano() {
+export function buildVolcano() { return bake(rawVolcano()); }
+
+function rawVolcano() {
   const g = new THREE.Group();
   g.add(part(new THREE.CylinderGeometry(7, 26, 30, 9), mat(0x5b4a46), [0, 14.5, 0]));
   g.add(part(new THREE.CylinderGeometry(6.4, 7, 1, 9), mat(0xff5a1f, { emissive: 0xff3d00, ei: 1.2 }), [0, 29.6, 0]));
@@ -637,5 +709,5 @@ export function buildCloud() {
   for (let i = 0; i < n; i++) {
     g.add(part(G.ball, m, [i * 2.2 - n, Math.random() * 1.2, Math.random() * 1.5], [2 + Math.random() * 1.4, 1.4 + Math.random(), 1.8]));
   }
-  return g;
+  return bake(g);
 }

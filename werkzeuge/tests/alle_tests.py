@@ -3,6 +3,7 @@
     python werkzeuge/tests/alle_tests.py             → Rechte + MCP, Zeit-Modus, Dauerbetrieb
     python werkzeuge/tests/alle_tests.py --handy     → zusätzlich Handy-Test (Testserver + unsichtbares Chrome)
     python werkzeuge/tests/alle_tests.py --spiele    → zusätzlich Spiele-Werkstatt (Chrome)
+    python werkzeuge/tests/alle_tests.py --dino      → zusätzlich Dino-Sprint 3D im Browser (Solo, Shop, Mehrspieler)
 """
 import os
 import shutil
@@ -35,6 +36,9 @@ print("Nova – alle Tests\n")
 lauf("Rechte + MCP", [sys.executable, HIER / "test_rechte_mcp.py"])
 lauf("Zeit-Modus", [sys.executable, HIER / "test_zeitmodus.py"])
 lauf("Dauerbetrieb (bis fertig)", [sys.executable, HIER / "test_endlos.py"])
+lauf("Dino-Mehrspieler (Räume)", [sys.executable, HIER / "test_dino.py"])
+if "--dino" in sys.argv:
+    lauf("Dino-Sprint 3D (Chrome)", [shutil.which("node") or "node", ROOT / "werkzeuge" / "dinotest.mjs"])
 if "--spiele" in sys.argv:
     lauf("Spiele-Werkstatt", [sys.executable, HIER / "test_spiele.py"])
 

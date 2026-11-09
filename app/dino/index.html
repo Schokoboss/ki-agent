@@ -19,14 +19,14 @@
   <div class="hud-top">
     <div class="stat"><b id="hDist">0</b><small>m</small></div>
     <div class="stat coin"><span aria-hidden="true">🪙</span><b id="hCoins">0</b></div>
-    <button id="btnPause" class="round dark" type="button" aria-label="Pause">⏸</button>
+    <button id="btnPause" class="round dark" type="button" aria-label="Pause"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1.2" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1.2" fill="currentColor"/></svg></button>
   </div>
   <div id="hPowers" class="powers"></div>
   <ol id="hBoard" class="board" hidden></ol>
   <div id="hSpect" class="spect" hidden>💀 Ausgeschieden – du schaust den anderen zu …</div>
   <div id="hHint" class="hint"></div>
 </div>
-<div id="big" class="big" aria-live="polite"></div>
+<div id="big" class="bigtext" aria-live="polite"></div>
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
 <section id="scrMenu" class="screen side-left" hidden>
@@ -38,6 +38,7 @@
     <button class="btn mp" id="bMulti" type="button">👥 Mehrspieler</button>
     <div class="row"><button class="btn" id="bShop" type="button">🛒 Shop</button><button class="btn" id="bHelp" type="button">❓ Anleitung</button></div>
     <div class="row"><button class="chip" data-toggle="sfx" type="button">🔊 Ton</button><button class="chip" data-toggle="musik" type="button">🎵 Musik</button></div>
+    <a class="chip nova" id="bNova" href="../" hidden>← Zurück zu Nova</a>
   </div>
 </section>
 
@@ -102,7 +103,7 @@
 
 <dialog id="help" class="help">
   <form method="dialog">
-    <h2>So geht's</h2>
+    <div class="bar"><h2>So geht's</h2><button class="round" value="close" aria-label="Schließen">✕</button></div>
     <table>
       <tr><td>⬅️ ➡️</td><td>Spur wechseln – Pfeiltasten / A D oder zur Seite wischen</td></tr>
       <tr><td>⬆️</td><td>Springen – ↑ / W / Leertaste, nach oben wischen oder tippen</td></tr>

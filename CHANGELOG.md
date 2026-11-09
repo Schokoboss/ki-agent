@@ -2,6 +2,15 @@
 
 Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 
+## 09.11.2026
+- **Dino-Sprint 3D** (`app/dino/`): Endlos-Rennen in 3D mit three.js – 3 Spuren, springen/ducken/ausweichen, 8 Dinos mit
+  Spezialfähigkeit, 6 Power-ups, Münzen und Kristalle, Shop mit Upgrades, Weiterlaufen, Tag/Nacht, Musik und Töne per
+  WebAudio. Knopf „Dino-Sprint 3D spielen“ in der Chatliste; three.js wird vom Service Worker für offline gemerkt.
+- **Mehrspieler** (`server/dino_mp.py`): Räume mit 4-stelligem Code und Einladungs-Link, gleiche Strecke für alle (Seed),
+  Gegner als Geister, Meteor-Angriffe, Ergebnis mit Bonus-Münzen. Im Nova-Server unter `/mp/dino` (ohne Schlüssel, nur
+  Spielräume) oder allein fürs WLAN. `/dino` leitet jetzt auf `/dino/` um (Ordner unter `app/` mit `index.html`).
+- Tests: `werkzeuge/tests/test_dino.py` (Räume) und `werkzeuge/dinotest.mjs` (Chrome: Solo-Bot, Shop, Rennen PC gegen Handy).
+
 ## 04.11.2026
 - Startseite: Karte „Zum Startbildschirm hinzufügen“ (Installieren-Knopf, wo der Browser ihn anbietet).
 - Pausen im Zeit-Modus können nie negativ werden (Schutz gegen Uhr-Sprünge).
