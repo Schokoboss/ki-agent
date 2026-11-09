@@ -450,13 +450,19 @@ def http_response(status, body: bytes, ctype="text/plain; charset=utf-8", extra=
 
 def serve_file(path):
     path = urllib.parse.unquote(path.split("?", 1)[0])
-    if path == "/info":
+    if path.endswith("/info"):
         return http_response("200 OK", json.dumps(INFO).encode(), "application/json")
     if path == "/":
         path = "/index.html"
     f = (WEB / path.lstrip("/")).resolve()
     if WEB not in f.parents or not f.is_file():
-        return http_response("404 Not Found", b"Nicht gefunden")
+        # hinter einem Proxy mit Unterpfad (z. B. Vorschau): nur den Dateinamen in web/ suchen
+        name = path.rstrip("/").rsplit("/", 1)[-1] or "index.html"
+        f = (WEB / name).resolve()
+        if path.endswith("/"):
+            f = WEB / "index.html"
+        if WEB not in f.parents or not f.is_file():
+            return http_response("404 Not Found", b"Nicht gefunden")
     return http_response("200 OK", f.read_bytes(), TYPES.get(f.suffix, "application/octet-stream"))
 
 
@@ -477,7 +483,7 @@ async def on_connect(reader, writer):
         if ":" in ln:
             k, v = ln.split(":", 1)
             headers[k.strip().lower()] = v.strip()
-    if path.split("?")[0] == "/ws" and "websocket" in headers.get("upgrade", "").lower():
+    if path.split("?")[0].endswith("/ws") and "websocket" in headers.get("upgrade", "").lower():
         key = headers.get("sec-websocket-key", "")
         accept = base64.b64encode(hashlib.sha1((key + GUID).encode()).digest()).decode()
         writer.write(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"

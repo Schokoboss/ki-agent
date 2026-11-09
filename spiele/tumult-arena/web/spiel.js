@@ -84,7 +84,10 @@ function send(o) { if (S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify(o
 function connect() {
   setStatus('Verbinde …');
   let ws;
-  try { ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws'); } catch (e) { setTimeout(connect, 2000); return; }
+  const url = new URL('ws', location.href);          // relativ: funktioniert auch hinter Vorschau-/Proxy-Pfaden
+  url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  url.search = '';
+  try { ws = new WebSocket(url.href); } catch (e) { setTimeout(connect, 2000); return; }
   S.ws = ws;
   ws.onopen = () => { setStatus('Verbunden ✔', 'ok'); send({ t: 'hello', name: S.name, hero: S.hero, token: S.token }); };
   ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch (err) { return; } onMsg(m); };
@@ -134,7 +137,7 @@ function onWelcome(m) {
 
 async function refreshInfo() {
   try {
-    const r = await fetch('/info', { cache: 'no-store' });
+    const r = await fetch('info', { cache: 'no-store' });
     S.info = await r.json();
     if (S.screen === 'menu') renderInvite($('#invite'), null);
     if (S.screen === 'lobby' && S.room) renderInvite($('#lobbyInvite'), S.room.code);
@@ -207,7 +210,7 @@ function inviteLinks(code) {
     if (S.info.internet) out.push(['Übers Internet', S.info.internet + q]);
     for (const u of S.info.lan || []) out.push(['Im gleichen WLAN', u + q]);
   }
-  const here = location.origin + q;
+  const here = location.origin + location.pathname.replace(/[^/]*$/, '') + q.slice(1);
   if (!/^(localhost|127\.)/.test(location.hostname) && !out.some(o => o[1] === here)) out.unshift(['Dieser Link', here]);
   return out;
 }
