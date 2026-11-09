@@ -2,6 +2,12 @@
 
 Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 
+## 09.11.2026
+- **Tumult Arena** (`spiele/tumult-arena/`): Multiplayer-Arena-Brawler im Browser. Eigener Python-Server (WebSocket,
+  30 Takte/s, Räume mit Code, Schnellspiel, Bots füllen auf, Einsteigen in laufende Partien, Wiederverbinden nach
+  Abbruch, Internet-Link per cloudflared), Vorhersage der eigenen Bewegung, Touch- und PC-Steuerung, 6 Helden,
+  3 Modi, 3 Karten. Test: `werkzeuge/tests/test_tumult.py` (läuft in `alle_tests.py` mit).
+
 ## 04.11.2026
 - Startseite: Karte „Zum Startbildschirm hinzufügen“ (Installieren-Knopf, wo der Browser ihn anbietet).
 - Pausen im Zeit-Modus können nie negativ werden (Schutz gegen Uhr-Sprünge).

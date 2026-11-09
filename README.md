@@ -86,6 +86,9 @@ Nova kann auch **direkt auf dem Handy** laufen – ganz ohne Laptop, sogar ohne 
   Ton, Highscore, Level, Pause, Effekte und Emoji-Figuren schon mit, Nova schreibt nur das eigentliche Spiel.
   Jede Version wird im unsichtbaren Chrome ~4 s echt durchgespielt (Fehler mit Zeile, läuft die Schleife,
   bewegt sich was, reagiert die Steuerung) und erst bei „OK“ veröffentlicht – mit Vorschaubild im Chat.
+- **Tumult Arena (Multiplayer-Spiel):** eigener Arena-Brawler im Browser für bis zu 8 Spieler – Handy und PC, im WLAN
+  oder per Internet-Link. 6 Helden, 3 Modi (Teamkampf, Kristallrausch, Letzter Stand), Bots füllen freie Plätze.
+  Start: `spiele\tumult-arena\Tumult Arena starten.cmd` – Details in `spiele/tumult-arena/README.md`.
 - **Apps & Webseiten:** Nova programmiert sie und gibt dir einen **festen Link** (über GitHub Pages
   `go.html`, findet den Laptop nach jedem Neustart wieder; dieselbe Datei behält ihren Link auch nach
   Verbesserungen). Teilbar – funktioniert, solange der Laptop läuft. Wer den Link hat, sieht auch, wann
@@ -195,6 +198,7 @@ server\      der Agent (Python, nur Standardbibliothek)
 app\         die Handy-App (liegt auch auf GitHub Pages)
 workspace\   Arbeitsordner des Agenten – hier landen seine Dateien
 werkzeuge\   Testserver mit Fake-KI, Handy-Test (6 Handy-Profile), MCP-Testserver
+spiele\      Tumult Arena (Multiplayer-Spiel, eigener Server)
 data\        Chats, Gedächtnis, Schlüssel, Logs (privat, nicht auf GitHub)
 ```
 

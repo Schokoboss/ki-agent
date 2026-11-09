@@ -1,6 +1,6 @@
 """Alle Nova-Tests auf einmal (isoliert: echte Chats, Arbeitsordner und config.json bleiben unberührt).
 
-    python werkzeuge/tests/alle_tests.py             → Rechte + MCP, Zeit-Modus, Dauerbetrieb
+    python werkzeuge/tests/alle_tests.py             → Rechte + MCP, Zeit-Modus, Dauerbetrieb, Tumult Arena
     python werkzeuge/tests/alle_tests.py --handy     → zusätzlich Handy-Test (Testserver + unsichtbares Chrome)
     python werkzeuge/tests/alle_tests.py --spiele    → zusätzlich Spiele-Werkstatt (Chrome)
 """
@@ -35,6 +35,7 @@ print("Nova – alle Tests\n")
 lauf("Rechte + MCP", [sys.executable, HIER / "test_rechte_mcp.py"])
 lauf("Zeit-Modus", [sys.executable, HIER / "test_zeitmodus.py"])
 lauf("Dauerbetrieb (bis fertig)", [sys.executable, HIER / "test_endlos.py"])
+lauf("Tumult Arena (Spiel + Netz)", [sys.executable, HIER / "test_tumult.py"])
 if "--spiele" in sys.argv:
     lauf("Spiele-Werkstatt", [sys.executable, HIER / "test_spiele.py"])
 

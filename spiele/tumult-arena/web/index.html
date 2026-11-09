@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1b1440">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Tumult Arena</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<main id="ui">
+  <!-- ======================= Hauptmenü ======================= -->
+  <section id="menu" class="screen">
+    <header class="logo">
+      <span class="logo-1">TUMULT</span><span class="logo-2">ARENA</span>
+      <small id="netStatus" class="status">Verbinde …</small>
+    </header>
+
+    <div class="grid">
+      <div class="card">
+        <label class="lbl" for="inName">Dein Name</label>
+        <input id="inName" maxlength="16" autocomplete="off" spellcheck="false">
+
+        <h2>Held wählen</h2>
+        <div id="heroGrid" class="hero-grid"></div>
+        <div id="heroInfo" class="hero-info"></div>
+      </div>
+
+      <div class="card">
+        <h2>Modus</h2>
+        <div id="modeList" class="mode-list"></div>
+
+        <button id="btnQuick" class="big go">▶ Spielen</button>
+        <p class="hint">Sofort los – freie Plätze füllen Bots, echte Spieler übernehmen sie jederzeit.</p>
+
+        <h2>Mit Freunden</h2>
+        <div class="row">
+          <button id="btnCreate" class="mid">🏠 Privater Raum</button>
+        </div>
+        <div class="row">
+          <input id="inCode" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false" class="code-in">
+          <button id="btnJoin" class="mid">Beitreten</button>
+        </div>
+        <div id="invite" class="invite"></div>
+      </div>
+
+      <div class="card help">
+        <h2>Steuerung</h2>
+        <p><b>Handy:</b> linker Daumen läuft, rechter Daumen zielt – loslassen schießt, kurz tippen zielt automatisch.
+          Der goldene Knopf ist die <b>Super-Attacke</b>, sie lädt sich durch Treffer auf.</p>
+        <p><b>PC:</b> <kbd>WASD</kbd> laufen, Maus zielen, <kbd>Linksklick</kbd> schießen,
+          <kbd>Rechtsklick</kbd>/<kbd>Leertaste</kbd> Super, <kbd>1</kbd>–<kbd>6</kbd> Emotes, <kbd>Tab</kbd> Punkte, <kbd>M</kbd> Ton.</p>
+        <p><b>Tipps:</b> Im Busch bist du unsichtbar, bis du schießt oder jemand ganz nah kommt. Nicht schießen und
+          nicht getroffen werden heilt nach 3 Sekunden. Munition (3 Balken) lädt von selbst nach.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= Lobby ======================= -->
+  <section id="lobby" class="screen" hidden>
+    <header class="lobby-head">
+      <button id="btnLeaveLobby" class="small ghost">← Verlassen</button>
+      <div class="room-code"><small id="roomKind">Raum</small><b id="roomCode">----</b></div>
+      <button id="btnShare" class="small">🔗 Einladen</button>
+    </header>
+    <div class="grid">
+      <div class="card">
+        <div class="row between">
+          <h2 id="lobbyMode">Modus</h2>
+          <select id="selMode" hidden></select>
+        </div>
+        <p id="lobbyModeText" class="hint"></p>
+        <div id="teams" class="teams"></div>
+        <div class="row wrap">
+          <button id="btnSwap" class="mid">⇄ Team wechseln</button>
+          <label class="toggle" id="botToggle"><input type="checkbox" id="chkBots" checked> Bots füllen auf</label>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Dein Held</h2>
+        <div id="heroGridLobby" class="hero-grid small"></div>
+        <div id="lobbyInvite" class="invite"></div>
+        <button id="btnStart" class="big go">▶ Start</button>
+        <p id="lobbyWait" class="hint center"></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= Ergebnis ======================= -->
+  <section id="result" class="screen overlay" hidden>
+    <div class="result-box">
+      <h1 id="resTitle">SIEG!</h1>
+      <p id="resReason" class="hint center"></p>
+      <div id="resTable" class="res-table"></div>
+      <div class="row center">
+        <button id="btnAgain" class="big go">Weiter</button>
+        <button id="btnMenu" class="mid ghost">Menü</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- Knöpfe im Spiel -->
+<div id="hud" hidden>
+  <button id="hudLeave" class="hud-btn" title="Partie verlassen">✕</button>
+  <button id="hudSound" class="hud-btn" title="Ton an/aus (M)">🔊</button>
+  <button id="hudEmote" class="hud-btn" title="Emote">😀</button>
+  <div id="emoteBar" hidden>
+    <button data-n="0">👍</button><button data-n="1">😂</button><button data-n="2">😮</button><button data-n="3">😡</button><button data-n="4">GG</button><button data-n="5">💀</button>
+  </div>
+</div>
+<div id="rotateHint" hidden>📱↻ Handy quer halten für mehr Überblick</div>
+<div id="toast" role="status"></div>
+
+<script src="ton.js"></script>
+<script src="grafik.js"></script>
+<script src="spiel.js"></script>
+</body>
+</html>
