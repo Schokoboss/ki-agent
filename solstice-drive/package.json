@@ -1,0 +1,34 @@
+{
+  "name": "solstice-drive",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SOLSTICE DRIVE – Open-World-Arcade-Rennspiel auf Kap Aurora (Browser, optimiert für Google Pixel 10a)",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typen": "tsc --noEmit",
+    "server": "tsx server/index.ts",
+    "icons": "tsx werkzeuge/icons-bauen.ts",
+    "karte": "tsx werkzeuge/karte-rendern.ts",
+    "balance": "tsx werkzeuge/balance.ts",
+    "fahrtest": "node werkzeuge/fahrtest.mjs",
+    "messung": "node werkzeuge/fps-messung.mjs"
+  },
+  "dependencies": {
+    "three": "0.187.0",
+    "ws": "8.22.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/three": "0.187.0",
+    "@types/ws": "^8.18.0",
+    "tsx": "^4.20.0",
+    "typescript": "^6.0.0",
+    "vite": "^8.3.0",
+    "vitest": "^5.1.0"
+  }
+}
