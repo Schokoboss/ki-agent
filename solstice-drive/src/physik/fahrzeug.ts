@@ -78,6 +78,9 @@ export class Fahrzeug {
   readonly v: Vec3 = v3();
   readonly dreh: Vec3 = v3();
   readonly raeder: Rad[] = [neuesRad(true), neuesRad(true), neuesRad(false), neuesRad(false)];
+  /** Lage vor dem letzten Schritt (für die Interpolation der Darstellung). */
+  readonly altPos: Vec3 = v3();
+  readonly altRot: Quat = quat();
 
   // Eingaben
   gas = 0;
@@ -168,6 +171,13 @@ export class Fahrzeug {
     this.lenkwinkel = 0; this.lenkGlatt = 0; this.luftZeit = 0; this.tcsFaktor = 1;
     this.rueckwaertsZeit = 0; this.umkippZeit = 0; this.landung = 0;
     this.aktualisiereBasis();
+    this.gleicheAltAn();
+  }
+
+  /** Verhindert Interpolationssprünge nach Teleport/Laden. */
+  gleicheAltAn(): void {
+    this.altPos.x = this.pos.x; this.altPos.y = this.pos.y; this.altPos.z = this.pos.z;
+    this.altRot.x = this.rot.x; this.altRot.y = this.rot.y; this.altRot.z = this.rot.z; this.altRot.w = this.rot.w;
   }
 
   /** Setzt Geschwindigkeit entlang der Fahrzeugachse (z. B. fliegender Start, Rückspulen). */
@@ -261,6 +271,8 @@ export class Fahrzeug {
     const X = this.links, Y = this.oben, Z = this.vorn;
     const pos = this.pos, v = this.v, om = this.dreh;
     const m = w.masse;
+    this.altPos.x = pos.x; this.altPos.y = pos.y; this.altPos.z = pos.z;
+    this.altRot.x = this.rot.x; this.altRot.y = this.rot.y; this.altRot.z = this.rot.z; this.altRot.w = this.rot.w;
 
     const vVor = v.x * Z.x + v.y * Z.y + v.z * Z.z;
     const vQuer = v.x * X.x + v.y * X.y + v.z * X.z;
@@ -695,6 +707,7 @@ export class Fahrzeug {
     this.lenkwinkel = a[i++]; this.lenkGlatt = a[i++]; this.luftZeit = a[i++]; this.tcsFaktor = a[i++];
     this.last = a[i++]; this.espAktiv = a[i++];
     this.aktualisiereBasis();
+    this.gleicheAltAn();
   }
 
   static readonly ZUSTAND_LAENGE = ZUSTAND_LAENGE;
