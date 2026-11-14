@@ -549,16 +549,7 @@ export function passeGelaendeAn(netz: Strassennetz, roh: Float32Array, hoehen: F
           if (d > r) continue;
           const o = j * N + q;
           const deck = st.y[i] + (st.y[i + 1] - st.y[i]) * t;
-          if (tunnel) {
-            // Tunnelöffnung: Zellen nahe am Portal (dünne Überdeckung) nicht zeichnen
-            if (roh[o] - deck < 11 && q < N - 1 && j < N - 1) {
-              loch[j * (N - 1) + q] = 1;
-              if (q > 0) loch[j * (N - 1) + q - 1] = 1;
-              if (j > 0) loch[(j - 1) * (N - 1) + q] = 1;
-              if (q > 0 && j > 0) loch[(j - 1) * (N - 1) + q - 1] = 1;
-            }
-            continue;
-          }
+          if (tunnel) continue;
           if (d < best[o]) {
             best[o] = d;
             const u = ((x - px) * dz - (z - pz) * dx) / l;
@@ -574,5 +565,29 @@ export function passeGelaendeAn(netz: Strassennetz, roh: Float32Array, hoehen: F
     if (best[o] > 1e8) continue;
     const f = glatt(kern[o], kern[o] + AUSLAUF, best[o]);
     hoehen[o] = ziel[o] + (roh[o] - ziel[o]) * f;
+  }
+  // Tunnelöffnungen: Zellen ausstanzen, deren (angepasstes) Gelände in den Röhrenraum ragt
+  for (const st of netz.strassen) {
+    const r = st.halbbreite + 2.2;
+    for (let i = 0; i < st.n - 1; i++) {
+      if (st.flag[i] !== FLAG_TUNNEL && st.flag[i + 1] !== FLAG_TUNNEL) continue;
+      const ax = st.x[i], az = st.z[i], dx = st.x[i + 1] - ax, dz = st.z[i + 1] - az;
+      const l2 = dx * dx + dz * dz;
+      const i0 = Math.max(0, Math.floor((Math.min(ax, ax + dx) - r + WELT_HALB) / RASTER)), i1 = Math.min(N - 2, Math.floor((Math.max(ax, ax + dx) + r + WELT_HALB) / RASTER));
+      const j0 = Math.max(0, Math.floor((Math.min(az, az + dz) - r + WELT_HALB) / RASTER)), j1 = Math.min(N - 2, Math.floor((Math.max(az, az + dz) + r + WELT_HALB) / RASTER));
+      for (let j = j0; j <= j1; j++) {
+        for (let q = i0; q <= i1; q++) {
+          // Zelle (q, j) mit Ecken q..q+1, j..j+1: Abstand der Zellmitte zur Achse
+          const x = (q + 0.5) * RASTER - WELT_HALB, z = (j + 0.5) * RASTER - WELT_HALB;
+          const t = klemme(((x - ax) * dx + (z - az) * dz) / l2, 0, 1);
+          const d = Math.hypot(x - ax - dx * t, z - az - dz * t);
+          if (d > r + RASTER * 0.72) continue;
+          const deck = st.y[i] + (st.y[i + 1] - st.y[i]) * t;
+          const o = j * N + q;
+          const tief = Math.min(hoehen[o], hoehen[o + 1], hoehen[o + N], hoehen[o + N + 1]);
+          if (tief < deck + TUNNEL_HOEHE + 1.6) loch[j * (N - 1) + q] = 1;
+        }
+      }
+    }
   }
 }

@@ -183,12 +183,9 @@ export class Weltkarte implements Boden {
   }
 }
 
-/** Erzeugt die komplette Welt. `fortschritt` wird mit 0..1 aufgerufen (Ladebalken). */
-export function erzeugeWeltkarte(fortschritt?: (anteil: number, schritt: string) => void): Weltkarte {
-  const roh = new Float32Array(N * N);
-  const region = new Uint8Array(N * N);
+function rohZeilen(roh: Float32Array, region: Uint8Array, j0: number, j1: number): void {
   const gew = new Float64Array(REGIONEN.length + 1);
-  for (let j = 0; j < N; j++) {
+  for (let j = j0; j < j1; j++) {
     const z = j * RASTER - WELT_HALB;
     for (let i = 0; i < N; i++) {
       const x = i * RASTER - WELT_HALB;
@@ -201,15 +198,46 @@ export function erzeugeWeltkarte(fortschritt?: (anteil: number, schritt: string)
       for (let r = 1; r <= REGIONEN.length; r++) if (gew[r] > wert) { wert = gew[r]; best = r; }
       region[o] = best === 0 ? REGION.KUESTE : REGIONEN[best - 1].id;
     }
-    if (fortschritt && j % 128 === 0) fortschritt((j / N) * 0.6, 'gelaende');
   }
-  fortschritt?.(0.6, 'strassen');
+}
+
+function fertige(roh: Float32Array, region: Uint8Array): Weltkarte {
   const wasserMax = Math.max(...Object.values(WASSERSTAND));
   const netz = baueStrassennetz({ roh, orte: ORTE, strassen: STRASSEN, wasserMax });
-  fortschritt?.(0.9, 'anpassen');
-  const karte = new Weltkarte(roh, region, netz);
-  fortschritt?.(1, 'fertig');
+  return new Weltkarte(roh, region, netz);
+}
+
+/** Erzeugt die komplette Welt in einem Zug (Tests, Werkzeuge). */
+export function erzeugeWeltkarte(): Weltkarte {
+  const roh = new Float32Array(N * N);
+  const region = new Uint8Array(N * N);
+  rohZeilen(roh, region, 0, N);
+  return fertige(roh, region);
+}
+
+/** Erzeugt die Welt stückweise und meldet den Fortschritt (0..1), damit der Ladebalken läuft. */
+export async function erzeugeWeltkarteAsync(fortschritt: (anteil: number, schritt: string) => void): Promise<Weltkarte> {
+  const roh = new Float32Array(N * N);
+  const region = new Uint8Array(N * N);
+  const pause = () => new Promise<void>((r) => setTimeout(r, 0));
+  const block = 64;
+  for (let j = 0; j < N; j += block) {
+    rohZeilen(roh, region, j, Math.min(N, j + block));
+    fortschritt((j / N) * 0.7, 'gelaende');
+    await pause();
+  }
+  fortschritt(0.72, 'strassen');
+  await pause();
+  const karte = fertige(roh, region);
+  fortschritt(1, 'fertig');
   return karte;
 }
 
-void glatt; void FLAG_TUNNEL;
+let _gemeinsam: Weltkarte | null = null;
+/** Gemeinsame Instanz für Tests (die Erzeugung dauert gut eine Sekunde). */
+export function gemeinsameWeltkarte(): Weltkarte {
+  if (!_gemeinsam) _gemeinsam = erzeugeWeltkarte();
+  return _gemeinsam;
+}
+
+void glatt; void FLAG_TUNNEL; void FLAG_BRUECKE;

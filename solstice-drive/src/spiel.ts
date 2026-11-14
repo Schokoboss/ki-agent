@@ -13,6 +13,8 @@ import { FahrzeugAnsicht } from './fahrzeuge/ansicht';
 import { Atmosphaere } from './welt/atmosphaere';
 import { Himmel } from './welt/himmel';
 import { Testgelaende } from './welt/testgelaende';
+import { Inselwelt } from './welt/inselwelt';
+import type { Weltkarte } from './welt/weltkarte';
 import { Hud } from './ui/hud';
 import { TouchSteuerung } from './ui/touch';
 
@@ -42,12 +44,19 @@ export class Spiel {
   skript: Skripteingabe | null = null;
   zeit = 0;
 
-  constructor(canvas: HTMLCanvasElement, ui: HTMLElement, qualitaet: Qualitaet = istMobil() ? 'mittel' : 'hoch') {
+  /** Inselwelt (null auf der Teststrecke). */
+  insel: Inselwelt | null = null;
+  diagnose = false;
+
+  constructor(canvas: HTMLCanvasElement, ui: HTMLElement, karte: Weltkarte | null, qualitaet: Qualitaet = istMobil() ? 'mittel' : 'hoch') {
     this.grafik = new Grafik(canvas, qualitaet);
     this.eingabe = new Eingabe();
     this.himmel = new Himmel(this.grafik.qualitaet.wolken);
     this.grafik.szene.add(this.himmel.netz);
-    this.welt = new Testgelaende();
+    if (karte) {
+      this.insel = new Inselwelt(karte, this.grafik.qualitaet);
+      this.welt = this.insel;
+    } else this.welt = new Testgelaende();
     this.grafik.szene.add(this.welt.gruppe);
 
     const auto = autoNachId('aurel-s7');
@@ -61,6 +70,14 @@ export class Spiel {
     this.touch = new TouchSteuerung(this.eingabe, ui);
     this.schleife = new Spielschleife((dt) => this.physik(dt), (alpha, dt) => this.zeichne(alpha, dt));
     this.atmosphaere.aktualisiere(0);
+    this.insel?.ladeAlles(new THREE.Vector3(s.x, 0, s.z));
+  }
+
+  /** Versetzt das Spielerauto (Schnellreise, Werkzeuge). */
+  teleportiere(x: number, z: number, gier: number): void {
+    this.spieler.setzeAuf(x, z, gier, this.welt);
+    this.kamera.springe();
+    this.insel?.ladeAlles(new THREE.Vector3(x, 0, z));
   }
 
   autoIds(): string[] { return AUTOS.map((a) => a.id); }
@@ -84,6 +101,7 @@ export class Spiel {
     const e = this.skript ?? this.eingabe.fahren;
     f.gas = e.gas; f.bremse = e.bremse; f.lenkung = e.lenkung; f.handbremse = e.handbremse;
     this.umwelt.naesse = this.atmosphaere.naesse;
+    if (this.insel) this.umwelt.wasserHoehe = this.insel.karte.wasserHoehe;
     f.schritt(dt, this.welt, this.umwelt);
     if (f.landung > 2.2) {
       this.kamera.stoss(f.landung);
@@ -111,6 +129,11 @@ export class Spiel {
     this.grafik.zeichne();
     this.grafik.regleAufloesung(this.schleife.bildzeit);
     this.hud.aktualisiere(f);
+    if (this.diagnose && this.schleife.bilder % 10 === 0) {
+      const info = this.grafik.renderer.info.render;
+      this.hud.diagnose.classList.remove('versteckt');
+      this.hud.diagnose.textContent = `${(1000 / this.schleife.bildzeit).toFixed(0)} FPS  ${this.schleife.arbeitszeit.toFixed(1)} ms  Aufrufe ${info.calls}  Dreiecke ${(info.triangles / 1000).toFixed(0)}k  Kacheln ${this.insel?.kachelnAktiv ?? 0}  Skal. ${this.grafik.skalierung.toFixed(2)}\n${f.pos.x.toFixed(0)}, ${f.pos.y.toFixed(1)}, ${f.pos.z.toFixed(0)}`;
+    }
   }
 
   private aktion(a: string): void {
