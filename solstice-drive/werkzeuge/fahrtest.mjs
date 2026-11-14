@@ -1,25 +1,26 @@
-// Fahrtest: fährt im Headless-Browser per Skript und legt Bildschirmfotos ab.
+// Fahrtest: fährt im Headless-Browser per Skript über die Insel und legt Bildschirmfotos ab.
 // Aufruf: npm run build && npm run fahrtest
 import { starteServer, oeffneSpiel } from './browser.mjs';
 
 const server = await starteServer();
-const spiel = await oeffneSpiel(server.url);
+const spiel = await oeffneSpiel(server.url, { abfrage: '?diagnose' });
+const schritte = [
+  ['01-start', { gas: 0, bremse: 0, lenkung: 0, handbremse: 0 }, 30],
+  ['02-vollgas', { gas: 1, bremse: 0, lenkung: 0, handbremse: 0 }, 240],
+  ['03-drift', { gas: 1, bremse: 0, lenkung: -1, handbremse: 0 }, 70],
+  ['04-gegenlenken', { gas: 1, bremse: 0, lenkung: 0.6, handbremse: 0 }, 50],
+  ['05-wiese', { gas: 1, bremse: 0, lenkung: 0.25, handbremse: 0 }, 200],
+  ['06-bremsen', { gas: 0, bremse: 1, lenkung: 0, handbremse: 0 }, 160],
+];
 try {
   await spiel.seite.evaluate(() => document.getElementById('laden')?.remove());
-  await spiel.bilder(30);
-  console.log('Start:', await spiel.zustand());
-  await spiel.foto('01-start');
-  await spiel.eingabe({ gas: 1, bremse: 0, lenkung: 0, handbremse: 0 });
-  await spiel.bilder(180);
-  console.log('3 s Vollgas:', await spiel.zustand());
-  await spiel.foto('02-vollgas');
-  await spiel.eingabe({ gas: 1, bremse: 0, lenkung: -1, handbremse: 0 });
-  await spiel.bilder(90);
-  console.log('Linkskurve:', await spiel.zustand());
-  await spiel.foto('03-kurve');
-  await spiel.eingabe({ gas: 0, bremse: 1, lenkung: 0, handbremse: 0 });
-  await spiel.bilder(150);
-  console.log('Gebremst:', await spiel.zustand());
+  for (const [name, eingabe, bilder] of schritte) {
+    await spiel.eingabe(eingabe);
+    await spiel.bilder(bilder);
+    const z = await spiel.zustand();
+    console.log(name, `x=${z.x.toFixed(0)} y=${z.y.toFixed(1)} z=${z.z.toFixed(0)} ${z.kmh.toFixed(0)} km/h Gang ${z.gang} Räder ${z.raeder}`);
+    await spiel.foto(name);
+  }
   if (spiel.fehler.length) { console.error('Konsolenfehler:', spiel.fehler); process.exitCode = 1; }
 } finally {
   await spiel.schliesse();

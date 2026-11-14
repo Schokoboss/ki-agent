@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { UMGEBUNG } from '../engine/shader';
+import { NACHT_UNIFORM } from '../engine/netzbau';
 import { klemme01, mische, glatt } from '../engine/mathe';
 
 export type Wetter = 'sonne' | 'regen' | 'nebel' | 'gewitter';
@@ -58,6 +59,8 @@ export class Atmosphaere {
   blitz = 0;
   /** Wird auf true gesetzt, wenn in diesem Bild ein Blitz begann (für Donner). */
   blitzNeu = false;
+  /** 0 draußen … 1 tief im Tunnel (dimmt Sonne und Himmel). */
+  tunnel = 0;
   private sonnenAnteil = 1;
   private grau = 0;
   private blitzWarten = 6;
@@ -135,7 +138,7 @@ export class Atmosphaere {
 
     const f = stufe(e);
     const U = UMGEBUNG;
-    const g = this.grau, s = this.sonnenAnteil;
+    const g = this.grau, s = this.sonnenAnteil * (1 - this.tunnel);
     const helligkeit = (c: number[]) => c[0] * 0.3 + c[1] * 0.55 + c[2] * 0.15;
     const entsaettigt = (c: number[], ziel: THREE.Color, faktor: number) => {
       const h = helligkeit(c);
@@ -147,6 +150,7 @@ export class Atmosphaere {
     entsaettigt(f.zenit, U.uZenit.value, mische(1, 0.6, g));
     entsaettigt(f.horizont, U.uHorizont.value, mische(1, 0.75, g));
     const hl = U.uHimmelLicht.value;
+    if (this.tunnel > 0) hl.setRGB(mische(hl.r, 0.2, this.tunnel), mische(hl.g, 0.17, this.tunnel), mische(hl.b, 0.12, this.tunnel));
     U.uBodenLicht.value.setRGB(hl.r * 0.42 + f.sonne[0] * s * 0.1, hl.g * 0.4 + f.sonne[1] * s * 0.09, hl.b * 0.36 + f.sonne[2] * s * 0.07);
     // Nebel nimmt die Horizontfarbe an
     const ho = U.uHorizont.value;
@@ -156,6 +160,7 @@ export class Atmosphaere {
     U.uBlitz.value = this.blitz;
     U.uSterne.value = glatt(0.02, -0.15, e) * (1 - this.wolken * 0.9);
     U.uWolken.value = this.wolken;
+    NACHT_UNIFORM.value = glatt(0.14, -0.02, e);
     const jz = U.uJahreszeit.value;
     const ziel = this.jahreszeit;
     jz.x += ((ziel === 'fruehling' ? 1 : 0) - jz.x) * k * 2;

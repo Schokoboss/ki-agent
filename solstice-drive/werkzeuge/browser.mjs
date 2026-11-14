@@ -59,14 +59,22 @@ export async function oeffneSpiel(url, { viewport = PIXEL_QUER, touch = true, dp
   const api = {
     seite, browser, fehler,
     /** Rechnet n Bilder mit 60 Hz. */
-    bilder: (n, hz = 60) => seite.evaluate(([n, hz]) => {
-      for (let i = 0; i < n; i++) { window.__t += 1000 / hz; window.__sd.schleife.bild(window.__t); }
-    }, [n, hz]),
+    bilder: (n, hz = 60, alleZeichnen = false) => seite.evaluate(([n, hz, alle]) => {
+      const g = window.__sd.grafik;
+      for (let i = 0; i < n; i++) {
+        // nur das letzte Bild wirklich zeichnen – die Software-Grafik wäre sonst der Engpass
+        g.ueberspringe = !alle && i < n - 1;
+        window.__t += 1000 / hz; window.__sd.schleife.bild(window.__t);
+      }
+      g.ueberspringe = false;
+      const gl = g.renderer.getContext();
+      gl.finish();
+    }, [n, hz, alleZeichnen]),
     /** Setzt die Skripteingabe (null = Spielereingabe). */
     eingabe: (e) => seite.evaluate((e) => { window.__sd.skript = e; }, e),
     foto: async (name) => {
       const datei = path.join(AUSGABE, name.endsWith('.png') ? name : `${name}.png`);
-      await seite.screenshot({ path: datei });
+      await seite.screenshot({ path: datei, timeout: 120000 });
       return datei;
     },
     zustand: () => seite.evaluate(() => {
