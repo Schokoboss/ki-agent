@@ -20,15 +20,17 @@ export function landmaske(x: number, z: number): number {
   }
   const m = Math.log(s) / k; // km ins Landesinnere (weiches Maximum)
   // Küstenlinie ausfransen: Buchten und Landzungen
-  const rausch = fbm(x / 1400 + 3.1, z / 1400 - 1.7, 4) * 0.38 + rauschen2(x / 330, z / 330) * 0.06;
-  return m + rausch;
+  const rausch = fbm(x / 1400 + 3.1, z / 1400 - 1.7, 4) * 0.34 + rauschen2(x / 330, z / 330) * 0.06;
+  // zum Kartenrand hin immer Meer
+  const rand = Math.max(Math.abs(x), Math.abs(z));
+  return m + rausch - glatt(3600, 4050, rand) * 2.5;
 }
 
 /** Regionsgewichte (Index 0 = Küste/Tiefland, 1.. = REGIONEN in Datenreihenfolge), normiert. */
 export function regionsGewichte(x: number, z: number, aus: Float64Array = _gew): Float64Array {
   const wx = x + rauschen2(x / 600 + 9, z / 600) * 140, wz = z + rauschen2(x / 600 - 4, z / 600 + 7) * 140;
-  let summe = 0.42;
-  aus[0] = 0.42;
+  let summe = 0.16;
+  aus[0] = 0.16;
   for (let i = 0; i < REGIONEN.length; i++) {
     const r = REGIONEN[i];
     const d = Math.sqrt((wx - r.x) * (wx - r.x) + (wz - r.z) * (wz - r.z)) / r.radius;
@@ -53,8 +55,8 @@ function regionsHoehe(id: RegionId, x: number, z: number): number {
     case REGION.FESTIVAL: return 40 + rauschen2(x / 260, z / 260) * 1.6;
     case REGION.STADT: return 6.5 + rauschen2(x / 300, z / 300) * 0.7;
     case REGION.GEBIRGE: {
-      const g = grat(x / 1500 + 1.3, z / 1500 + 0.4, 5);
-      return 110 + 560 * Math.pow(g, 1.25) + fbm(x / 240, z / 240, 3) * 26;
+      const g = grat(x / 1250 + 1.3, z / 1250 + 0.4, 3, 2.07, 0.4);
+      return 62 + 640 * Math.pow(g, 1.5) + fbm(x / 300, z / 300, 2) * 10;
     }
     case REGION.WALD: {
       const h = fbm(x / 760 - 2.2, z / 760 + 5.1, 5) * 0.5 + 0.5;
