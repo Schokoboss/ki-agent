@@ -9,6 +9,8 @@ import { Wasser } from './wasser';
 import type { Weltkarte } from './weltkarte';
 import { Objektverwaltung } from './objekte';
 import { bauePflanzen, KachelRequisiten, pflanzenMaterial } from './bewuchs';
+import { baueBauten, type Bauten } from './bauten';
+import type { Hindernisraster } from '../physik/kollision';
 
 interface KachelAnsicht {
   lod: number;
@@ -38,9 +40,13 @@ export class Inselwelt {
   kachelnAktiv = 0;
   readonly objekte: Objektverwaltung;
 
-  constructor(readonly karte: Weltkarte, private qualitaet: QualitaetsWerte) {
+  private readonly bauten: Bauten;
+
+  constructor(readonly karte: Weltkarte, private qualitaet: QualitaetsWerte, hindernisse: Hindernisraster) {
     this.strassen = new StrassenKacheln(karte);
     this.objekte = new Objektverwaltung(karte);
+    this.bauten = baueBauten(karte, hindernisse, this.objekte);
+    this.gruppe.add(this.bauten.gruppe);
     this.gruppe.add(baueFernnetz(karte));
     this.wasser = new Wasser(karte);
     this.gruppe.add(this.wasser.netz);
@@ -70,8 +76,9 @@ export class Inselwelt {
   }
 
   /** Streaming: hält die Kacheln um die Kamera aktuell. Baut höchstens `budget` Kacheln je Aufruf. */
-  aktualisiere(kamera: THREE.Vector3, _dt: number, budget = 2): void {
+  aktualisiere(kamera: THREE.Vector3, dt: number, budget = 2): void {
     this.kameraPos.copy(kamera);
+    if (this.bauten.riesenrad) this.bauten.riesenrad.rotation.z += dt * 0.12;
     WASSER_UNIFORM.value = this.karte.wasserHoehe;
     NAH_RADIUS_UNIFORM.value = this.warteschlange.length > 6 ? 0 : this.qualitaet.sichtweite - 420;
     if (Math.abs(kamera.x - this.letzteX) + Math.abs(kamera.z - this.letzteZ) > 24) {

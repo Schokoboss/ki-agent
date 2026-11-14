@@ -14,7 +14,7 @@ import type { AutoDaten, Tuning } from './fahrzeuge/typen';
 import { FahrzeugAnsicht } from './fahrzeuge/ansicht';
 import type { Lackierung } from './fahrzeuge/lack';
 import { FahrEffekte } from './fahrzeuge/effekte';
-import { Atmosphaere } from './welt/atmosphaere';
+import { Atmosphaere, type Jahreszeit, type Wetter } from './welt/atmosphaere';
 import { Himmel } from './welt/himmel';
 import { Testgelaende } from './welt/testgelaende';
 import { Inselwelt } from './welt/inselwelt';
@@ -84,9 +84,9 @@ export class Spiel {
     this.grafik.szene.add(this.himmel.netz);
     this.karte = karte;
     if (karte) {
-      this.insel = new Inselwelt(karte, this.grafik.qualitaet);
-      this.welt = this.insel;
       this.physik = new Physikwelt(karte);
+      this.insel = new Inselwelt(karte, this.grafik.qualitaet, this.physik.hindernisse);
+      this.welt = this.insel;
       this.physik.weltKollision = erzeugeWeltKollision(karte, this.insel.objekte);
     } else {
       this.welt = new Testgelaende();
@@ -148,6 +148,20 @@ export class Spiel {
     this.spieler.setzeAuf(x, z, gier, this.welt, yBezug);
     this.kamera.springe();
     this.insel?.ladeAlles(new THREE.Vector3(x, 0, z));
+  }
+
+  /** Wechselt die Jahreszeit: Farben, Wasserstand, Untergründe und Haftung. */
+  setzeJahreszeit(j: Jahreszeit): void {
+    this.atmosphaere.setzeJahreszeit(j);
+    if (this.karte) this.karte.jahreszeit = j;
+    const u = this.physik.umwelt;
+    u.gripLose = j === 'fruehling' ? 0.9 : j === 'herbst' ? 0.94 : 1;
+    u.gripStrasse = j === 'winter' ? 0.9 : j === 'herbst' ? 0.96 : 1;
+  }
+
+  /** Setzt Wetter und optional die Tageszeit sofort. */
+  setzeWetter(w: Wetter, stunde?: number): void {
+    this.atmosphaere.setzeSofort(w, stunde);
   }
 
   /** Setzt ein Auto auf die nächste Straße zurück (oder an Ort und Stelle aufrecht). */
