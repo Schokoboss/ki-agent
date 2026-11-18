@@ -142,6 +142,7 @@ export class HUD {
     const dot = (x, z, col, r) => { const [px, pz] = P(x, z); g.fillStyle = col; g.beginPath(); g.arc(px, pz, r / zoom, 0, 7); g.fill(); g.strokeStyle = '#fff'; g.lineWidth = 1.5 / zoom; g.stroke(); };
     if (extra.events) for (const ev of extra.events) dot(ev.type === 'jump' ? ev.ax : ev.x, ev.type === 'jump' ? ev.az : ev.z, EVENT_COLORS[ev.type], ev.type === 'race' ? 6 : 4.5);
     if (extra.ais) for (const a of extra.ais) dot(a.pos.x, a.pos.z, '#ff9a1f', 4);
+    if (extra.peers) for (const a of extra.peers) dot(a.pos.x, a.pos.z, '#ff3d7f', 5.5);
     if (extra.cp) dot(extra.cp.x, extra.cp.z, '#1fe0ff', 6);
     g.restore();
     // Wegpunkt-Pfeil am Rand
@@ -270,7 +271,7 @@ export class HUD {
   raceStart(r) { $('race').hidden = false; $('free-info').hidden = true; }
   raceEnd() { $('race').hidden = true; $('free-info').hidden = false; }
   raceInfo(r, rank, lap) {
-    $('r-pos').innerHTML = `${rank}<small>/${r.ais.length + 1}</small>`;
+    $('r-pos').innerHTML = `${rank}<small>/${r.field || r.ais.length + 1}</small>`;
     $('r-lap').textContent = r.ev.sprint ? `${Math.max(0, Math.min(100, Math.round(r.prog / r.total * 100)))} %` : `Runde ${lap}/${r.laps}`;
     $('r-time').textContent = fmtTime(Math.max(0, r.finished ? r.finishT : r.t));
     const gd = r.ghost ? r.ghost.data : null;
@@ -283,9 +284,9 @@ export class HUD {
     $('res-event').textContent = res.ev.name;
     const tb = $('res-table'); tb.innerHTML = '';
     res.rows.forEach((r, i) => {
-      const tr = document.createElement('div'); tr.className = 'row' + (r.me ? ' me' : '');
-      tr.innerHTML = `<span class="p">${i + 1}</span><span class="n"></span><span class="c"></span><span class="t">${fmtTime(r.time)}</span>`;
-      tr.querySelector('.n').textContent = r.name;
+      const tr = document.createElement('div'); tr.className = 'row' + (r.me ? ' me' : '') + (r.human ? ' human' : '');
+      tr.innerHTML = `<span class="p">${i + 1}</span><span class="n"></span><span class="c"></span><span class="t">${r.live ? 'fährt noch' : fmtTime(r.time)}</span>`;
+      tr.querySelector('.n').textContent = (r.human ? '👤 ' : '') + r.name;
       tr.querySelector('.c').textContent = r.car ? `${r.car.maker} ${r.car.name}` : '';
       tb.appendChild(tr);
     });

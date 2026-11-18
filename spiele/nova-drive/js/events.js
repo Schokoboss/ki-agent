@@ -225,9 +225,12 @@ export class Events {
   }
 
   // ---------------------------------------------------------------- Rennen
-  startRace(ev, ghost = null) {
+  // opts.mp: Mehrspieler-Start {ai, ids, seed} – vom Mitspieler empfangen oder hier erzeugt und an den Raum gesendet
+  startRace(ev, ghost = null, opts = {}) {
     const g = this.g, W = g.world;
     this.cancelSide();
+    let mp = opts.mp || null;
+    if (!mp && !ghost && g.net && g.net.active) mp = g.net.sendRace(ev, !!g.settings.mpAI);
     const path = ev.path, st = g.car.stats;
     const sprint = !!ev.sprint;
     const total = sprint ? (ev.to - ev.at) * path.length - 12 : ev.laps * path.length;
@@ -239,13 +242,14 @@ export class Events {
       ev, path, prof, total, hw: ev.hw, world: W, dirt: !!ev.dirt, top, accel: st.accel * 0.95,
       startS: ev.s, t: -3.6 - INTRO, t0: -3.6 - INTRO, started: false, ais: [], cps: [], next: 0, prog: 0, pS: ev.s, lastPos: 0,
       ghostRec: [], ghost: null, ghostData: ghost, finished: false, finishT: 0, crashes: 0, laps: sprint ? 1 : ev.laps, missed: false,
+      mp, humans: new Map(), wall0: performance.now() / 1000,
     };
     for (let s = 160; s < total - 20; s += 170) race.cps.push(s);
     race.cps.push(total);
     // Gegner
-    const diff = [0.88, 0.95, 1.0][g.settings.difficulty ?? 1];
-    const n = g.quality === 0 ? Math.min(ev.ai, 5) : ev.ai;
-    const rnd = mulberry32(Date.now() & 0xffff);
+    const diff = [0.88, 0.95, 1.0][mp ? 1 : g.settings.difficulty ?? 1]; // Mehrspieler: überall gleich stark
+    const n = mp ? mp.ai : g.quality === 0 ? Math.min(ev.ai, 5) : ev.ai;
+    const rnd = mulberry32(mp ? mp.seed : Date.now() & 0xffff);
     const names = [...AI_NAMES].sort(() => rnd() - 0.5);
     const pool = CARS.filter(c => !ev.dirt || c.offroad > 0.2);
     for (let i = 0; i < n; i++) {
@@ -261,15 +265,18 @@ export class Events {
       ai.place(path, race);
       race.ais.push(ai);
     }
-    // Spieler hinten
-    const prow = Math.floor(n / 2), pside = n % 2 ? 1 : -1;
+    // Spieler hinten (im Mehrspieler: jeder Mensch auf seinem eigenen Startplatz hinter der KI)
+    const me = mp ? mp.ids.indexOf(g.net.id) : 0;
+    const slot = n + (me < 0 ? mp.ids.length : me);
+    const prow = Math.floor(slot / 2), pside = slot % 2 ? 1 : -1;
     const ps = ev.s - 10 - prow * 10;
     const pp = path.at(ps, P);
     const plat = pside * Math.min(2.8, ev.hw - 1.6);
     g.car.reset(pp.x - pp.tz * plat, pp.z + pp.tx * plat, Math.atan2(pp.tx, pp.tz));
     race.prog = -10 - prow * 10; race.pS = ps;
-    // Geist
-    const gd = ghost || g.loadGhost(ev.id);
+    race.field = n + (mp ? Math.max(mp.ids.length, me + 1) : 1);
+    // Geist (nicht im Mehrspieler – da fahren echte Gegner)
+    const gd = mp ? null : ghost || g.loadGhost(ev.id);
     if (gd) {
       race.ghost = { data: gd, model: makeGhostModel(gd.car, gd.color) };
       g.scene.add(race.ghost.model);
@@ -312,7 +319,9 @@ export class Events {
 
   updateRace(dt) {
     const g = this.g, r = this.race, car = g.car;
-    r.t += dt;
+    // Mehrspieler: Uhr läuft nach Wanduhr weiter (auch in der Pause) – alle Geräte zählen gleich
+    if (r.mp) r.t = r.t0 + (performance.now() / 1000 - r.wall0);
+    else r.t += dt;
     if (!r.started && r.t >= 0) { r.started = true; g.audio.play('go'); g.hud.countdown('LOS!'); }
     else if (!r.started) {
       const n = Math.ceil(-r.t);
@@ -352,8 +361,16 @@ export class Events {
       if (r.recT >= 0.1) { r.recT -= 0.1; r.ghostRec.push([car.pos.x, car.pos.z, car.yaw]); }
     }
     if (r.ghost) placeGhost(r.ghost, Math.max(0, r.t), g.world);
+    // Mitspieler im selben Rennen (Fortschritt und Zielzeit melden sie selbst)
+    if (r.mp && g.net) for (const p of g.net.racers(r.ev.id)) {
+      const h = r.humans.get(p.id) || { id: p.id };
+      h.name = p.name; h.spec = p.spec; h.prog = p.race.prog; if (p.race.fin) h.fin = p.race.fin;
+      r.humans.set(p.id, h);
+    }
+    if (r.mp) r.field = Math.max(r.field, r.ais.length + 1 + r.humans.size);
     // Platzierung
-    const rank = 1 + r.ais.filter(a => (a.done && (!r.finished || a.finish < r.finishT)) || (!a.done && !r.finished && a.prog > r.prog)).length;
+    let rank = 1 + r.ais.filter(a => (a.done && (!r.finished || a.finish < r.finishT)) || (!a.done && !r.finished && a.prog > r.prog)).length;
+    for (const h of r.humans.values()) if ((h.fin && (!r.finished || h.fin < r.finishT)) || (!h.fin && !r.finished && h.prog > r.prog)) rank++;
     if (r.lastRank && rank < r.lastRank && r.started && !r.finished) g.skills.add('Überholt', 220 * (r.lastRank - rank));
     r.lastRank = rank; r.rank = rank;
     const lap = r.ev.sprint ? 1 : clamp(Math.floor(Math.max(0, r.prog) / r.path.length) + 1, 1, r.laps);
@@ -381,7 +398,8 @@ export class Events {
       if (!isFinite(t)) t = r.t + Math.max(0, r.total - ai.prog) / Math.max(8, ai.speed * 0.95);
       rows.push({ name: ai.name, time: t, car: ai.spec });
     }
-    rows.sort((a, b) => a.time - b.time);
+    for (const h of r.humans.values()) rows.push({ name: h.name, time: h.fin || Infinity, live: !h.fin, human: true, car: h.spec });
+    rows.sort((a, b) => (a.time === b.time ? 0 : a.time - b.time));
     const pos = rows.findIndex(x => x.me) + 1;
     const pay = g.eco.racePayout(ev, pos, r.crashes, g.settings.difficulty);
     const cr = pay.total, fans = pay.fans;
