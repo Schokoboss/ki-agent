@@ -41,3 +41,21 @@ PC-Modus (automatisch am PC, sonst Einstellungen → Gerät → PC, oder Adresse
   Gamepad:  RT Gas, LT Bremse, Stick lenken, A Handbremse, B/RB Nitro, LB Rückblick, Y Kamera,
             X Event starten, Back Karte, Start Pause, Steuerkreuz ↓ halten = zurückspulen.
             Im Menü: Steuerkreuz wählen, A bestätigen, B zurück.
+
+Mehrspieler (mit Freunden auf anderen Geräten)
+-----------------------------------------------
+  Titel oder Pause → „👥 Mehrspieler“ → „Raum erstellen“. Den 5-stelligen Code (oder „🔗 Einladen“-Link) an
+  Freunde schicken; die öffnen Nova Drive, tippen auf „👥 Mehrspieler“ und geben den Code ein (der Link macht das
+  von selbst). Jeder braucht Internet. Ihr seht euch auf der Insel und auf der Minikarte.
+  Startet einer ein Rennen an einer Lichtsäule, fahren alle im Raum mit (KI-Gegner auf Wunsch dazu).
+  Übertragen werden nur Name, Auto, Farbe, Position und Rennstand über einen öffentlichen Vermittlungsdienst
+  (HiveMQ) – wer den Code kennt, kann mitlesen. Also keine privaten Namen verwenden.
+
+Lenkrad
+-------
+  USB-Lenkrad (Logitech G29/G920/G923, Thrustmaster, Fanatec, Moza …) anstecken, einmal drehen,
+  dann Einstellungen → „USB-Lenkrad“ → „🎮 Einrichten“: Lenkrad ganz links/rechts drehen, Gas und Bremse
+  einmal durchtreten, Knöpfe für Nitro und Handbremse drücken. „Lenkrad-Weg“: wie viel Drehung vollen
+  Einschlag gibt (½ ist ein guter Start; bei 900°-Lenkrädern ⅓). Options-Knopf = Pause.
+  Force-Feedback gibt es im Browser leider nicht.
+  Am Handy: Einstellungen → Lenkung → „Lenkrad“ – Touch-Lenkrad unten links, am Kranz greifen und drehen.

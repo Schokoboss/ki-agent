@@ -125,6 +125,9 @@ Maus zum Umsehen/Zoomen, Gamepad auch im Menü, Tastenhilfe (H). Alle Tasten ste
 **Grafik Hyper ✦** (über Ultra): GTAO-Umgebungsverdeckung, Echtzeit-Spiegelungen am eigenen Auto, Supersampling,
 mehr Gras/Detail/Sichtweite – für starke GPUs (`lib/postprocessing/GTAOPass.js` aus three.js r170, MIT).
 Kino & Zeit (`js/cine.js`): Kamerafahrt vor dem Rennen, Wiederholung mit TV-Kameras, Zurückspulen (Q/⌫/⏪ halten).
+**Mehrspieler** (`js/net.js`): Räume mit 5-stelligem Code über MQTT/WebSocket (öffentlicher Dienst HiveMQ, Ersatz EMQX;
+zum Testen `index.html?broker=ws://localhost:PORT/mqtt`). **Lenkrad**: USB-Lenkrad mit Einrichtungs-Assistent
+(Einstellungen → USB-Lenkrad), am Handy Touch-Lenkrad als Lenkart.
 Ohne Server am Handy spielen: `node werkstatt/handy-datei.mjs` (braucht esbuild) baut `NovaDrive-Handy.html` – eine einzige
 Datei mit allem drin; aufs Handy laden und in Chrome öffnen. Lokal mit Handy-QR-Code: `Nova Drive starten.cmd`.
 

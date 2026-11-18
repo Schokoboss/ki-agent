@@ -60,6 +60,7 @@
       <div id="posters">🎟 0/20</div>
       <button id="h-spin" class="spin-badge" hidden>🎡 0</button>
     </div>
+    <button id="h-mp" class="mp-chip" hidden>👥</button>
   </div>
   <div id="race" hidden>
     <div id="r-pos">1<small>/8</small></div>
@@ -110,6 +111,11 @@
       <button id="c-left" class="ctl" aria-label="Links">◀</button>
       <button id="c-right" class="ctl" aria-label="Rechts">▶</button>
     </div>
+    <div id="c-wheel" class="ctl-zone" aria-label="Lenkrad"><div class="tw"><svg viewBox="-50 -50 100 100" aria-hidden="true">
+      <circle class="rim" r="41" fill="none" stroke-width="9"/>
+      <path d="M-11 3 L-37 8 M11 3 L37 8 M0 11 L0 37" stroke="rgba(255,255,255,.5)" stroke-width="7" stroke-linecap="round" fill="none"/>
+      <circle r="12" fill="rgba(255,61,127,.55)" stroke="#fff" stroke-width="2"/>
+      <rect x="-3.5" y="-49" width="7" height="12" rx="2.5" fill="#ff3d7f"/></svg></div></div>
     <div id="c-slider" class="ctl-zone"><div class="rail"></div><div class="knob"></div><span>wischen zum Lenken</span></div>
     <div id="pedals">
       <button id="c-hand" class="ctl small" aria-label="Handbremse">HB</button>
@@ -127,6 +133,7 @@
     <div class="sub">Festival der Sonnenküste</div>
     <div class="menu">
       <button id="t-drive" class="btn primary">Fahren</button>
+      <button id="t-mp" class="btn">👥 Mehrspieler</button>
       <button id="t-garage" class="btn">Garage</button>
       <button id="t-daily" class="btn">Tagesaufgaben</button>
       <button id="t-wheel" class="btn">Glücksrad</button>
@@ -135,8 +142,8 @@
       <button id="t-install" class="btn" hidden>📲 Als App installieren</button>
     </div>
   </div>
-  <div class="foot">Offene Insel · 9 Rennen · Blitzer · Driftzonen · Schanzen · 20 Plakate · Freunde per Link herausfordern</div>
-  <div class="pc-hint">🖥 PC-Modus · <kbd>Enter</kbd> Fahren · Tastatur, Maus &amp; Gamepad · <kbd>H</kbd> Tastenhilfe</div>
+  <div class="foot">Offene Insel · 9 Rennen · Blitzer · Driftzonen · Schanzen · 20 Plakate · Mehrspieler mit Freunden auf anderen Geräten</div>
+  <div class="pc-hint">🖥 PC-Modus · <kbd>Enter</kbd> Fahren · Tastatur, Maus, Gamepad &amp; Lenkrad · <kbd>H</kbd> Tastenhilfe</div>
 </section>
 
 <!-- App installieren: Anleitung, wenn der Browser es nicht direkt anbietet -->
@@ -150,6 +157,45 @@
       <li>Danach Nova Drive über das neue Symbol starten.</li>
     </ol>
     <button class="btn primary" data-back>Alles klar</button>
+  </div>
+</section>
+
+<!-- Mehrspieler: Raum erstellen oder mit Code beitreten -->
+<section id="mp" class="screen dim" hidden>
+  <div class="panel">
+    <h2>👥 Mehrspieler <small id="mp-state"></small></h2>
+    <p class="muted small">Mit Freunden auf anderen Handys, Tablets oder PCs gemeinsam über die Insel fahren und Rennen gegeneinander. Jeder braucht Internet und öffnet Nova Drive.</p>
+    <label class="mp-lab">Dein Name <input id="mp-name" type="text" maxlength="16" placeholder="Spieler" autocomplete="off"></label>
+    <div id="mp-out">
+      <button id="mp-create" class="btn primary">Raum erstellen</button>
+      <div class="mp-or">oder mit Code beitreten</div>
+      <div class="row mp-join"><input id="mp-code" type="text" maxlength="5" placeholder="CODE" autocomplete="off" autocapitalize="characters" spellcheck="false"><button id="mp-join" class="btn">Beitreten</button></div>
+    </div>
+    <div id="mp-in" hidden>
+      <div class="mp-code">Raum-Code <b id="mp-room">-----</b></div>
+      <div class="row"><button id="mp-share" class="btn">🔗 Einladen</button><button id="mp-copy" class="btn">Code kopieren</button></div>
+      <button id="mp-drive" class="btn primary">Losfahren ▶</button>
+      <div id="mp-list"></div>
+      <label class="mp-check"><input id="mp-ai" type="checkbox"> KI-Gegner in Rennen mitfahren lassen</label>
+      <p class="muted small">Startet jemand ein Rennen an einer Lichtsäule, fahren alle im Raum mit – egal wo sie gerade sind.</p>
+      <button id="mp-leave" class="btn ghost">Raum verlassen</button>
+    </div>
+    <div id="mp-msg" class="muted small"></div>
+    <button class="btn" data-back>Zurück</button>
+  </div>
+</section>
+
+<!-- USB-Lenkrad einrichten -->
+<section id="wheelcal" class="screen dim" hidden>
+  <div class="panel">
+    <h2>🎮 Lenkrad einrichten</h2>
+    <div id="wc-dev" class="muted small"></div>
+    <div id="wc-step"></div>
+    <div class="wc-bar"><i id="wc-meter"></i><b id="wc-center"></b></div>
+    <div id="wc-live" class="muted small"></div>
+    <div class="row"><button id="wc-next" class="btn primary">Weiter</button><button id="wc-skip" class="btn">Überspringen</button></div>
+    <p class="muted small">Funktioniert mit Lenkrädern, die der Browser als Controller erkennt (z. B. Logitech, Thrustmaster, Fanatec, Moza). Force-Feedback geht im Browser leider nicht.</p>
+    <button class="btn ghost" data-back>Abbrechen</button>
   </div>
 </section>
 
@@ -198,6 +244,7 @@
   <div class="panel">
     <h2>Pause</h2>
     <button id="p-resume" class="btn primary">Weiter</button>
+    <button id="p-mp" class="btn">👥 Mehrspieler</button>
     <button id="p-photo" class="btn">📸 Fotomodus</button>
     <div class="row nav-row"><button id="p-nav-race" class="btn">🧭 Nächstes Rennen</button><button id="p-nav-fest" class="btn">🧭 Festival</button></div>
     <button id="p-restart" class="btn">Rennen neu starten</button>
@@ -219,7 +266,11 @@
       <label>Gerät</label>
       <div class="seg" id="s-device"><button data-v="auto">Automatisch</button><button data-v="phone">📱 Handy</button><button data-v="pc">🖥 PC</button></div>
       <label class="touch-only">Lenkung</label>
-      <div class="seg touch-only" id="s-control"><button data-v="buttons">Tasten ◀ ▶</button><button data-v="slider">Wischen</button><button data-v="tilt">Neigen</button></div>
+      <div class="seg touch-only" id="s-control"><button data-v="buttons">Tasten ◀ ▶</button><button data-v="slider">Wischen</button><button data-v="wheel">Lenkrad</button><button data-v="tilt">Neigen</button></div>
+      <label>USB-Lenkrad</label>
+      <div class="seg" id="s-wheelrow"><button id="s-wheelcal" type="button">🎮 Einrichten</button><span id="s-wheelinfo" class="muted small"></span></div>
+      <label>Lenkrad-Weg</label>
+      <div class="seg" id="s-wheelgain"><button data-v="1">ganz</button><button data-v="2">½</button><button data-v="3">⅓</button><button data-v="4">¼</button></div>
       <label>Lenkgefühl</label><div class="rangebox"><span>sanft</span><input id="s-sens" type="range" min="0.5" max="1.5" step="0.05"><span>direkt</span></div>
       <label class="touch-only">Neigen</label>
       <div class="seg touch-only" id="s-tiltinv"><button data-v="0">Normal</button><button data-v="1">Umgekehrt</button><button id="s-calib" type="button">Mitte setzen</button></div>

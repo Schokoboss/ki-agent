@@ -46,7 +46,7 @@ export class Vehicle {
     const sens = this.sens || 1;
     const tgt = clamp(inp.steer, -1, 1) * (sens < 1 ? 0.7 + 0.3 * sens : 1);
     const back = Math.abs(tgt) < Math.abs(this.steer) || tgt * this.steer < 0;
-    const rate = (back ? 7 : 4.2) * (0.6 + 0.4 * sens);
+    const rate = (back ? 7 : 4.2) * (0.6 + 0.4 * sens) * (inp.direct ? 3.5 : 1); // echtes Lenkrad: fast direkt
     this.steer += clamp(tgt - this.steer, -rate * dt, rate * dt);
 
     const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);

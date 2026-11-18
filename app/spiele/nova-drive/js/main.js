@@ -11,13 +11,14 @@ import { Events, Skills, TYPE_NAMES } from './events.js';
 import { HUD, makeMapImage } from './hud.js';
 import { Audio, isTurbo } from './audio.js';
 import { TimeMachine, introCam, INTRO, Replay, REPLAY_FRAMES } from './cine.js';
-import { Input } from './input.js';
+import { Input, isWheelId } from './input.js';
 import { Particles, Smoke, Skids, Rain } from './effects.js';
 import { CARS, UPGRADES, carStats, rating, carClass, CLASS_COLORS, EVENTS, RADIO, TIPS } from './data.js';
 import { clamp, lerp, damp, fmtNum, fmtTime, wrapAngle, breathe, view, updateView, logicalPoint, localPoint } from './util.js';
 import { EVENT_COLORS } from './world.js';
 import { Economy, PRIZES } from './economy.js';
 import { RoadGraph, NavRibbon, say, fmtDist, TURN_ICON, turnText } from './nav.js';
+import { Net } from './net.js';
 import { GTAOPass } from '../lib/postprocessing/GTAOPass.js';
 import { EffectComposer } from '../lib/postprocessing/EffectComposer.js';
 import { RenderPass } from '../lib/postprocessing/RenderPass.js';
@@ -38,7 +39,7 @@ class Game {
   constructor() {
     this.save = Object.assign({ credits: 25000, fans: 0, owned: {}, current: null, best: {}, stars: {}, posters: [], races: 0, wins: 0 }, store.get(SAVE_KEY) || {});
     this.settings = Object.assign({ quality: 'auto', control: 'buttons', autoGas: false, sfx: 0.8, music: 0.45, station: 0, cam: 0, name: '', difficulty: 1, time: 'dyn',
-      sens: 1, tiltInvert: false, ctl: 1, haptic: true, weather: 'dyn', voice: true, device: 'auto', keyHelp: true, hd: 'auto' }, store.get(SET_KEY) || {});
+      sens: 1, tiltInvert: false, ctl: 1, haptic: true, weather: 'dyn', voice: true, device: 'auto', keyHelp: true, hd: 'auto', mpAI: false, wheel: null, wheelGain: 2 }, store.get(SET_KEY) || {});
     // ?pc in der Adresse (z. B. vom Starter am Laptop) schaltet den PC-Modus fest ein
     const q = new URLSearchParams(location.search);
     if (q.has('pc')) this.settings.device = 'pc';
@@ -58,6 +59,7 @@ class Game {
     this.shake = 0; this.time = 0;
     this.waypoint = null;
     this.challenge = parseChallenge();
+    this.mpCode = (location.hash.match(/#mp=([A-Za-z0-9]{5})/) || [])[1] || null; // Einladungslink zum Mehrspieler-Raum
     this.nearMap = new Map();
     this.smashChain = 0;
   }
@@ -144,6 +146,7 @@ class Game {
     this.skills = new Skills(this);
     this.events = new Events(this);
     this.events.init();
+    this.net = new Net(this);
     this.eco = new Economy(this);
     this.graph = new RoadGraph(this.world);
     this.ribbon = new NavRibbon(this.scene, this.world);
@@ -151,6 +154,7 @@ class Game {
     this.scenery.setTime(this.settings.time === 'dyn' ? 17.2 : TIME_FIXED[this.settings.time] ?? 17.2);
     this.updateEnv(true);
     this.bindUI();
+    this.bindNet();
     this.bindMouseCam();
     this.bindTurnedScroll();
     this.hud.money();
@@ -174,11 +178,18 @@ class Game {
     $('loading').classList.add('done');
     setTimeout(() => $('loading').remove(), 700);
     this.showScreen('title');
+    if (this.mpCode) { this.backTo = 'title'; this.showScreen('mp'); $('mp-code').value = this.mpCode; this.mpJoin(); }
     requestAnimationFrame(t => this.loop(t));
     addEventListener('resize', () => this.resize());
     addEventListener('orientationchange', () => setTimeout(() => this.resize(), 250));
     // „Als App installieren“ (Chrome/Android): eigene App mit Symbol, startet immer quer und im Vollbild
     addEventListener('beforeinstallprompt', e => { e.preventDefault(); this.installEvt = e; this.updateInstallBtn(); });
+    // USB-Lenkrad angesteckt: Hinweis zum Einrichten (Pedale zuordnen)
+    addEventListener('gamepadconnected', e => {
+      const id = e.gamepad.id;
+      if (this.settings.wheel && this.settings.wheel.id === id) this.hud.toast('🏎 Lenkrad bereit', 'info');
+      else if (isWheelId(id)) this.hud.toast('🏎 Lenkrad erkannt – Einstellungen → USB-Lenkrad → Einrichten (Pedale zuordnen)', 'info');
+    });
     addEventListener('appinstalled', () => { this.installEvt = null; $('t-install').hidden = true; this.hud.toast('Nova Drive ist installiert – Symbol auf dem Startbildschirm', 'info'); });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) { this.audio.suspend(); if (this.state === 'free' || this.state === 'race') this.pause(); }
@@ -423,8 +434,10 @@ class Game {
   rating(id = this.save.current) { const s = this.carSpec(id); return rating(carStats(s, (this.save.owned[id] || {}).up || {})); }
 
   spawnAtFestival() {
-    const F = FESTIVAL;
-    this.car.reset(F.x + 18, F.z - 30, Math.PI);
+    const F = FESTIVAL, id = this.net && this.net.room ? this.net.id : '';
+    // im Mehrspieler-Raum nebeneinander statt aufeinander starten
+    const o = id ? ((id.charCodeAt(0) * 7 + id.charCodeAt(1)) % 5 - 2) * 4 : 0;
+    this.car.reset(F.x + 18 + o, F.z - 30, Math.PI);
     this.syncCar(0);
   }
 
@@ -506,6 +519,9 @@ class Game {
     if (name === 'settings') this.openSettings();
     if (name === 'daily') this.openDaily();
     if (name === 'wheel') this.openWheel();
+    if (name === 'mp') this.renderMP();
+    if (name === 'wheelcal') this.startWheelCal(); else this.wc = null;
+    if (this.input) this.input.calibrating = name === 'wheelcal';
     if (name === 'pause' || name === 'title') this.updateSpinBadges();
   }
   updateSpinBadges() {
@@ -669,6 +685,9 @@ class Game {
     });
     this.updateInstallBtn();
     click('t-settings', () => { this.backTo = 'title'; this.showScreen('settings'); });
+    click('t-mp', () => { this.backTo = 'title'; this.showScreen('mp'); });
+    click('p-mp', () => { this.backTo = 'pause'; this.showScreen('mp'); });
+    click('h-mp', () => { if (this.state !== 'free' && this.state !== 'race') return; this.pause(); this.backTo = 'pause'; this.showScreen('mp'); });
     click('t-daily', () => { this.backTo = 'title'; this.showScreen('daily'); });
     click('t-wheel', () => { this.backTo = 'title'; this.showScreen('wheel'); });
     click('p-daily', () => { this.backTo = 'pause'; this.showScreen('daily'); });
@@ -716,15 +735,254 @@ class Game {
   back() {
     const to = this.backTo;
     if (this.wheelBusy) return;
-    if (['settings', 'map', 'garage', 'daily', 'wheel', 'install'].includes(this.screen)) {
+    if (this.screen === 'wheelcal') { this.showScreen('settings'); return; }
+    if (['settings', 'map', 'garage', 'daily', 'wheel', 'install', 'mp'].includes(this.screen)) {
       if (to === 'title') this.showScreen('title');
       else if (to === 'pause') this.showScreen('pause');
       else { this.setState(this.prevState === 'race' && this.events.race ? 'race' : 'free'); this.last = performance.now(); }
     }
   }
 
+  // ---------------------------------------------------------------- Mehrspieler (verschiedene Geräte)
+  bindNet() {
+    const n = this.net, click = (id, fn) => $(id).addEventListener('click', e => { e.preventDefault(); this.audio.init(); this.audio.play('ui'); fn(e); });
+    n.on((kind, data) => {
+      if (kind === 'status') { if (this.screen === 'mp') this.renderMP(); this.updateMPChip(); }
+      else if (kind === 'joined') this.hud.toast(`👥 ${data.name} ist dabei`, 'info');
+      else if (kind === 'left') this.hud.toast(`👥 ${data.name} hat den Raum verlassen`, 'info');
+      else if (kind === 'event' && data.type === 'race') this.joinRemoteRace(data);
+    });
+    click('mp-create', () => this.mpCreate());
+    click('mp-join', () => this.mpJoin());
+    click('mp-leave', () => { n.leave(); history.replaceState(null, '', location.href.split('#')[0]); this.mpMsg(''); this.renderMP(); });
+    click('mp-share', () => this.mpShare());
+    click('mp-copy', () => { (navigator.clipboard ? navigator.clipboard.writeText(n.room) : Promise.reject()).then(() => this.hud.toast('Code kopiert', 'info'), () => {}); });
+    click('mp-drive', () => { if (this.state === 'title') $('t-drive').click(); else this.back(); });
+    $('mp-code').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); this.mpJoin(); } });
+    $('mp-code').addEventListener('input', e => { const t = e.target; t.value = t.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5); });
+    $('mp-name').addEventListener('change', e => { this.settings.name = e.target.value.trim().slice(0, 16); this.saveSettings(); n.sendState(); this.renderMP(); });
+    $('mp-ai').addEventListener('change', e => { this.settings.mpAI = e.target.checked; this.saveSettings(); });
+    addEventListener('pagehide', () => n.leave());
+  }
+  mpMsg(t, warn) { const el = $('mp-msg'); el.textContent = t; el.classList.toggle('warn', !!warn); }
+  mpName() { const v = $('mp-name').value.trim().slice(0, 16); if (v !== (this.settings.name || '')) { this.settings.name = v; this.saveSettings(); } return v || 'Spieler'; }
+  async mpCreate() {
+    const n = this.net;
+    if (n.status === 'verbinde') return;
+    if (n.room) n.leave();
+    this.mpName();
+    this.mpMsg('Raum wird erstellt …');
+    try {
+      const code = await n.create(this.settings.name || 'Spieler');
+      history.replaceState(null, '', location.href.split('#')[0] + '#mp=' + code);
+      this.mpMsg('Raum offen – schick den Code oder Link an deine Freunde.');
+    } catch { this.mpMsg('Keine Verbindung zum Mehrspieler-Dienst. Internet prüfen und nochmal versuchen.', true); }
+    this.renderMP();
+  }
+  async mpJoin() {
+    const n = this.net, code = $('mp-code').value;
+    if (n.status === 'verbinde') return;
+    if (code.length !== 5) { this.mpMsg('Der Raum-Code hat 5 Zeichen.', true); return; }
+    if (n.room) n.leave();
+    this.mpName();
+    this.mpMsg('Suche Raum ' + code.toUpperCase() + ' …');
+    this.renderMP();
+    try {
+      await n.join(code);
+      history.replaceState(null, '', location.href.split('#')[0] + '#mp=' + n.room);
+      this.mpMsg('Drin! Fahr los – du siehst die anderen auf der Insel.');
+    } catch (e) {
+      this.mpMsg(e && e.message === 'Raum nicht gefunden' ? `Raum ${code.toUpperCase()} nicht gefunden – Code prüfen oder den Gastgeber fragen, ob der Raum noch offen ist.` : 'Keine Verbindung zum Mehrspieler-Dienst. Internet prüfen und nochmal versuchen.', true);
+    }
+    this.renderMP();
+  }
+  mpShare() {
+    const code = this.net.room;
+    if (!code) return;
+    const url = location.href.split('#')[0] + '#mp=' + code;
+    const text = `👥 Fahr mit mir bei Nova Drive! Raum-Code: ${code}`;
+    if (/^https?:/.test(location.protocol) && navigator.share) navigator.share({ title: 'Nova Drive – Mehrspieler', text, url }).catch(() => {});
+    else if (navigator.clipboard) navigator.clipboard.writeText(/^https?:/.test(location.protocol) ? text + '\n' + url : text).then(() => this.hud.toast('Einladung kopiert – schick sie deinen Freunden!', 'info'), () => {});
+  }
+  renderMP() {
+    const n = this.net, on = !!n.room;
+    $('mp-out').hidden = on; $('mp-in').hidden = !on;
+    if (document.activeElement !== $('mp-name')) $('mp-name').value = this.settings.name || '';
+    $('mp-ai').checked = !!this.settings.mpAI;
+    $('mp-state').textContent = { aus: '', verbinde: '⏳ Verbinde …', verbunden: '🟢 Verbunden', fehler: '🔴 Keine Verbindung' }[n.status] || '';
+    for (const id of ['mp-create', 'mp-join']) $(id).disabled = n.status === 'verbinde';
+    if (on) {
+      $('mp-room').textContent = n.room;
+      const list = $('mp-list'); list.innerHTML = '';
+      const row = (txt, cls) => { const d = document.createElement('div'); d.className = 'mp-p ' + (cls || ''); d.textContent = txt; list.appendChild(d); };
+      const spec = this.carSpec();
+      row(`👤 ${this.settings.name || 'Spieler'} (du)${spec ? ' · ' + spec.maker + ' ' + spec.name : ''}`, 'me');
+      for (const p of n.peers.values()) row(`👤 ${p.name}${p.spec ? ' · ' + p.spec.maker + ' ' + p.spec.name : ''}${p.drive ? '' : ' · im Menü'}`);
+      if (!n.peers.size) row('Noch niemand da – teile den Code oder Link.', 'empty');
+    }
+    $('mp-drive').textContent = this.state === 'title' ? 'Losfahren ▶' : 'Weiterfahren ▶';
+  }
+  updateMPChip() {
+    const n = this.net, el = $('h-mp');
+    el.hidden = !n.room;
+    if (n.room) el.textContent = `👥 ${n.room} · ${n.peers.size + 1}${n.status === 'verbunden' ? '' : ' ⏳'}`;
+  }
+  // ein Mitspieler hat ein Rennen gestartet → alle fahren mit, egal wo sie gerade sind
+  joinRemoteRace(e) {
+    const ev = this.events.byId(e.ev);
+    if (!ev || this.state === 'loading') return;
+    const who = this.net.peers.get(e.from), name = who ? who.name : 'Ein Mitspieler';
+    if (!this.save.current) { this.hud.toast(`${name} startet ein Rennen – wähl erst dein Auto`, 'warn'); return; }
+    if (this.state === 'photo') { $('c').style.filter = ''; $('ph-vig').hidden = true; }
+    if (this.replay) { this.replay.finish(); this.replay = null; this.skipCine = false; this.setCine(null); }
+    if (this.rewinding) this.endRewind();
+    if (this.events.race) this.events.endRace(true);
+    this.challenge = null; this.wheelBusy = false;
+    if (this.nav) this.clearNav();
+    if (this.state === 'title') this.startDriving();
+    this.setState('free');
+    this.camYaw = undefined; this.camY = undefined;
+    this.events.startRace(ev, null, { mp: e });
+    this.hud.toast(`👥 ${name} startet „${ev.name}“ – alle fahren mit!`, 'info');
+  }
+
+  // ---------------------------------------------------------------- USB-Lenkrad einrichten (Lenkachse, Pedale, Knöpfe)
+  findWheelPad() {
+    const pads = [...(navigator.getGamepads ? navigator.getGamepads() : [])].filter(Boolean);
+    return pads.find(p => isWheelId(p.id, this.settings.wheel)) || pads.find(p => p.mapping !== 'standard') || pads[0] || null;
+  }
+  startWheelCal() {
+    this.wc = { step: 'find', pad: -1, id: '', res: {}, used: new Set(), hat: new Set() };
+    this.renderWheelCal();
+    // eigener 30-ms-Takt: Anschläge und Pedalwege nicht verpassen, auch wenn das Bild ruckelt
+    clearInterval(this.wcTimer);
+    this.wcTimer = setInterval(() => this.tickWheelCal(0.03), 30);
+    $('wc-next').onclick = e => { e.preventDefault(); this.audio.play('ui'); this.wcNext(); };
+    $('wc-skip').onclick = e => { e.preventDefault(); this.audio.play('ui'); this.wcNext(true); };
+  }
+  wcRead(p) { return { a: [...p.axes], b: p.buttons.map(b => b.value || (b.pressed ? 1 : 0)) }; }
+  wcGo(step, p) {
+    const w = this.wc;
+    w.step = step; w.base = p ? this.wcRead(p) : null; w.min = []; w.max = []; w.lock = null; w.still = 0; w.last = null; w.ready = false;
+    this.renderWheelCal();
+  }
+  wcNext(skip) {
+    const w = this.wc, s = this.settings;
+    if (!w) return;
+    const order = ['steer', 'gas', 'brake', 'nitro', 'hand', 'done'];
+    if (w.step === 'steer') {
+      if (!w.ready) { if (!skip) this.hud.toast('Erst das Lenkrad ganz nach links und rechts drehen', 'warn'); return; }
+      let bi = -1, br = 0;
+      for (let i = 0; i < w.max.length; i++) if (!w.hat.has(i) && w.max[i] - w.min[i] > br) { br = w.max[i] - w.min[i]; bi = i; }
+      w.res.steer = { i: bi, c: +((w.max[bi] + w.min[bi]) / 2).toFixed(3), r: +((w.max[bi] - w.min[bi]) / 2).toFixed(3) };
+      w.used.add('a' + bi);
+    }
+    if (w.step === 'done') {
+      s.wheel = { id: w.id, ...w.res };
+      this.saveSettings(); this.applyControlMode();
+      this.hud.toast('🏎 Lenkrad eingerichtet – viel Spaß!', 'info');
+      this.input.wheelUsed = true; this.input.padUsed = true;
+      this.showScreen('settings');
+      return;
+    }
+    if (w.step === 'find') return;
+    const p = navigator.getGamepads()[w.pad];
+    this.wcGo(order[order.indexOf(w.step) + 1], p);
+  }
+  tickWheelCal(dt) {
+    const w = this.wc;
+    if (this.screen !== 'wheelcal' || !w) { clearInterval(this.wcTimer); this.wc = null; this.input.calibrating = false; return; }
+    if (this.input.took('Enter') || this.input.took('NumpadEnter')) this.wcNext();
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    if (w.step === 'find') {
+      const q = this.findWheelPad();
+      if (q && (q.axes.some(v => Math.abs(v) > 0.02 && v < 1.05) || q.buttons.some(b => b.pressed))) { w.pad = q.index; w.id = q.id; this.wcGo('steer', q); }
+      return;
+    }
+    const p = pads[w.pad];
+    if (!p || p.id !== w.id) { this.wcGo('find'); return; }
+    const cur = this.wcRead(p), meter = $('wc-meter'), live = $('wc-live');
+    for (let i = 0; i < cur.a.length; i++) if (cur.a[i] > 1.05) w.hat.add(i); // Steuerkreuz-Achse in Ruhe
+    if (w.step === 'steer') {
+      let bi = -1, br = 0;
+      for (let i = 0; i < cur.a.length; i++) {
+        if (w.hat.has(i)) continue;
+        w.min[i] = Math.min(w.min[i] ?? cur.a[i], cur.a[i]); w.max[i] = Math.max(w.max[i] ?? cur.a[i], cur.a[i]);
+        if (w.max[i] - w.min[i] > br) { br = w.max[i] - w.min[i]; bi = i; }
+      }
+      w.ready = br > 1.1;
+      const v = bi >= 0 ? cur.a[bi] : 0;
+      meter.style.left = (50 + Math.min(0, v) * 50) + '%'; meter.style.width = Math.abs(v) * 50 + '%';
+      live.textContent = bi >= 0 && br > 0.1 ? `Achse ${bi}: ${v.toFixed(2)} · Weg ${Math.round(br / 2 * 100)} %` + (w.ready ? ' ✓' : '') : 'Warte auf Drehung …';
+      $('wc-next').disabled = !w.ready;
+      return;
+    }
+    if (w.step === 'gas' || w.step === 'brake') {
+      // stärkste Änderung gegenüber dem Start: Achse (Pedal) oder analoger Knopf
+      let best = null;
+      for (let i = 0; i < cur.a.length; i++) {
+        if (w.hat.has(i) || w.used.has('a' + i)) continue;
+        w.min[i] = Math.min(w.min[i] ?? cur.a[i], cur.a[i]); w.max[i] = Math.max(w.max[i] ?? cur.a[i], cur.a[i]);
+        const span = w.max[i] - w.min[i];
+        if (!best || span > best.span) best = { k: 'a', i, span };
+      }
+      for (let i = 0; i < cur.b.length; i++) {
+        if (w.used.has('b' + i)) continue;
+        const span = Math.max(0, cur.b[i] - (w.base.b[i] || 0));
+        if (span > 0.5 && (!best || span > best.span)) best = { k: 'b', i, span };
+      }
+      if (!w.lock && best && best.span > 0.6) {
+        if (best.k === 'b') w.lock = { k: 'b', i: best.i };
+        else { const i = best.i, b0 = w.base.a[i] ?? 0; const full = Math.abs(w.max[i] - b0) >= Math.abs(w.min[i] - b0) ? w.max[i] : w.min[i]; w.lock = { k: 'a', i, full, dir: Math.sign(full - b0) || 1 }; }
+      }
+      const L = w.lock;
+      if (L && L.k === 'a') {
+        const v = cur.a[L.i];
+        if ((v - L.full) * L.dir > 0) L.full = v; // weiter durchgetreten
+        const span = Math.max(1e-3, w.max[L.i] - w.min[L.i]), f = Math.abs(v - L.full) / span;
+        w.still = w.last !== null && Math.abs(v - w.last) < 0.01 ? w.still + dt : 0; w.last = v;
+        meter.style.left = '0'; meter.style.width = (1 - f) * 100 + '%';
+        live.textContent = `Achse ${L.i} erkannt · ${Math.round((1 - f) * 100)} %`;
+        if (f > 0.6 && w.still > 0.3) { // losgelassen und ruhig → Ruhelage merken
+          w.res[w.step] = { k: 'a', i: L.i, rest: +v.toFixed(3), full: +L.full.toFixed(3) }; w.used.add('a' + L.i); this.audio.play('cp'); this.wcNext();
+        }
+      } else if (L && L.k === 'b') {
+        const v = cur.b[L.i];
+        meter.style.left = '0'; meter.style.width = v * 100 + '%';
+        live.textContent = `Pedal als Knopf ${L.i} erkannt`;
+        if (v < 0.1) { w.res[w.step] = { k: 'b', i: L.i }; w.used.add('b' + L.i); this.audio.play('cp'); this.wcNext(); }
+      } else { meter.style.width = '0'; live.textContent = 'Warte auf das Pedal …'; }
+      return;
+    }
+    if (w.step === 'nitro' || w.step === 'hand') {
+      const i = cur.b.findIndex((v, k) => v > 0.5 && (w.base.b[k] || 0) < 0.5 && !w.used.has('b' + k));
+      if (w.lock === null && i >= 0) { w.lock = { i }; live.textContent = `Knopf ${i}`; }
+      if (w.lock && cur.b[w.lock.i] < 0.3) { w.res[w.step] = w.lock.i; w.used.add('b' + w.lock.i); this.audio.play('cp'); this.wcNext(); }
+    }
+  }
+  renderWheelCal() {
+    const w = this.wc, T = {
+      find: 'Lenkrad per USB anschließen und einmal am Lenkrad drehen oder ein Pedal drücken – der Browser meldet es erst danach.',
+      steer: '1/5 · Dreh das Lenkrad ganz nach links und ganz nach rechts (bis zum Anschlag), dann zurück zur Mitte.',
+      gas: '2/5 · Gaspedal einmal ganz durchtreten und wieder loslassen.',
+      brake: '3/5 · Bremspedal einmal ganz durchtreten und wieder loslassen.',
+      nitro: '4/5 · Drück den Knopf oder die Schaltwippe für Nitro.',
+      hand: '5/5 · Drück den Knopf oder die Schaltwippe für die Handbremse.',
+      done: '✓ Fertig! Gas, Bremse, Lenkung und Knöpfe sind zugeordnet.',
+    };
+    $('wc-step').textContent = T[w.step];
+    $('wc-dev').textContent = w.id ? '🏎 ' + w.id.replace(/\s*\(.*\)\s*$/, '').slice(0, 60) : 'Kein Lenkrad gefunden';
+    $('wc-next').hidden = w.step === 'find' || w.step === 'gas' || w.step === 'brake' || w.step === 'nitro' || w.step === 'hand';
+    $('wc-next').disabled = w.step === 'steer' && !w.ready;
+    $('wc-next').textContent = w.step === 'done' ? 'Speichern ✓' : 'Weiter ▸';
+    $('wc-skip').hidden = !['gas', 'brake', 'nitro', 'hand'].includes(w.step);
+    document.querySelector('.wc-bar').classList.toggle('center', w.step === 'steer');
+    $('wc-meter').style.width = '0'; $('wc-live').textContent = '';
+  }
+
   startDriving() {
     if (this.challenge) { this.showChallenge(); return; }
+    if (this.net.room) this.spawnAtFestival();
     this.setState('free');
     this.eco.loginBonus();
     this.camYaw = this.car.yaw;
@@ -978,6 +1236,10 @@ class Game {
     seg('s-hd', s.hd, v => { s.hd = v; this.hud.toast('HD-Texturen: wird beim nächsten Start aktiv', 'info'); });
     seg('s-device', s.device, v => { s.device = v; this.applyControlMode(); this.resize(); this.hud.toast(this.pc ? 'PC-Modus: Tastatur, Maus & Gamepad' : 'Handy-Modus: Touch-Steuerung', 'info'); });
     seg('s-haptic', s.haptic ? '1' : '0', v => { s.haptic = v === '1'; this.applyControlMode(); });
+    seg('s-wheelgain', s.wheelGain || 2, v => { s.wheelGain = +v; this.applyControlMode(); });
+    $('s-wheelcal').onclick = () => { this.audio.play('ui'); this.showScreen('wheelcal'); };
+    const wp = this.findWheelPad();
+    $('s-wheelinfo').textContent = s.wheel ? '✓ eingerichtet' + (wp && wp.id !== s.wheel.id ? ' (anderes Gerät angeschlossen)' : '') : wp ? 'erkannt – bitte einrichten' : 'nicht eingerichtet';
     $('s-calib').onclick = () => { this.input.calibrate(); this.audio.play('ui'); this.hud.toast(this.input.tiltOk ? 'Neigung: aktuelle Haltung ist jetzt geradeaus' : 'Erst „Lenkung: Neigen“ wählen', 'info'); };
     const sens = $('s-sens');
     sens.value = s.sens;
@@ -1027,6 +1289,7 @@ class Game {
     const s = this.settings;
     this.input.mode = s.control; this.input.autoGas = s.autoGas;
     this.input.sens = s.sens; this.input.tiltInvert = s.tiltInvert; this.input.haptic = s.haptic;
+    this.input.wheelCfg = s.wheel; this.input.wheelGain = s.wheelGain || 2;
     if (this.car) this.car.sens = s.sens;
     document.body.dataset.control = s.control;
     document.body.dataset.autogas = s.autoGas ? '1' : '0';
@@ -1037,13 +1300,16 @@ class Game {
   renderKeyHelp() {
     const el = $('keys');
     if (!el) return;
-    const pad = this.input.padUsed;
-    const rows = pad
+    const pad = this.input.padUsed, wheel = pad && this.input.wheelUsed;
+    const rows = wheel
+      ? [['Lenkrad', 'Lenken'], ['Gaspedal', 'Gas'], ['Bremspedal', 'Bremse'], ['Wippe rechts', 'Nitro'], ['Wippe links', 'Handbremse'], ['Options', 'Pause'], ['Kreuz/A', 'Event starten'],
+        ...(this.settings.wheel ? [] : [['Einstellungen', 'Pedale einrichten!']])]
+      : pad
       ? [['RT', 'Gas'], ['LT', 'Bremse'], ['Stick', 'Lenken'], ['A', 'Handbremse'], ['B / RB', 'Nitro'], ['LB', 'Rückblick'], ['Y', 'Kamera'], ['Back', 'Karte'], ['X', 'Event starten'], ['↓ halten', 'Zurückspulen'], ['Start', 'Pause']]
       : [['W ↑', 'Gas'], ['S ↓', 'Bremse'], ['A D ← →', 'Lenken'], ['Leertaste', 'Handbremse'], ['Shift', 'Nitro'], ['X', 'Rückblick'], ['C', 'Kamera'],
         ['Maus ziehen', 'Umsehen'], ['Mausrad', 'Zoom'], ['Enter', 'Event starten'], ['M', 'Karte'], ['N', 'Navi zum Rennen'], ['G', 'Fotomodus'],
         ['Q / ⌫ halten', 'Zurückspulen'], ['R', 'Zurücksetzen'], ['T', 'Radio'], ['F', 'Vollbild'], ['Esc', 'Pause']];
-    el.innerHTML = `<div class="k-head">${pad ? '🎮 Gamepad' : '⌨️ Tastatur'} <span>H blendet aus</span></div>` +
+    el.innerHTML = `<div class="k-head">${wheel ? '🏎 Lenkrad' : pad ? '🎮 Gamepad' : '⌨️ Tastatur'} <span>H blendet aus</span></div>` +
       rows.map(([k, t]) => `<div class="k-row"><kbd>${k}</kbd><span>${t}</span></div>`).join('');
     this._padShown = pad;
     el.classList.toggle('min', !this.settings.keyHelp);
@@ -1273,7 +1539,14 @@ class Game {
     this.audio.setRain(this.state === 'free' || this.state === 'race' || this.state === 'title' ? amt : 0);
   }
 
-  buzz(ms) { if (this.settings.haptic && navigator.vibrate) try { navigator.vibrate(ms); } catch {} }
+  buzz(ms) {
+    if (this.settings.haptic && navigator.vibrate) try { navigator.vibrate(ms); } catch {}
+    // Controller mit Rüttelmotor (Lenkräder meist nicht – Force-Feedback lässt der Browser nicht zu)
+    if (this.input.padUsed && navigator.getGamepads) for (const p of navigator.getGamepads()) {
+      const v = p && p.vibrationActuator;
+      if (v && v.playEffect) v.playEffect('dual-rumble', { duration: ms * 2, strongMagnitude: Math.min(1, ms / 100), weakMagnitude: 0.5 }).catch(() => {});
+    }
+  }
   cycleCam() { this.camMode = (this.camMode + 1) % 3; this.settings.cam = this.camMode; this.saveSettings(); this.hud.toast(['Kamera: Nah', 'Kamera: Weit', 'Kamera: Motorhaube'][this.camMode], 'info'); }
   nextStation() {
     this.settings.station = (this.settings.station + 1) % RADIO.length;
@@ -1325,7 +1598,7 @@ class Game {
     if (I.took('KeyN') && this.state === 'free') this.navToNextRace();
     if (I.took('KeyG') && drive && !this.events.race) { this.prevState = this.state; this.openPhoto(); }
     // Gamepad / Pfeiltasten im Menü
-    if (!drive && this.screen) {
+    if (!drive && this.screen && this.screen !== 'wheelcal') {
       const dir = I.took('PadUp') ? [0, -1] : I.took('PadDown') ? [0, 1] : I.took('PadLeft') ? [-1, 0] : I.took('PadRight') ? [1, 0] : null;
       if (dir) this.menuMove(dir);
       if (I.took('PadA')) { const f = document.activeElement; if (f && f.tagName === 'BUTTON' && f.offsetParent) f.click(); else this.menuMove([0, 1]); }
@@ -1452,6 +1725,7 @@ class Game {
     if (this.screen === 'garage' && this.state !== 'garage') this.state = 'garage';
     if (this.screen !== 'garage' && this.previewModel) this.closeGarage();
     this.audio.tick(dt);
+    this.net.update(dt);
     const cp = this.camera.position;
     this.scenery.update(dt, this.time, cp, this.audio.beat, this.car.pos);
     this.smoke.update(dt, view.h * this.pr * 0.9);
@@ -1468,12 +1742,12 @@ class Game {
     if (this.replay) { this.tickReplay(dt); return; }
     if (race && race.finished && !race.replayDone && !race.replayStart && race.after > 1.2) this.startReplay(race);
     // Zurückspulen (Q / Rücktaste / Steuerkreuz ↓ / ⏪ halten)
-    const canRewind = !(race && (race.finished || !race.started)) && this.tm.buf.length > 3;
+    const canRewind = !(race && (race.finished || !race.started || race.mp)) && this.tm.buf.length > 3;
     if (raw.rewind && canRewind) { this.rewindStep(dt); return; }
     if (this.rewinding) this.endRewind();
     // Kamerafahrt vor dem Start: Gas, Enter oder Tippen überspringt
     const intro = !!(race && race.t0 !== undefined && race.t < race.t0 + INTRO);
-    if (intro && (raw.throttle > 0.5 || this.skipCine || this.input.took('Enter') || this.input.took('PadA'))) { race.t = race.t0 + INTRO; this.skipCine = false; }
+    if (intro && !race.mp && (raw.throttle > 0.5 || this.skipCine || this.input.took('Enter') || this.input.took('PadA'))) { race.t = race.t0 + INTRO; this.skipCine = false; }
     if (intro !== (this.cineMode === 'intro')) this.setCine(intro && race.t < race.t0 + INTRO ? 'intro' : null, race);
     let inp = raw;
     if (race && !race.started) inp = { throttle: 0, brake: 1, steer: raw.steer, handbrake: true, nitro: false, rev: raw.throttle };
@@ -1530,7 +1804,7 @@ class Game {
     this.audio.updateCar(car, raw, true, this.carStyle);
     // HUD
     this.hud.speedo(car);
-    const extra = { events: race ? null : this.events.list, ais: race ? race.ais : null, waypoint: race ? null : this.waypoint };
+    const extra = { events: race ? null : this.events.list, ais: race ? race.ais : null, waypoint: race ? null : this.waypoint, peers: this.net.room ? this.net.mapPeers() : null };
     if (!race && this.nav) extra.navPts = this.nav.r.pts.slice(this.nav.idx, this.nav.idx + 500);
     if (race) {
       extra.route = { path: race.path, from: race.pS, len: Math.min(900, race.startS + race.total - race.pS + (race.path.closed ? 0 : 0)) };
@@ -1570,7 +1844,8 @@ class Game {
       const ev = race.ev;
       $('cine-type').textContent = ev.dirt ? 'Rallye · Schotter' : ev.sprint ? 'Sprint' : 'Rundstrecke';
       $('cine-name').textContent = ev.name;
-      $('cine-info').textContent = `${ev.sprint ? Math.round(race.total / 100) / 10 + ' km' : race.laps + ' Runden'} · ${race.ais.length + 1} Fahrer · ${this.carSpec().maker} ${this.carSpec().name}`;
+      $('cine-info').textContent = `${ev.sprint ? Math.round(race.total / 100) / 10 + ' km' : race.laps + ' Runden'} · ${race.field || race.ais.length + 1} Fahrer${race.mp ? ' · 👥 Mehrspieler' : ''} · ${this.carSpec().maker} ${this.carSpec().name}`;
+      $('cine-skip').hidden = !!race.mp; // alle sollen gleichzeitig losfahren
       this.audio.play('whoosh');
     }
   }
@@ -1626,8 +1901,9 @@ class Game {
     const spd = Math.hypot(car.vel.x, car.vel.z);
     const others = [];
     if (race) for (const a of race.ais) others.push({ o: a, ai: true });
+    for (const p of this.net.cars()) others.push({ o: p, ai: true, peer: true });
     for (const t of this.traffic.cars) if (t.road && t.model.visible) others.push({ o: t, ai: false });
-    for (const { o, ai } of others) {
+    for (const { o, ai, peer } of others) {
       const dx = o.pos.x - car.pos.x, dz = o.pos.z - car.pos.z;
       const d = Math.hypot(dx, dz);
       if (d > 12) { this.nearMap.delete(o); continue; }
@@ -1639,12 +1915,12 @@ class Game {
         st.contact = true;
         const vx = car.vel.x - o.vx, vz = car.vel.z - o.vz;
         const vn = vx * hit.nx + vz * hit.nz;
-        const share = ai ? 0.6 : 1;
+        const share = peer ? 0.5 : ai ? 0.6 : 1; // Mitspieler: jeder schiebt sich selbst die Hälfte weg
         car.pos.x += hit.nx * hit.pen * share; car.pos.z += hit.nz * hit.pen * share;
         if (vn < 0) {
           car.vel.x -= hit.nx * vn * 1.2 * share; car.vel.z -= hit.nz * vn * 1.2 * share;
           const f = -vn;
-          if (ai) {
+          if (ai && !peer) {
             const fwd = Math.sin(o.yaw) * -hit.nx + Math.cos(o.yaw) * -hit.nz;
             o.speed = Math.max(0, o.speed + fwd * f * 0.4 - f * 0.15);
             o.lat += (-hit.nx * -Math.cos(o.yaw) + -hit.nz * Math.sin(o.yaw)) * hit.pen * 0.8;

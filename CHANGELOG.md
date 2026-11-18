@@ -2,6 +2,20 @@
 
 Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 
+## 18.11.2026
+- **Nova Drive – Mehrspieler über verschiedene Geräte** (Titel/Pause → 👥 Mehrspieler): Raum erstellen, 5-stelligen
+  Code oder Einladungslink (`#mp=CODE`) teilen, Freunde treten am Handy, Tablet oder PC bei. Alle sehen sich gegenseitig
+  auf der Insel (mit Namensschild und Punkt auf der Minikarte), Autos stoßen sich ab. Startet jemand ein Rennen, fahren
+  alle im Raum mit: gleiche Startaufstellung auf jedem Gerät, Platzierung und Ergebnisliste mit echten Mitspielern,
+  Rennuhr läuft nach Wanduhr (Pause schützt nicht), kein Zurückspulen/Überspringen. KI-Gegner wahlweise dazu.
+  Technik: MQTT über WebSocket über einen öffentlichen Vermittlungsdienst (HiveMQ, Ersatz EMQX) – kein eigener Server;
+  gesendet werden nur Name, Auto, Farbe, Position und Rennstand (10×/s). `js/net.js`, `lib/mqtt.esm.js` (mqtt.js 5.10.4, MIT).
+- **Lenkrad**: USB-Lenkräder mit Pedalen (Logitech, Thrustmaster, Fanatec, Moza … – alles, was der Browser als Controller
+  meldet): Einstellungen → USB-Lenkrad → Einrichten (Assistent: Lenkachse, Gas, Bremse, Nitro- und Handbremsen-Knopf),
+  Lenkrad-Weg ganz/½/⅓/¼, direkte Lenkung ohne Glättung, Steuerkreuz und Knöpfe auch im Menü. Am Handy neue Lenkart
+  **Touch-Lenkrad** (Einstellungen → Lenkung → Lenkrad): am Kranz greifen und drehen, federt zurück.
+- Tippen in Textfeldern (Name, Raum-Code) löst keine Spieltasten mehr aus (vorher z. B. F = Vollbild beim Namen eingeben).
+
 ## 06.11.2026
 - **Nova Drive – 16 Autos**: 8 neue eigene Blender-Modelle – Camper-Bus (Dachträger, Surfbrett), Kleinwagen, Buggy
   (Überrollkäfig), Geländewagen, Oldtimer (Speichenräder, Weißwandreifen), Kombi, Keil-Supersportler (Klappscheinwerfer),
