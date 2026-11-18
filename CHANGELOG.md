@@ -2,6 +2,28 @@
 
 Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 
+## 18.11.2026 (2)
+- **Nova Drive läuft flüssiger** (gemessen: 50–66 % weniger Dreiecke pro Bild, eigenes Auto 11 statt 40 Zeichenaufrufe):
+  - Grafik „Auto“ wählt die Stufe nach Gerät/Grafikchip (Handy Ultra, starker PC Hyper, Software-Grafik Niedrig) statt
+    immer Hyper; Handys rendern nicht mehr in voller Bildschirmdichte (vorher bis 2,6-fach). Läuft es dauerhaft zu langsam,
+    startet das Spiel beim nächsten Mal eine Stufe niedriger.
+  - Laufzeit-Regelung in 1-s-Schritten: erst Auflösung, dann Spiegelbild einfrieren → Verdeckung aus → kleinere
+    Schattenkarte → Leuchten aus; läuft es wieder flüssig, kommt alles zurück.
+  - Gelände in Detailstufen (nah fein, fern grob, nahtlos durch Schürzen), Felsen/Häuser/Laternen in Kacheln mit
+    Reichweite (zeichnet nur, was im Blickfeld liegt – auch für die Schatten), Zuschauer nur in Festival-Nähe,
+    Verkehr wechselt bei 70 m auf das einfache Modell, Spiegel-Würfelkamera eine Seite pro Bild statt sechs,
+    Umgebungsverdeckung in halber Auflösung, Gras-Neuverteilung in 2-ms-Häppchen (vorher Ruckler bei Tempo),
+    Handy: halbe Schattenkarte, 2× statt 4× Kantenglättung.
+- **5 neue Autos** (21 insgesamt, eigene Blender-Modelle): Kubo Würfel 660 (Mini-Kastenwagen, zweifarbiges Dach),
+  Regent Limousine V6, Lumen Coupé 2.0T (Haubenschlitze, Abrisskante), Zephyra Cabrio 3.0 (offener Viersitzer),
+  Vortex LMP Prototyp (Langstrecken-Renner mit Flosse und großem Flügel, neues Spitzenauto).
+- **Mehr Inhalt**: 3 neue Rennen (Küstensprint, Festival-Ausdauer 6 Runden, Waldmarathon 5 Runden), 3 neue Blitzer,
+  3 neue Driftzonen, neue Event-Art **Tempozone** (Durchschnittstempo von Start bis Ziel, 4 Stück), **Scheunenfunde**:
+  4 vergessene Autos vor Scheunen auf der Insel – Gerücht im Radio in der Nähe, langsam vors Tor fahren → Auto in der
+  Garage (Karte zeigt Fundorte, Profil zählt mit). 33 Events insgesamt.
+- Fehler behoben: Titelmenü am Handy quer zu hoch („Einstellungen“ abgeschnitten, „Als App installieren“ unerreichbar)
+  → zweispaltig; neue Events nicht auf zu kurzen Straßen bzw. auf anderen Startpunkten.
+
 ## 18.11.2026
 - **Nova Drive – Mehrspieler über verschiedene Geräte** (Titel/Pause → 👥 Mehrspieler): Raum erstellen, 5-stelligen
   Code oder Einladungslink (`#mp=CODE`) teilen, Freunde treten am Handy, Tablet oder PC bei. Alle sehen sich gegenseitig

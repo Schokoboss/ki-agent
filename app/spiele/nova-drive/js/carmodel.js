@@ -26,6 +26,11 @@ const STYLES = {
   buggy: { L: 3.6, W: 1.86, clr: 0.46, belt: 0.96, nose: 0.8, tail: 0.96, hood: 1.0, ws: 0.38, roof: 0, rear: 0, H: 1.3, wR: 0.42, wb: 2.3 },
   wedge: { L: 4.42, W: 1.96, clr: 0.22, belt: 0.78, nose: 0.48, tail: 0.95, hood: 1.25, ws: 1.1, roof: 0.55, rear: 1.2, H: 1.08, wR: 0.35, wb: 2.55 },
   rally80: { L: 4.05, W: 1.86, clr: 0.38, belt: 1.0, nose: 0.88, tail: 0.98, hood: 1.12, ws: 0.6, roof: 1.45, rear: 0.55, H: 1.48, wR: 0.35, wb: 2.45 },
+  coupe: { L: 4.38, W: 1.86, clr: 0.26, belt: 0.9, nose: 0.66, tail: 0.92, hood: 1.5, ws: 0.8, roof: 0.72, rear: 1.12, H: 1.3, wR: 0.34, wb: 2.62 },
+  sedan: { L: 4.88, W: 1.86, clr: 0.28, belt: 0.99, nose: 0.76, tail: 0.99, hood: 1.38, ws: 0.78, roof: 1.5, rear: 0.52, H: 1.46, wR: 0.35, wb: 2.9 },
+  proto: { L: 4.95, W: 2.02, clr: 0.19, belt: 0.76, nose: 0.42, tail: 0.94, hood: 1.12, ws: 1.0, roof: 0.58, rear: 1.55, H: 1.06, wR: 0.36, wb: 2.95 },
+  kei: { L: 3.3, W: 1.62, clr: 0.22, belt: 0.96, nose: 0.86, tail: 1.0, hood: 0.42, ws: 0.52, roof: 1.98, rear: 0.08, H: 1.72, wR: 0.28, wb: 2.25 },
+  cabrio: { L: 4.7, W: 1.9, clr: 0.26, belt: 0.9, nose: 0.68, tail: 0.9, hood: 1.7, ws: 0.38, roof: 0, rear: 0, H: 1.22, wR: 0.35, wb: 2.78 },
 };
 
 function extrude(pts, width, bevel = 0.06) {
@@ -55,6 +60,7 @@ const TEMPL = {};
 const STYLE_CAR = {
   hatch: 'kestrel', truck: 'tundra', roadster: 'velora', rally: 'ostwind', muscle: 'brenner', gt: 'aurum', ev: 'volt', hyper: 'phantom',
   van: 'sundog', suv: 'atlas', mini: 'pixie', wagon: 'nordwind', classic: 'vira', buggy: 'dune', wedge: 'strato', rally80: 'gruppo',
+  coupe: 'lumen', sedan: 'regent', proto: 'vortex', kei: 'kubo', cabrio: 'zephyra',
 };
 
 export async function loadCarModels(ids, onProgress = () => {}) {
@@ -171,7 +177,7 @@ function fromTemplate(spec, color, opts) {
   const T = TEMPL[id];
   if (!T) return null;
   // Gegner: mittleres Blender-Modell (zusammengefasst, 3 Draw-Calls). Verkehr: mittel ab „Hoch“, sonst LOD.
-  const wantMid = opts.lod && (opts.lod === 'ai' ? DETAIL >= 1 : DETAIL >= 2);
+  const wantMid = opts.lod && opts.lod !== 'far' && (opts.lod === 'ai' ? DETAIL >= 1 : DETAIL >= 2); // 'far' = immer LOD
   if (wantMid && !T.mid && (T.midScene || T.full)) T.mid = prepLod(T.midScene || T.full);
   const LODT = opts.lod ? (wantMid && T.mid ? T.mid : T.lod || T.mid) : null;
   if (opts.lod ? !LODT : !T.full) return null;
@@ -227,15 +233,55 @@ function fromTemplate(spec, color, opts) {
         o.material = root.userData.headMat;
       } else if (o.material.name === 'glass') { o.material.envMapIntensity = 1.6; }
     });
+    // gleiche Materialien zusammenfassen: ~40 → ~15 Zeichenaufrufe fürs eigene Auto (und nochmal so viele im Schatten)
+    mergeByMaterial(bodyG);
+    for (const w of wheels) mergeByMaterial(w.spin);
   }
   const exh = [];
   const exN = spec.style === 'gt' || spec.style === 'muscle' || spec.style === 'hyper' ? 2 : 1;
   for (let i = 0; i < exN; i++) exh.push(new THREE.Vector3(exN === 2 ? (i ? 0.48 : -0.48) : 0.5, S.clr + 0.09, -S.L / 2 - 0.12));
-  root.userData = { bodyG, wheels, paintMat, tailMat, headMat: root.userData.headMat, dims: S, exhaust: exh, style: spec.style, gltf: true };
+  root.userData = { bodyG, wheels, paintMat, tailMat, headMat: root.userData.headMat, dims: S, exhaust: exh, style: spec.style, gltf: true, lodKind: opts.lod ? (LODT === T.mid ? 'mid' : 'lod') : 'full' };
   return root;
 }
 
-// spec: Eintrag aus CARS (style), color: Lackfarbe, opts.lod: true = Verkehr (2 Draw-Calls), 'ai' = Gegner
+// alle Meshes unter group (beliebig verschachtelt) nach Material + Attributsatz zu je einem Mesh verschmelzen
+const _gi = new THREE.Matrix4();
+function mergeByMaterial(group) {
+  group.updateMatrixWorld(true);
+  _gi.copy(group.matrixWorld).invert();
+  const buckets = new Map(), meshes = [];
+  group.traverse(o => { if (o.isMesh && !o.isSkinnedMesh && !Array.isArray(o.material)) meshes.push(o); });
+  if (meshes.length < 3) return;
+  for (const o of meshes) {
+    const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+    for (const k of Object.keys(g.attributes)) {
+      if (!['position', 'normal', 'uv', 'color'].includes(k)) { g.deleteAttribute(k); continue; }
+      // komprimierte Modelle (meshopt): Ganzzahl-Koordinaten → erst in Kommazahlen, sonst schneidet die Verschiebung sie ab
+      const A = g.attributes[k];
+      if (A.normalized || !(A.array instanceof Float32Array) || A.isInterleavedBufferAttribute) {
+        const f = new Float32Array(A.count * A.itemSize);
+        for (let i = 0; i < A.count; i++) for (let c = 0; c < A.itemSize; c++) f[i * A.itemSize + c] = A.getComponent ? A.getComponent(i, c) : [A.getX(i), A.getY(i), A.getZ(i), A.getW(i)][c];
+        g.setAttribute(k, new THREE.BufferAttribute(f, A.itemSize));
+      }
+    }
+    g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(_gi, o.matrixWorld));
+    g.morphAttributes = {};
+    const key = o.material.uuid + '|' + Object.keys(g.attributes).sort().join(',');
+    let b = buckets.get(key); if (!b) buckets.set(key, b = { mat: o.material, geos: [], shadow: false, order: o.renderOrder });
+    b.geos.push(g); b.shadow ||= o.castShadow;
+  }
+  const merged = [];
+  for (const b of buckets.values()) {
+    const g = b.geos.length > 1 ? mergeGeometries(b.geos) : b.geos[0];
+    if (!g) return; // passt nicht zusammen → Original behalten
+    const m = new THREE.Mesh(g, b.mat); m.castShadow = b.shadow; m.renderOrder = b.order;
+    merged.push(m);
+  }
+  for (const c of [...group.children]) group.remove(c);
+  for (const m of merged) group.add(m);
+}
+
+// spec: Eintrag aus CARS (style), color: Lackfarbe, opts.lod: true = Verkehr (2 Draw-Calls), 'far' = Verkehr weit weg, 'ai' = Gegner
 export function buildCar(spec, color, opts = {}) {
   const m = fromTemplate(spec, color, opts);
   if (m) return m;

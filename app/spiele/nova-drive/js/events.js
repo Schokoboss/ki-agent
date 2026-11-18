@@ -1,15 +1,15 @@
 // Events auf der Insel: Rennen, Blitzer, Driftzonen, Schanzen, Plakate – und die Skill-Kette.
 import * as THREE from '../lib/three.module.min.js';
-import { EVENTS, CARS } from './data.js';
+import { EVENTS, CARS, BARN_CARS } from './data.js';
 import { INTRO } from './cine.js';
 import { clamp, fmtTime, fmtNum, mulberry32 } from './util.js';
 import { RaceAI, speedProfile } from './ai.js';
 import { EVENT_COLORS } from './world.js';
 import { buildCar } from './carmodel.js';
 
-const ICONS = { race: '🏁', trap: '📷', drift: '〰', jump: '⚠' };
+const ICONS = { race: '🏁', trap: '📷', drift: '〰', jump: '⚠', speed: '⏱' };
 const P = {};
-export const TYPE_NAMES = { race: 'Rennen', trap: 'Blitzer', drift: 'Driftzone', jump: 'Sprungschanze' };
+export const TYPE_NAMES = { race: 'Rennen', trap: 'Blitzer', drift: 'Driftzone', jump: 'Sprungschanze', speed: 'Tempozone' };
 const AI_NAMES = ['Mila', 'Jonas', 'Aylin', 'Ben', 'Sofia', 'Luca', 'Emre', 'Lea', 'Noah', 'Hanna', 'Finn', 'Yara'];
 
 // ---------------------------------------------------------------- Skill-Kette
@@ -80,7 +80,7 @@ export class Events {
   constructor(game) {
     this.g = game;
     this.list = [];
-    this.race = null; this.drift = null; this.jump = null;
+    this.race = null; this.drift = null; this.jump = null; this.speedz = null; this.barns = [];
     this.near = null;
     this.trapCool = new Map();
     this.nearMiss = new Map();
@@ -106,6 +106,67 @@ export class Events {
       else ev.beacon = S.addBeacon(ev.x, ev.z, EVENT_COLORS.trap, ICONS.trap);
       this.list.push(ev);
     }
+    this.initBarns();
+  }
+
+  // ---------- Scheunenfunde: vier weit verteilte Scheunen, vor dem Tor steht ein verstaubtes Auto
+  initBarns() {
+    const W = this.g.world, all = W.buildings.filter(b => b.variant === 'barn');
+    if (!all.length) return;
+    const picks = [];
+    // erst die vom Festival am weitesten entfernte, dann jeweils die, die am weitesten von allen bisherigen liegt
+    const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+    picks.push(all.reduce((m, b) => (dist(b, { x: -200, z: 420 }) > dist(m, { x: -200, z: 420 }) ? b : m), all[0]));
+    while (picks.length < Math.min(BARN_CARS.length, all.length)) {
+      let best = null, bd = -1;
+      for (const b of all) { if (picks.includes(b)) continue; const d = Math.min(...picks.map(p => dist(p, b))); if (d > bd) { bd = d; best = b; } }
+      picks.push(best);
+    }
+    const found = this.g.save.barns || [];
+    picks.forEach((b, i) => {
+      const id = 'b_' + i, carId = BARN_CARS[i], spec = CARS.find(c => c.id === carId);
+      if (!spec) return;
+      const off = b.d / 2 + 4.5, x = b.x + Math.sin(b.yaw) * off, z = b.z + Math.cos(b.yaw) * off;
+      const f = { id, car: carId, spec, x, z, yaw: b.yaw, found: found.includes(id), hinted: false, model: null };
+      this.barns.push(f);
+    });
+  }
+  updateBarns() {
+    const g = this.g, car = g.car;
+    for (const f of this.barns) {
+      if (f.found) continue;
+      const d = Math.hypot(car.pos.x - f.x, car.pos.z - f.z);
+      // Modell erst in der Nähe bauen (spart Speicher), weit weg wieder weg
+      if (d < 220 && !f.model) {
+        f.model = buildCar(f.spec, f.spec.colors[0], { lod: 'ai' });
+        const pm = f.model.userData.paintMat;
+        if (pm && pm.userData.dirt) pm.userData.dirt.value = 1;
+        f.model.position.set(f.x, g.world.heightAt(f.x, f.z), f.z);
+        f.model.rotation.y = f.yaw;
+        f.model.traverse(o => { if (o.isMesh) o.castShadow = true; });
+        g.scene.add(f.model);
+      } else if (d > 260 && f.model) { g.scene.remove(f.model); f.model = null; }
+      if (d < 280 && !f.hinted) { f.hinted = true; g.hud.toast('📻 Gerücht: In einer Scheune hier in der Nähe soll ein vergessenes Auto stehen…', 'radio'); }
+      if (d < 8 && car.speedKmh < 45) this.findBarn(f);
+    }
+  }
+  findBarn(f) {
+    const g = this.g;
+    f.found = true;
+    (g.save.barns ||= []).push(f.id);
+    if (f.model) { g.scene.remove(f.model); f.model = null; }
+    const n = g.save.barns.length, total = this.barns.length;
+    if (!g.save.owned[f.car]) {
+      g.save.owned[f.car] = { up: {}, color: f.spec.colors[0] };
+      g.hud.banner('Scheunenfund!', `${f.spec.maker} ${f.spec.name}`, null, `Steht jetzt in deiner Garage · ${n}/${total}`);
+    } else {
+      const cr = Math.round(f.spec.price * 0.5);
+      g.reward(cr, 0, true);
+      g.hud.banner('Scheunenfund!', `${f.spec.maker} ${f.spec.name}`, null, `Schon in der Garage – verkauft für ${fmtNum(cr)} CR · ${n}/${total}`);
+    }
+    g.reward(0, 1500, true);
+    g.audio.play('win'); g.confetti && g.confetti();
+    g.saveGame();
   }
   byId(id) { return this.list.find(e => e.id === id); }
 
@@ -123,7 +184,49 @@ export class Events {
     if (near !== this.near) { this.near = near; g.hud.prompt(near); }
     this.updateTraps(dt);
     this.updateDrift(dt);
+    this.updateSpeedZone(dt);
     this.updateJump(dt);
+    this.updateBarns();
+  }
+
+  // ---------- Tempozone: Schnitt von Start bis Ziel
+  updateSpeedZone(dt) {
+    const car = this.g.car;
+    if (!this.speedz) {
+      if (this.drift) return;
+      for (const ev of this.list) {
+        if (ev.type !== 'speed') continue;
+        const d = Math.hypot(car.pos.x - ev.x, car.pos.z - ev.z);
+        if (d > ev.hw + 6) continue;
+        const fwd = Math.sin(car.yaw) * Math.sin(ev.yaw) + Math.cos(car.yaw) * Math.cos(ev.yaw);
+        if (fwd < 0.3 || car.speedKmh < 20) continue;
+        this.speedz = { ev, s: ev.s, end: ev.to * ev.path.length, t: 0 };
+        this.g.hud.zone(ev.name, 'So schnell wie möglich bis zum Ziel!');
+        this.g.audio.play('cp');
+        ev.beacon.hidden = true;
+        break;
+      }
+      return;
+    }
+    const z = this.speedz, ev = z.ev;
+    z.t += dt;
+    const c = ev.path.closest(car.pos.x, car.pos.z, z.s, 60);
+    if (c.s > z.s - 30) z.s = Math.max(z.s, c.s);
+    const done = z.s - ev.s, avg = z.t > 0.3 ? done / z.t * 3.6 : 0;
+    this.g.hud.zoneScore(Math.round(avg), ev.stars, ` km/h · noch ${Math.max(0, Math.round(z.end - z.s))} m`);
+    const finished = z.s >= z.end - 3, failed = c.dist > 40 || z.t > 150;
+    if (finished || failed) {
+      this.g.hud.zone(null);
+      ev.beacon.hidden = false;
+      this.speedz = null;
+      if (failed) { this.g.hud.toast('Tempozone verlassen – nochmal von vorn', 'warn'); return; }
+      const kmh = Math.round((z.end - ev.s) / z.t * 3.6);
+      const stars = ev.stars.filter(v => kmh >= v).length;
+      const rec = this.g.save.best[ev.id] || 0;
+      if (kmh > rec) this.g.save.best[ev.id] = kmh;
+      this.g.hud.banner(ev.name, `Schnitt ${kmh} km/h`, stars, kmh > rec && rec ? 'Neuer Rekord!' : '');
+      this.giveStars(ev, stars);
+    }
   }
 
   // ---------- Blitzer
@@ -291,7 +394,11 @@ export class Events {
     this.updateGates();
   }
 
-  cancelSide() { if (this.drift) { this.drift.ev.beacon.hidden = false; this.g.hud.zone(null); } this.drift = null; this.jump = null; }
+  cancelSide() {
+    if (this.drift) { this.drift.ev.beacon.hidden = false; this.g.hud.zone(null); }
+    if (this.speedz) { this.speedz.ev.beacon.hidden = false; this.g.hud.zone(null); }
+    this.drift = null; this.jump = null; this.speedz = null;
+  }
 
   endRace(aborted) {
     const g = this.g, r = this.race;

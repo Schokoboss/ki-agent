@@ -88,6 +88,17 @@ export const CARS = [
     price: 95000, style: 'rally80', colors: ['#f2f2f2', '#6d5dfc', '#e63946', '#1f4e9c', '#ffb703', '#111111'] },
   { id: 'strato', maker: 'Strato', name: 'Keil V12', drive: 'RWD', top: 305, accel: 14.2, grip: 1.22, handling: 1.12, offroad: 0.05,
     price: 180000, style: 'wedge', colors: ['#f1f1f1', '#ff3d00', '#111111', '#ffd400', '#00b4d8', '#d7263d'] },
+  // dritte Runde (hinten angehängt – Herausforderungs-Links bleiben gültig)
+  { id: 'kubo', maker: 'Kubo', name: 'Würfel 660', drive: 'FWD', top: 152, accel: 6.4, grip: 0.96, handling: 1.26, offroad: 0.3,
+    price: 7000, style: 'kei', colors: ['#f2c14e', '#7bc47f', '#5fa8d3', '#f2f2f2', '#ff8fab', '#e8432e'] },
+  { id: 'regent', maker: 'Regent', name: 'Limousine V6', drive: 'AWD', top: 238, accel: 10.4, grip: 1.04, handling: 1.0, offroad: 0.25,
+    price: 42000, style: 'sedan', colors: ['#22232a', '#8d99ae', '#f2f2f2', '#1d3557', '#7a1f2b', '#3d6b3a'] },
+  { id: 'lumen', maker: 'Lumen', name: 'Coupé 2.0T', drive: 'RWD', top: 246, accel: 11.2, grip: 1.1, handling: 1.22, offroad: 0.1,
+    price: 56000, style: 'coupe', colors: ['#ff3d7f', '#1b98e0', '#f2f2f2', '#111111', '#ffd400', '#2ec4b6'] },
+  { id: 'zephyra', maker: 'Zephyra', name: 'Cabrio 3.0', drive: 'RWD', top: 255, accel: 11.6, grip: 1.08, handling: 1.1, offroad: 0.05,
+    price: 82000, style: 'cabrio', colors: ['#c9a227', '#9b1d20', '#f1e3c8', '#1b3a5c', '#e5e5e5', '#2d6a4f'] },
+  { id: 'vortex', maker: 'Vortex', name: 'LMP Prototyp', drive: 'RWD', top: 338, accel: 16.2, grip: 1.42, handling: 1.3, offroad: 0.02,
+    price: 420000, style: 'proto', colors: ['#00e5ff', '#111111', '#ff3d00', '#f2f2f2', '#6d5dfc', '#36e27a'] },
 ];
 
 export const UPGRADES = [
@@ -145,7 +156,26 @@ export const EVENTS = [
   { id: 'j_feld', type: 'jump', name: 'Sprungschanze Feld', x: -95, z: 330, yaw: Math.PI * 1.05, stars: [50, 85, 120] },
   { id: 'j_strand', type: 'jump', name: 'Sprungschanze Strand', x: 560, z: 520, yaw: Math.PI * 1.75, stars: [50, 85, 120] },
   { id: 'j_steppe', type: 'jump', name: 'Sprungschanze Steppe', x: 610, z: -400, yaw: Math.PI * 0.833, stars: [50, 85, 120] },
+
+  // neue Inhalte: Rennen auf bisher freien Straßen, mehr Blitzer und Driftzonen
+  { id: 'r_kueste_s', type: 'race', name: 'Küstensprint', road: 'kueste', sprint: true, at: 0.3, to: 0.7, reward: 14000, fans: 1400, ai: 7 },
+  { id: 'r_festival_x', type: 'race', name: 'Festival-Ausdauer', road: 'festival', laps: 6, at: 0.5, reward: 21000, fans: 2100, ai: 7 },
+  { id: 'r_wald_x', type: 'race', name: 'Waldmarathon', road: 'wald', laps: 5, at: 0.5, reward: 19000, fans: 1900, ai: 5, dirt: true },
+  { id: 't_markt', type: 'trap', name: 'Blitzer Marktstraße', road: 'markt', at: 0.55, stars: [100, 130, 160] },
+  { id: 't_stadt', type: 'trap', name: 'Blitzer Altstadt', road: 'stadt', at: 0.62, stars: [110, 140, 170] },
+  { id: 't_berg', type: 'trap', name: 'Blitzer Bergpfad', road: 'berg', at: 0.72, stars: [90, 120, 150] },
+  { id: 'd_berg', type: 'drift', name: 'Driftzone Bergpfad', road: 'berg', at: 0.2, to: 0.55, stars: [5000, 12000, 24000] },
+  { id: 'd_kueste', type: 'drift', name: 'Driftzone Küstenkurven', road: 'kueste', at: 0.78, to: 0.9, stars: [6000, 15000, 30000] },
+  { id: 'd_festival', type: 'drift', name: 'Driftzone Festivalring', road: 'festival', at: 0.3, to: 0.8, stars: [5000, 12000, 24000] },
+  // Tempozonen: Durchschnittstempo zwischen Start und Ziel
+  { id: 's_kueste', type: 'speed', name: 'Tempozone Küstenbogen', road: 'kueste', at: 0.55, to: 0.7, stars: [150, 185, 220] },
+  { id: 's_see', type: 'speed', name: 'Tempozone Seeufer', road: 'see', at: 0.15, to: 0.4, stars: [130, 160, 195] },
+  { id: 's_pass', type: 'speed', name: 'Tempozone Passstraße', road: 'pass', at: 0.05, to: 0.28, stars: [110, 140, 170] },
+  { id: 's_wald', type: 'speed', name: 'Tempozone Waldpiste', road: 'wald', at: 0.78, to: 0.98, stars: [90, 115, 140] },
 ];
+
+// Scheunenfunde: seltene Autos, versteckt vor Scheunen auf der Insel (Reihenfolge = Fundorte von außen nach innen)
+export const BARN_CARS = ['vira', 'gruppo', 'strato', 'zephyra'];
 
 // Gebäude-Modelle (Maße wie in werkstatt/welt.py: w = Breite der Vorderseite, d = Tiefe, Vorderseite = +z)
 export const HOUSES = {
@@ -165,4 +195,6 @@ export const TIPS = [
   'Nach einem Rennen: „Freund herausfordern“ schickt deinen Geist als Link.',
   'Geländewagen und Rallye-Autos sind abseits der Straße viel schneller.',
   'Upgrades in der Garage machen dein Auto stärker – aber auch die Gegner passen sich an.',
+  'Gerüchte sagen: In vier Scheunen auf der Insel stehen vergessene Autos. Fahr langsam vor das Scheunentor!',
+  'Tempozonen zählen den Schnitt von Start bis Ziel – ein Ausrutscher kostet die ganze Runde.',
 ];

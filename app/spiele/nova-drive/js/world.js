@@ -31,7 +31,7 @@ vec3 atNrm(sampler2D t, vec2 uv) {
 `;
 
 const AO_DIST = [5, 12, 26, 55];
-export const EVENT_COLORS = { race: '#7a6bff', trap: '#ff9a1f', drift: '#ff3d9a', jump: '#ffd400' };
+export const EVENT_COLORS = { race: '#7a6bff', trap: '#ff9a1f', drift: '#ff3d9a', jump: '#ffd400', speed: '#2ee6a6' };
 
 export class Scenery {
   constructor(scene, world, T, quality) {
@@ -60,7 +60,7 @@ export class Scenery {
       ['Zuschauer, Boote, Windräder', () => { this.buildCrowd(); this.buildBoats(); this.buildTurbines(); }, 1],
       ['Gras säen', () => this.buildGrass(), 1],
       ['Unterholz pflanzen', () => this.buildProps(), 1],
-      ['Letzte Details', () => { this.buildClouds(); this.buildGlows(); this.buildGates(); }, 1],
+      ['Letzte Details', () => { this.buildClouds(); this.buildGlows(); this.buildGates(); this.chunkStatic(); }, 1],
     ];
     const total = steps.reduce((a, s) => a + s[2], 0);
     let done = 0;
@@ -71,6 +71,38 @@ export class Scenery {
       done += w;
     }
     prog(1, 'Fertig');
+  }
+
+  // Große, feste Instanz-Bündel (Felsen, Häuser, Laternen) in 250-m-Kacheln teilen: dann zeichnet die Grafikkarte –
+  // auch für die Schattenkarte – nur Kacheln im Blickfeld und in Reichweite statt immer die ganze Insel.
+  chunkStatic(cell = 250) {
+    const list = [];
+    this.scene.traverse(o => { if (o.isInstancedMesh && o.userData.chunk !== undefined) list.push(o); });
+    const m = new THREE.Matrix4(), c = new THREE.Color(), p = new THREE.Vector3();
+    this.cullChunks = [];
+    for (const im of list) {
+      const far = im.userData.chunk, buckets = new Map(), cs = im.userData.chunkCell || cell;
+      for (let i = 0; i < im.count; i++) {
+        im.getMatrixAt(i, m); p.setFromMatrixPosition(m);
+        const k = Math.floor(p.x / cs) * 1000 + Math.floor(p.z / cs);
+        let a = buckets.get(k); if (!a) buckets.set(k, a = []);
+        a.push(i);
+      }
+      if (buckets.size < 2) { if (!im.boundingSphere) im.computeBoundingSphere(); this.cullChunks.push(im); continue; }
+      const parent = im.parent;
+      for (const idx of buckets.values()) {
+        const ch = new THREE.InstancedMesh(im.geometry, im.material, idx.length);
+        idx.forEach((i, j) => { im.getMatrixAt(i, m); ch.setMatrixAt(j, m); if (im.instanceColor) { im.getColorAt(i, c); ch.setColorAt(j, c); } });
+        ch.castShadow = im.castShadow; ch.receiveShadow = im.receiveShadow; ch.renderOrder = im.renderOrder;
+        ch.customDepthMaterial = im.customDepthMaterial; ch.customDistanceMaterial = im.customDistanceMaterial;
+        ch.userData = { ...im.userData }; ch.layers.mask = im.layers.mask; ch.name = im.name;
+        ch.position.copy(im.position); ch.quaternion.copy(im.quaternion); ch.scale.copy(im.scale);
+        ch.computeBoundingSphere();
+        parent.add(ch);
+        this.cullChunks.push(ch);
+      }
+      parent.remove(im);
+    }
   }
 
   // vorberechnete Verschattung durch Bäume, Felsen und Häuser (Raster wie die Höhenkarte)
@@ -130,6 +162,7 @@ export class Scenery {
     this.buildClouds();
     this.buildGlows();
     this.buildGates();
+    this.chunkStatic();
   }
 
   // ---------------------------------------------------------------- Himmel & Licht
@@ -191,7 +224,7 @@ export class Scenery {
     this.sun = new THREE.DirectionalLight(0xffffff, 2.2);
     if (this.q >= 1) {
       this.sun.castShadow = true;
-      const ms = this.q >= 3 ? 4096 : this.q >= 2 ? 2048 : 1024;
+      const ms = this.q >= 3 ? (this.mobile ? 2048 : 4096) : this.q >= 2 ? 2048 : 1024; // Handy: halbe Schattenkarte
       this.sun.shadow.mapSize.set(ms, ms);
       const c = this.sun.shadow.camera;
       const ext = this.q >= 3 ? 85 : 55;
@@ -288,7 +321,9 @@ export class Scenery {
     const step = this.q >= 4 ? 4 : this.q >= 3 ? 5 : this.q >= 2 ? 6.5 : this.q >= 1 ? 8 : 11;
     const M = Math.round((2 * HALF) / step);
     const st = (2 * HALF) / M;
-    const C = 4, per = Math.ceil(M / C);
+    // 6×6 Kacheln mit drei Detailstufen (voll · jede 2. · jede 4. Zeile) – ferne Kacheln gröber (siehe update)
+    const C = 6, per = Math.ceil(M / C / 4) * 4;
+    this.terrainTiles = [];
     const mat = this.q >= 2 ? this.terrainSplat() : new THREE.MeshLambertMaterial({ vertexColors: true, map: this.T.ground });
     this.terrainMat = mat;
     const col = [0, 0, 0];
@@ -318,21 +353,61 @@ export class Scenery {
         cl[k * 3] = col[0]; cl[k * 3 + 1] = col[1]; cl[k * 3 + 2] = col[2];
         uv[k * 2] = x / 9; uv[k * 2 + 1] = z / 9;
       }
-      const idx = [];
-      for (let j = 0; j < nz - 1; j++) for (let i = 0; i < nx - 1; i++) {
-        const a = j * nx + i, b = a + 1, c = a + nx, d = c + 1;
-        idx.push(a, c, b, b, c, d);
+      // Schürzen: Randpunkte 7 m tiefer kopiert – verdecken Ritzen, wo Nachbarkacheln gröber sind
+      const border = [];
+      for (let i = 0; i < nx; i++) border.push(i);
+      for (let j = 1; j < nz; j++) border.push(j * nx + nx - 1);
+      for (let i = nx - 2; i >= 0; i--) border.push((nz - 1) * nx + i);
+      for (let j = nz - 2; j >= 1; j--) border.push(j * nx);
+      const nb = border.length, tot = nx * nz + nb;
+      const P2 = new Float32Array(tot * 3), N2 = new Float32Array(tot * 3), C2 = new Float32Array(tot * 3), U2 = new Float32Array(tot * 2);
+      P2.set(pos); N2.set(nor); C2.set(cl); U2.set(uv);
+      const low = new Map();
+      border.forEach((v, q) => {
+        const o = nx * nz + q;
+        P2[o * 3] = pos[v * 3]; P2[o * 3 + 1] = pos[v * 3 + 1] - 7; P2[o * 3 + 2] = pos[v * 3 + 2];
+        for (let c = 0; c < 3; c++) { N2[o * 3 + c] = nor[v * 3 + c]; C2[o * 3 + c] = cl[v * 3 + c] * 0.8; }
+        U2[o * 2] = uv[v * 2]; U2[o * 2 + 1] = uv[v * 2 + 1];
+        low.set(v, o);
+      });
+      const idx = [], ranges = [];
+      for (const sstep of [1, 2, 4]) {
+        const start = idx.length;
+        const cols = [], rows = [];
+        for (let i = 0; i < nx - 1; i += sstep) cols.push(i); cols.push(nx - 1);
+        for (let j = 0; j < nz - 1; j += sstep) rows.push(j); rows.push(nz - 1);
+        for (let r = 0; r < rows.length - 1; r++) for (let q = 0; q < cols.length - 1; q++) {
+          const a = rows[r] * nx + cols[q], b = rows[r] * nx + cols[q + 1], c = rows[r + 1] * nx + cols[q], d = rows[r + 1] * nx + cols[q + 1];
+          idx.push(a, c, b, b, c, d);
+        }
+        // Schürze entlang der vier Ränder (beidseitig, damit die Wickelrichtung egal ist)
+        const edge = (list) => { for (let q = 0; q < list.length - 1; q++) { const a = list[q], b = list[q + 1], la = low.get(a), lb = low.get(b); idx.push(a, la, b, b, la, lb, a, b, la, b, lb, la); } };
+        edge(cols.map(i => i)); edge(cols.map(i => (nz - 1) * nx + i));
+        edge(rows.map(j => j * nx)); edge(rows.map(j => j * nx + nx - 1));
+        ranges.push([start, idx.length - start]);
       }
       const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-      g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
-      g.setAttribute('color', new THREE.BufferAttribute(cl, 3));
-      g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-      g.setIndex(idx);
+      g.setAttribute('position', new THREE.BufferAttribute(P2, 3));
+      g.setAttribute('normal', new THREE.BufferAttribute(N2, 3));
+      g.setAttribute('color', new THREE.BufferAttribute(C2, 3));
+      g.setAttribute('uv', new THREE.BufferAttribute(U2, 2));
+      g.setIndex(tot > 65535 ? new THREE.Uint32BufferAttribute(idx, 1) : new THREE.Uint16BufferAttribute(idx, 1));
       g.computeBoundingSphere();
+      g.setDrawRange(ranges[0][0], ranges[0][1]);
       const m = new THREE.Mesh(g, mat);
       m.receiveShadow = true;
+      const x0 = -HALF + i0 * st, x1 = -HALF + i1 * st, z0 = -HALF + j0 * st, z1 = -HALF + j1 * st;
+      this.terrainTiles.push({ m, ranges, lod: 0, x0, x1, z0, z1 });
       this.scene.add(m);
+    }
+  }
+  // Gelände-Detailstufe je Kachel nach Entfernung zur Kamera (Abstand zum Kachelrand)
+  updateTerrainLod(cam) {
+    const near = this.q >= 4 ? 380 : this.q >= 3 ? 300 : 220, mid = near * 2.6;
+    for (const T of this.terrainTiles || []) {
+      const dx = Math.max(T.x0 - cam.x, 0, cam.x - T.x1), dz = Math.max(T.z0 - cam.z, 0, cam.z - T.z1), d = Math.hypot(dx, dz);
+      const lod = d < near ? 0 : d < mid ? 1 : 2;
+      if (lod !== T.lod) { T.lod = lod; T.m.geometry.setDrawRange(T.ranges[lod][0], T.ranges[lod][1]); }
     }
   }
 
@@ -653,6 +728,7 @@ export class Scenery {
     im.count = rocks.length;
     im.computeBoundingSphere();
     im.castShadow = this.q >= 1;
+    im.userData.chunk = 750;
     this.scene.add(im);
   }
 
@@ -740,6 +816,7 @@ export class Scenery {
     });
     im.computeBoundingSphere(); ih.computeBoundingSphere();
     im.castShadow = this.q >= 2;
+    im.userData.chunk = ih.userData.chunk = 500;
     this.scene.add(im, ih);
   }
 
@@ -1180,6 +1257,7 @@ export class Scenery {
       });
       im.computeBoundingSphere();
       im.castShadow = this.q >= 1; im.receiveShadow = true;
+      im.userData.chunk = this.q >= 4 ? 1000 : 750;
       this.scene.add(im);
     }
   }
@@ -1207,6 +1285,7 @@ export class Scenery {
       });
       im.computeBoundingSphere();
       im.castShadow = true; im.receiveShadow = true;
+      im.userData.chunk = this.q >= 4 ? 1000 : 750;
       this.scene.add(im);
     });
     return true;
@@ -1330,6 +1409,7 @@ export class Scenery {
         });
         im.computeBoundingSphere();
         im.castShadow = this.q >= 1 && tint; im.receiveShadow = true;
+        im.userData.chunk = tint ? 'fog' : 1200; im.userData.chunkCell = 700; // Orte als Ganzes (sonst zu viele Aufrufe)
         this.scene.add(im);
       }
     }
@@ -1350,6 +1430,7 @@ export class Scenery {
     });
     im.computeBoundingSphere(); ih.computeBoundingSphere();
     im.castShadow = this.q >= 1;
+    im.userData.chunk = ih.userData.chunk = 500; im.userData.chunkCell = ih.userData.chunkCell = 400;
     this.scene.add(im, ih);
   }
 
@@ -1525,34 +1606,45 @@ export class Scenery {
     this.scene.add(im);
     this.grass = { im, max, cx: 1e9, cz: 1e9, R: this.q >= 4 ? 100 : this.q >= 3 ? 78 : 55, step: this.q >= 4 ? 1.2 : this.q >= 3 ? 1.35 : 1.6 };
   }
+  // Gras um die Kamera neu verteilen – in Häppchen von max. ~2 ms pro Bild (vorher ein Stück, das bei Tempo ruckelte)
   updateGrass(cam, t) {
     const G = this.grass;
     if (!G) return;
     this.grassU.uTime.value = t;
-    if (Math.hypot(cam.x - G.cx, cam.z - G.cz) < 14) return;
-    G.cx = cam.x; G.cz = cam.z;
     const W = this.world, R = G.R, st = G.step, im = G.im;
-    let n = 0;
-    const i0 = Math.floor((cam.x - R) / st), i1 = Math.ceil((cam.x + R) / st), j0 = Math.floor((cam.z - R) / st), j1 = Math.ceil((cam.z + R) / st);
-    for (let j = j0; j <= j1 && n < G.max; j++) for (let i = i0; i <= i1 && n < G.max; i++) {
-      let h = (Math.imul(i, 73856093) ^ Math.imul(j, 19349663)) >>> 0;
-      const rnd = () => { h ^= h << 13; h ^= h >>> 17; h ^= h << 5; return (h >>> 0) / 4294967296; };
-      const x = (i + rnd()) * st, z = (j + rnd()) * st;
-      const d = Math.hypot(x - cam.x, z - cam.z);
-      if (d > R || rnd() < d / R * 0.75) continue;
-      if (W.surfaceAt(x, z) !== 0 || W.edgeAt(x, z) < 1.5) continue;
-      const y = W.baseAt(x, z);
-      if (y < 2.6 || y > 120) continue;
-      const sc = (0.7 + rnd() * 0.8) * (1 - d / R * 0.35);
-      _m.compose(_p.set(x, y - 0.03, z), _q.setFromEuler(_e.set(0, rnd() * 6.28, 0)), _s.set(sc, sc * (0.8 + rnd() * 0.6), sc));
-      im.setMatrixAt(n, _m);
-      const v = 0.75 + rnd() * 0.45, dry = rnd() < 0.15 ? 0.25 : 0;
-      im.setColorAt(n, _c.setRGB(v + dry, v + dry * 0.6, v * (1 - dry)));
-      n++;
+    if (!G.job && Math.hypot(cam.x - G.cx, cam.z - G.cz) >= 14) {
+      G.cx = cam.x; G.cz = cam.z;
+      G.job = { x: cam.x, z: cam.z, i0: Math.floor((cam.x - R) / st), i1: Math.ceil((cam.x + R) / st), j: Math.floor((cam.z - R) / st), j1: Math.ceil((cam.z + R) / st), n: 0 };
     }
-    im.count = n;
+    const J = G.job;
+    if (!J) return;
+    const t0 = performance.now(), budget = G.first ? 2.2 : 1e9; // beim allerersten Mal alles auf einmal
+    G.first = true;
+    for (; J.j <= J.j1 && J.n < G.max; J.j++) {
+      const j = J.j;
+      for (let i = J.i0; i <= J.i1 && J.n < G.max; i++) {
+        let h = (Math.imul(i, 73856093) ^ Math.imul(j, 19349663)) >>> 0;
+        const rnd = () => { h ^= h << 13; h ^= h >>> 17; h ^= h << 5; return (h >>> 0) / 4294967296; };
+        const x = (i + rnd()) * st, z = (j + rnd()) * st;
+        const d = Math.hypot(x - J.x, z - J.z);
+        if (d > R || rnd() < d / R * 0.75) continue;
+        if (W.surfaceAt(x, z) !== 0 || W.edgeAt(x, z) < 1.5) continue;
+        const y = W.baseAt(x, z);
+        if (y < 2.6 || y > 120) continue;
+        const sc = (0.7 + rnd() * 0.8) * (1 - d / R * 0.35);
+        _m.compose(_p.set(x, y - 0.03, z), _q.setFromEuler(_e.set(0, rnd() * 6.28, 0)), _s.set(sc, sc * (0.8 + rnd() * 0.6), sc));
+        im.setMatrixAt(J.n, _m);
+        const v = 0.75 + rnd() * 0.45, dry = rnd() < 0.15 ? 0.25 : 0;
+        im.setColorAt(J.n, _c.setRGB(v + dry, v + dry * 0.6, v * (1 - dry)));
+        J.n++;
+      }
+      if (performance.now() - t0 > budget) { J.j++; break; }
+    }
+    const done = J.j > J.j1 || J.n >= G.max;
+    im.count = done ? J.n : Math.max(im.count, J.n);
     im.instanceMatrix.needsUpdate = true;
     if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    if (done) G.job = null;
   }
 
   // ---------- Zuschauer, Boote, Windräder
@@ -1743,6 +1835,16 @@ export class Scenery {
       const bs = im.boundingSphere;
       im.visible = Math.hypot(bs.center.x - camPos.x, bs.center.z - camPos.z) < fogFar + bs.radius;
     }
+    // geteilte Bündel: hinter Reichweite/Nebel aus; Gelände-Detailstufen (4× pro Sekunde reicht)
+    this._ccT = (this._ccT || 0) - dt;
+    if (this._ccT <= 0) this.updateTerrainLod(camPos);
+    if (this._ccT <= 0 && this.cullChunks) {
+      this._ccT = 0.25;
+      for (const im of this.cullChunks) {
+        const bs = im.boundingSphere, far = im.userData.chunk === 'fog' ? fogFar : Math.min(fogFar, im.userData.chunk);
+        im.visible = Math.hypot(bs.center.x - camPos.x, bs.center.z - camPos.z) < far + bs.radius;
+      }
+    }
     for (const im of this.smashChunks || []) {
       const bs = im.boundingSphere;
       im.visible = Math.hypot(bs.center.x - camPos.x, bs.center.z - camPos.z) < Math.min(fogFar, 700) + bs.radius;
@@ -1760,7 +1862,9 @@ export class Scenery {
     if (this.rotors) for (const r of this.rotors) r.rotation.z -= dt * 0.9;
     this.animBoats(t);
     // Festival
-    const nearFest = Math.hypot(camPos.x - FESTIVAL.x, camPos.z - FESTIVAL.z) < 700;
+    const dFest = Math.hypot(camPos.x - FESTIVAL.x, camPos.z - FESTIVAL.z), nearFest = dFest < 700;
+    // Zuschauer (~180.000 Dreiecke mit Schatten) nur in der Nähe zeichnen
+    for (const c of this.crowd || []) for (const m of c.meshes) m.visible = dFest < 520;
     if (this.wheelRot) {
       this.wheelRot.rotation.z += dt * 0.08;
       for (const g of this.gondolas) g.rotation.z = -this.wheelRot.rotation.z;

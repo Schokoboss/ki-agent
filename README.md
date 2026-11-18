@@ -114,7 +114,7 @@ offline spielbar). Veröffentlicht als eigener Ordner `spiele/nova-drive/` im Zw
 Lokal testen: `python -m http.server` im Ordner `app` und `http://localhost:8000/spiele/nova-drive/` öffnen.
 Automodelle neu bauen: `python werkstatt/autos.py -- ../models` (braucht Blender bzw. `pip install bpy`), danach
 mit `gltf-transform meshopt` komprimieren (je Auto `<id>.glb` voll, `<id>_mid.glb` für Gegner, `<id>_lod.glb`).
-Vorschau aller Modelle: `werkstatt/vorschau.html?cars=sundog,atlas` (16 Autos, Navigation über die Karte).
+Vorschau aller Modelle: `werkstatt/vorschau.html?cars=sundog,atlas` (21 Autos, Navigation über die Karte).
 Foto-Texturen (Poly Haven, CC0) neu laden: `python werkstatt/texturen.py` → `models/tex/` (Quellen in `QUELLEN.txt`);
 fotografierte Felsen und Unterholz: `python werkstatt/felsen.py` → `models/welt/prock_*.glb`, `pv_*.glb`;
 HD-Paket (2K + Rauheit): `python werkstatt/texturen.py --hd` → `models/tex-hd/`; Einzeldatei mit HD: `node werkstatt/handy-datei.mjs --hd` → `NovaDrive-HD.html` (~29 MB).
@@ -125,6 +125,9 @@ Maus zum Umsehen/Zoomen, Gamepad auch im Menü, Tastenhilfe (H). Alle Tasten ste
 **Grafik Hyper ✦** (über Ultra): GTAO-Umgebungsverdeckung, Echtzeit-Spiegelungen am eigenen Auto, Supersampling,
 mehr Gras/Detail/Sichtweite – für starke GPUs (`lib/postprocessing/GTAOPass.js` aus three.js r170, MIT).
 Kino & Zeit (`js/cine.js`): Kamerafahrt vor dem Rennen, Wiederholung mit TV-Kameras, Zurückspulen (Q/⌫/⏪ halten).
+**Leistung**: Grafik „Auto“ rät die Stufe aus dem Grafikchip (`guessQuality` in `js/main.js`) und lernt nach unten
+(`settings.autoLevel`); Laufzeit-Regelung `perf()`/`setFx()`; Gelände-Detailstufen `updateTerrainLod`, Kacheln für feste
+Instanz-Bündel `chunkStatic` (`js/world.js`). Messskripte: Zeichenaufrufe/Dreiecke je Ort mit `renderer.info`.
 **Mehrspieler** (`js/net.js`): Räume mit 5-stelligem Code über MQTT/WebSocket (öffentlicher Dienst HiveMQ, Ersatz EMQX;
 zum Testen `index.html?broker=ws://localhost:PORT/mqtt`). **Lenkrad**: USB-Lenkrad mit Einrichtungs-Assistent
 (Einstellungen → USB-Lenkrad), am Handy Touch-Lenkrad als Lenkart.

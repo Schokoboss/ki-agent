@@ -39,12 +39,19 @@ STYLES = {
     'buggy': dict(L=3.6, W=1.86, clr=0.46, belt=0.96, nose=0.8, tail=0.96, hood=1.0, ws=0.01, roof=0.0, rear=0.0, H=0.97, wR=0.42, wb=2.3, tireW=0.34, rim='beadlock', flare=0.02),
     'wedge': dict(L=4.42, W=1.96, clr=0.22, belt=0.78, nose=0.48, tail=0.95, hood=1.25, ws=1.1, roof=0.55, rear=1.2, H=1.08, wR=0.35, wb=2.55, tireW=0.3, rim='dish', flare=0.06),
     'rally80': dict(L=4.05, W=1.86, clr=0.38, belt=1.0, nose=0.88, tail=0.98, hood=1.12, ws=0.6, roof=1.45, rear=0.55, H=1.48, wR=0.35, wb=2.45, tireW=0.27, rim='dish', flare=0.08),
+    # dritte Runde: Sport-Coupé, Limousine, Langstrecken-Prototyp, Würfel-Stadtwagen, Cabrio
+    'coupe': dict(L=4.38, W=1.86, clr=0.26, belt=0.9, nose=0.66, tail=0.92, hood=1.5, ws=0.8, roof=0.72, rear=1.12, H=1.3, wR=0.34, wb=2.62, tireW=0.27, rim='spoke5', flare=0.06),
+    'sedan': dict(L=4.88, W=1.86, clr=0.28, belt=0.99, nose=0.76, tail=0.99, hood=1.38, ws=0.78, roof=1.5, rear=0.52, H=1.46, wR=0.35, wb=2.9, tireW=0.25, rim='multi', flare=0.03),
+    'proto': dict(L=4.95, W=2.02, clr=0.19, belt=0.76, nose=0.42, tail=0.94, hood=1.12, ws=1.0, roof=0.58, rear=1.55, H=1.06, wR=0.36, wb=2.95, tireW=0.32, rim='multi', flare=0.13),
+    'kei': dict(L=3.3, W=1.62, clr=0.22, belt=0.96, nose=0.86, tail=1.0, hood=0.42, ws=0.52, roof=1.98, rear=0.08, H=1.72, wR=0.28, wb=2.25, tireW=0.2, rim='steel', flare=0.01),
+    'cabrio': dict(L=4.7, W=1.9, clr=0.26, belt=0.9, nose=0.68, tail=0.9, hood=1.7, ws=0.01, roof=0.0, rear=0.0, H=0.91, wR=0.35, wb=2.78, tireW=0.27, rim='spoke5', flare=0.04),
 }
 CARS = [('kestrel', 'hatch'), ('tundra', 'truck'), ('velora', 'roadster'), ('ostwind', 'rally'),
         ('brenner', 'muscle'), ('aurum', 'gt'), ('volt', 'ev'), ('phantom', 'hyper'),
         ('sundog', 'van'), ('atlas', 'suv'), ('pixie', 'mini'), ('nordwind', 'wagon'),
-        ('vira', 'classic'), ('dune', 'buggy'), ('strato', 'wedge'), ('gruppo', 'rally80')]
-OPEN = ('roadster', 'buggy')
+        ('vira', 'classic'), ('dune', 'buggy'), ('strato', 'wedge'), ('gruppo', 'rally80'),
+        ('lumen', 'coupe'), ('regent', 'sedan'), ('vortex', 'proto'), ('kubo', 'kei'), ('zephyra', 'cabrio')]
+OPEN = ('roadster', 'buggy', 'cabrio')
 
 RX = Matrix.Rotation(math.radians(90), 4, 'X')  # Spiel → Blender
 
@@ -233,7 +240,7 @@ def build_body(S, style, M, level=2):
     stations = [-L / 2 + L * (1 - math.cos(math.pi * i / (N - 1))) / 2 for i in range(N)]
     # Türfugen: je zwei eng beieinander liegende Stützstellen → dünne dunkle Linie
     seams = [] if style in OPEN else [sh.zWs - 0.03, sh.zRR + (0.12 if style not in ('van',) else 0.9)]
-    if style in ('wagon', 'suv', 'van'):
+    if style in ('wagon', 'suv', 'van', 'sedan', 'kei'):
         seams.append((sh.zRF + sh.zRR) / 2 - 0.05)
     for z in seams:
         stations += [z, z + 0.022]
@@ -279,7 +286,7 @@ def build_body(S, style, M, level=2):
     for nm in ['paint', 'glass', 'trim', 'chrome', 'accent']:
         me.materials.append(M[nm])
     mid_roof = (sh.zRR + sh.zRF) / 2
-    shiny = style in ('classic', 'wagon', 'gt', 'van')
+    shiny = style in ('classic', 'wagon', 'gt', 'van', 'sedan')
     nr = len(rings)
     nh = len(sh.section(0.0))  # Punkte im halben Profil
 
@@ -317,7 +324,7 @@ def build_body(S, style, M, level=2):
             elif k == 3:
                 idx = 0  # Dachkante / A- und C-Säule als gleichmäßiges Band
             else:
-                idx = (4 if style in ('mini', 'van') else 0) if roofzone else 1
+                idx = (4 if style in ('mini', 'van', 'kei') else 0) if roofzone else 1
         elif (h < S['clr'] + 0.11 and abs(p.normal.y) < 0.4 and abs(s) < L / 2 - 0.3) or p.normal.z < -0.75:
             idx = 2  # dunkle Unterkante nur an Seiten/Unterboden, nicht quer über Front/Heck
         elif any(z < s < z + 0.02 for z in gaps_top) and h > Bv - 0.07 and abs(x) < sh.hw(s) * 0.86:
@@ -394,7 +401,7 @@ def details(S, style, sh, M, full=False, body=None):
     sH = fz - 0.12
     hH = sh.T(sH) - 0.06
     slope = math.atan2(sh.T(sH + 0.05) - sh.T(sH - 0.05), 0.1)
-    if style in ('ev', 'hyper'):
+    if style in ('ev', 'hyper', 'proto'):
         add(box((0, hH + 0.01, sH + 0.02), (W * 0.84, 0.045, 0.1), M['head'], (slope * 0.5, 0, 0), 0.015))
         add(box((0, sh.T(-fz + 0.1) - 0.08, -fz + 0.08), (W * 0.9, 0.06, 0.08), M['tail'], (0, 0, 0), 0.015))
     else:
@@ -404,7 +411,7 @@ def details(S, style, sh, M, full=False, body=None):
             elif style == 'muscle':
                 for k in (0, 1):
                     add(cyl((sx * (sh.hw(sH) - 0.22 - k * 0.22), hH - 0.08, fz - 0.06), 0.085, 0.06, M['head'], (math.pi / 2, 0, 0), 16))
-            elif style in ('van', 'mini', 'classic', 'buggy', 'rally80'):
+            elif style in ('van', 'mini', 'classic', 'buggy', 'rally80', 'kei'):
                 rx = sh.hw(sH) - (0.28 if style != 'mini' else 0.24)
                 hz = fmax((sx * (rx - 0.1), sx * rx, sx * (rx + 0.1)), (hH - 0.13, hH - 0.03, hH + 0.07))
                 add(cyl((sx * rx, hH - 0.03, hz - 0.03), 0.105, 0.1, M['head'], (math.pi / 2, 0, 0), 20))
@@ -426,7 +433,7 @@ def details(S, style, sh, M, full=False, body=None):
             add(box((tx, ty, bz + 0.035), (0.49, 0.125, 0.07), M['trim'], (0, -sx * 0.15, 0), 0.02))
             add(box((tx, ty + 0.008, bz + 0.03), (0.44, 0.085, 0.08), M['tail'], (0, -sx * 0.15, 0), 0.02))
             add(box((tx - sx * 0.16, ty - 0.03, bz + 0.03), (0.1, 0.03, 0.081), M['head'], (0, -sx * 0.15, 0), 0.008))
-        if style in ('gt', 'hatch', 'suv', 'wagon', 'wedge', 'rally80'):
+        if style in ('gt', 'hatch', 'suv', 'wagon', 'wedge', 'rally80', 'sedan', 'coupe'):
             sT = -fz + 0.07
             ty = sh.T(sT) - 0.1
             bz = bmin((-0.3, 0, 0.3), (ty - 0.01, ty + 0.01))
@@ -459,9 +466,9 @@ def details(S, style, sh, M, full=False, body=None):
     for sx in (1, -1):
         add(box((sx * (W / 2 - 0.1), S['clr'] + 0.07, 0), (0.08, 0.1, S['wb'] - S['wR'] * 2 - 0.3), M['trim'], (0, 0, 0), 0.02))
     # Auspuff
-    ex = [-0.48, 0.48] if style in ('gt', 'muscle', 'hyper') else [0.5]
+    ex = [-0.48, 0.48] if style in ('gt', 'muscle', 'hyper', 'coupe', 'proto') else [0.5]
     if style != 'ev':
-        er = 0.062 if style in ('gt', 'muscle', 'hyper', 'wedge') else 0.05
+        er = 0.062 if style in ('gt', 'muscle', 'hyper', 'wedge', 'coupe', 'proto') else 0.05
         for x in ex:
             add(cyl((x, S['clr'] + 0.09, -fz + 0.02), er, 0.22, M['chrome'], (math.pi / 2, 0, 0), 20))
             add(cyl((x, S['clr'] + 0.09, -fz - 0.075), er * 0.72, 0.04, M['trim'], (math.pi / 2, 0, 0), 16))
@@ -644,7 +651,72 @@ def details(S, style, sh, M, full=False, body=None):
             a = 0.75 if sz > 0 else -0.75  # vorne hinten oben, hinten vorne oben
             add(box((sx * (wx - 0.005), S['wR'] + math.cos(a) * rr * 0.62, cz - math.sin(a) * rr * 0.62), (0.075, rr * 0.36, rr * 0.3), M['caliper'], (-a, 0, 0), 0.02))
             add(liner(sx, cz))
-    if style in ('gt', 'hyper', 'wedge', 'muscle', 'ev'):
+    if style == 'coupe':
+        # Abrisskante am Heck, Lüftungsschlitze auf der Haube, Kiemen hinter den Vorderrädern
+        add(box((0, S['tail'] + 0.04, -fz + 0.16), (W * 0.8, 0.04, 0.2), M['paint'], (-0.3, 0, 0), 0.012))
+        for sx in (1, -1):
+            hz = sh.zWs + 0.55
+            add(box((sx * 0.32, sh.T(hz) + 0.012, hz), (0.22, 0.02, 0.36), M['trim'], (-0.05, 0, 0), 0.006))
+            gx, gy, gz = sx * (sh.hw(0.55) + sh.flare(0.55) * 0.3), sh.Bl(0.55) - 0.22, 0.55
+            for k in (-0.05, 0.0, 0.05):
+                add(box((gx, gy + k, gz), (0.03, 0.018, 0.34), M['trim'], (0, 0, 0), 0.004))
+    if style == 'sedan':
+        # kleine Lippe auf dem Kofferraum, Chromleiste unter den Fenstern, Haifischflossen-Antenne
+        add(box((0, S['tail'] + 0.025, -fz + 0.2), (W * 0.62, 0.025, 0.12), M['paint'], (-0.2, 0, 0), 0.01))
+        for sx in (1, -1):
+            add(box((sx * (sh.hw(0) * 0.985), sh.Bl(0) + 0.015, (sh.zWs + sh.zRear) / 2), (0.015, 0.02, sh.zWs - sh.zRear - 0.3), M['chrome'], (0, 0, 0), 0.004))
+        add(ball((0, S['H'] + 0.04, sh.zRR + 0.18), (0.07, 0.07, 0.2), M['paint']))
+    if style == 'proto':
+        # Langstrecken-Prototyp: Haifischflosse, großer Flügel mit Endplatten, Seitenkästen, Dach-Lufthutze
+        # Flosse in 5 Stufen: sitzt auf dem Heckdeck, Oberkante läuft vom Dach sanft zum Flügel
+        zf0, zf1 = sh.zRR + 0.05, -fz + 0.5
+        top0, top1 = S['H'] + 0.02, S['tail'] + 0.36
+        for k in range(5):
+            za, zb = zf0 + (zf1 - zf0) * k / 5, zf0 + (zf1 - zf0) * (k + 1) / 5
+            zm = (za + zb) / 2
+            top = top0 + (top1 - top0) * (k + 0.5) / 5
+            bot = sh.T(zm) - 0.03
+            if top - bot > 0.03:
+                add(box((0, (top + bot) / 2, zm), (0.02, top - bot, abs(zb - za) + 0.01), M['paint'], (0, 0, 0), 0.006))
+        sW = -fz + 0.32
+        add(ball((0, S['tail'] + 0.48, sW), (W * 1.0, 0.06, 0.46), M['paint'], (0.12, 0, 0)))
+        add(box((0, S['tail'] + 0.5, sW - 0.22), (W * 0.94, 0.03, 0.012), M['trim'], (0, 0, 0), 0.003))
+        for sx in (1, -1):
+            add(box((sx * W * 0.5, S['tail'] + 0.4, sW), (0.016, 0.34, 0.56), M['paint'], (0, 0, 0), 0.004))
+            add(box((sx * 0.38, S['tail'] + 0.24, sW + 0.06), (0.035, 0.4, 0.12), M['trim'], (-0.15, 0, 0), 0.01))
+            add(box((sx * (sh.hw(-0.1) - 0.02), sh.Bl(-0.1) - 0.2, -0.1), (0.07, 0.26, 0.9), M['trim'], (0, sx * 0.1, 0), 0.02))
+        zs = (sh.zRF + sh.zRR) / 2 - 0.05
+        add(ball((0, S['H'] + 0.05, zs), (0.3, 0.16, 0.6), M['paint']))
+        add(ball((0, S['H'] + 0.08, zs + 0.26), (0.2, 0.08, 0.05), M['trim']))
+        add(box((0, S['clr'] + 0.05, -fz + 0.2), (W * 0.82, 0.16, 0.4), M['trim'], (0.35, 0, 0), 0.01))
+        add(box((0, S['clr'] + 0.02, fz - 0.22), (W * 0.92, 0.025, 0.3), M['trim'], (0, 0, 0), 0.006))
+    if style == 'kei':
+        # Würfel-Stadtwagen: Dachreling, Stoßfänger-Leisten, große Spiegel stehen schon
+        for sx in (1, -1):
+            rail(sx * W * 0.36, sh.zRF - 0.1, sh.zRR + 0.1, M['trim'], 0.06)
+        add(box((0, S['clr'] + 0.16, fz - 0.03), (W * 0.9, 0.12, 0.08), M['trim'], (0, 0, 0), 0.03))
+        add(box((0, S['clr'] + 0.16, -fz + 0.03), (W * 0.9, 0.12, 0.08), M['trim'], (0, 0, 0), 0.03))
+        add(box((0, S['H'] - 0.03, sh.zRR - 0.03), (W * 0.6, 0.03, 0.1), M['paint'], (-0.3, 0, 0), 0.01))
+    if style == 'cabrio':
+        # offener Viersitzer: Innenraum, zwei Sitzreihen, Windschutzscheibe mit Rahmen, Überrollbügel-Verkleidung
+        zc = sh.zWs - 1.15
+        add(box((0, S['belt'] + 0.005, zc), (W * 0.76, 0.04, 2.0), M['interior'], (0, 0, 0), 0.05))
+        for sx in (-0.4, 0.4):
+            for zz, hk in ((zc + 0.45, 1.0), (zc - 0.5, 0.85)):
+                add(box((sx, S['belt'] + 0.2 * hk, zz - 0.25), (0.48, 0.48 * hk, 0.12), M['interior'], (0.18, 0, 0), 0.05))
+                add(box((sx, S['belt'] + 0.05, zz), (0.46, 0.12, 0.48), M['interior'], (0, 0, 0), 0.04))
+            add(ball((sx, S['belt'] + 0.1, zc - 0.95), (0.42, 0.22, 0.4), M['paint']))
+        bpy.ops.mesh.primitive_torus_add(major_radius=0.2, minor_radius=0.028, major_segments=16, minor_segments=6)
+        t = active()
+        place(t, (0.4, S['belt'] + 0.1, zc + 0.68), (math.pi / 2 - 0.3, 0, 0))
+        add(finish(t, M['dash'], 0, 2, True))
+        add(box((0, S['belt'] + 0.02, sh.zWs - 0.28), (W * 0.82, 0.12, 0.3), M['dash'], (0.1, 0, 0), 0.03))
+        add(box((0, S['belt'] + 0.22, sh.zWs - 0.1), (W * 0.84, 0.42, 0.025), M['glass'], (-0.62, 0, 0), 0.01))
+        add(box((0, S['belt'] + 0.43, sh.zWs - 0.22), (W * 0.86, 0.03, 0.045), M['chrome'], (-0.62, 0, 0), 0.006))
+        for sx in (1, -1):
+            add(box((sx * W * 0.43, S['belt'] + 0.21, sh.zWs - 0.1), (0.03, 0.44, 0.04), M['chrome'], (-0.62, 0, 0), 0.006))
+        add(box((0, S['tail'] + 0.02, -fz + 0.22), (W * 0.7, 0.03, 0.16), M['paint'], (-0.12, 0, 0), 0.01))
+    if style in ('gt', 'hyper', 'wedge', 'muscle', 'ev', 'coupe', 'proto'):
         for x in (-0.42, -0.21, 0.0, 0.21, 0.42):
             add(box((x, S['clr'] - 0.02, -fz + 0.2), (0.014, 0.1, 0.32), M['trim'], (0, 0, 0), 0.003))
     # ---- für alle geschlossenen Autos: Türgriffe, Embleme
