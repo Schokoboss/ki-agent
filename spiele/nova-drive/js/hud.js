@@ -248,8 +248,8 @@ export class HUD {
     if (!name) { z.hidden = true; return; }
     z.hidden = false; $('zone-name').textContent = name; $('zone-score').textContent = '0';
   }
-  zoneScore(v, stars) {
-    $('zone-score').textContent = fmtNum(v);
+  zoneScore(v, stars, unit = '') {
+    $('zone-score').textContent = fmtNum(v) + unit;
     $('zone-stars').textContent = [0, 1, 2].map(i => (v >= stars[i] ? '★' : '☆')).join('');
   }
   prompt(ev) {

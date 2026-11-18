@@ -347,6 +347,11 @@ html.land.h520 #res-reward { font-size: 14px; }
 html.h430 .logo.big { font-size: 54px; }
 html.h430 .menu { margin-top: 10px; gap: 6px; }
 html.h430 .menu .btn { min-height: 40px; padding: 8px 14px; font-size: 15px; }
+/* niedrige Bildschirme (Handy quer): Titelmenü zweispaltig, „Fahren“ über die volle Breite; notfalls scrollbar */
+html.h520 .menu { display: grid; grid-template-columns: 1fr 1fr; width: 430px; gap: 7px; margin-top: 10px; }
+html.h520 .menu #t-drive { grid-column: 1 / -1; }
+html.h520 .menu .btn { min-height: 38px; padding: 7px 12px; font-size: 14.5px; }
+html.h520 .title-box { max-height: 100%; overflow-y: auto; }
 html.h430 .panel { padding: 12px; gap: 6px; }
 html.h430 .panel h2 { font-size: 20px; }
 html.h430 #res-title { font-size: 30px; }

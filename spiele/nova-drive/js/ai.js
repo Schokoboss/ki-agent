@@ -137,6 +137,8 @@ const TRAFFIC_STYLES = [
   { style: 'mini', colors: ['#d7263d', '#2a9d8f', '#e9c46a', '#264653'] },
   { style: 'wagon', colors: ['#3d405b', '#ecf0f1', '#81b29a', '#7f8c8d'] },
   { style: 'classic', colors: ['#9b1d20', '#1b3a5c', '#f1e3c8', '#3d6b3a'] },
+  { style: 'sedan', colors: ['#22232a', '#8d99ae', '#ecf0f1', '#1d3557'] },
+  { style: 'kei', colors: ['#f2c14e', '#7bc47f', '#5fa8d3', '#ecf0f1'] },
 ];
 
 export class Traffic {
@@ -150,7 +152,12 @@ export class Traffic {
     for (const r of roads) this.prof.set(r.id, speedProfile(r.path, 22, 3.2, 3, null, 1));
     for (let i = 0; i < count; i++) {
       const T = TRAFFIC_STYLES[i % TRAFFIC_STYLES.length];
-      const model = buildCar({ style: T.style }, T.colors[Math.floor(rnd() * T.colors.length)], { lod: true });
+      // nah: mittleres Modell (ab „Hoch“), weiter weg: einfaches LOD – gleiche Farbe, Wechsel bei 70 m
+      const color = T.colors[Math.floor(rnd() * T.colors.length)];
+      const model = new THREE.Group(), near = buildCar({ style: T.style }, color, { lod: true }), far = buildCar({ style: T.style }, color, { lod: 'far' });
+      model.add(near);
+      if (far && far.children.length && far.userData.lodKind !== near.userData.lodKind) model.add(far); else model.userData.single = true;
+      model.userData.near = near; model.userData.far = far;
       scene.add(model);
       const d = styleDims(T.style);
       const c = { model, road: null, s: 0, dir: 1, speed: 15, cruise: 14 + rnd() * 8, pos: new THREE.Vector3(), yaw: 0, half: (d.L / 2 - d.W / 2) * 0.85, rad: d.W / 2 * 0.95, vx: 0, vz: 0, hit: 0, lat: 0 };
@@ -193,6 +200,7 @@ export class Traffic {
       if (!c.road) { this.spawn(c, player.pos.x, player.pos.z, false); continue; }
       const d = Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z);
       if (d > 560) { this.spawn(c, player.pos.x, player.pos.z, true); continue; }
+      if (!c.model.userData.single) { const near = d < 70; c.model.userData.near.visible = near; c.model.userData.far.visible = !near; }
       const path = c.road.path, prof = this.prof.get(c.road.id);
       const i = path.idx(Math.round(path.wrapS(c.s) / path.ds));
       let vT = Math.min(c.cruise, prof[i]);

@@ -27,8 +27,9 @@ Dann läuft das Spiel auch unter  http://localhost:8765/spiele/nova-drive/
 Steuerung Handy: ◀ ▶ lenken, ▲ Gas, ▼ Bremse, HB Handbremse (driften), N₂O Nitro, ⏪ halten = zurückspulen.
 Vor jedem Rennen gibt es eine Kamerafahrt (Gas oder „Überspringen“), nach dem Ziel eine Wiederholung.
 
-Grafik: Einstellungen → Grafik. „Hyper ✦“ ist die höchste Stufe (Spiegelungen, Schattierung, mehr Detail)
-– für starke Grafikkarten. Wird beim nächsten Start aktiv.
+Grafik: Einstellungen → Grafik. „Auto“ (empfohlen) wählt die Stufe passend zum Gerät und regelt beim Fahren selbst
+nach (erst Auflösung, dann Effekte). Ruckelt es dauerhaft, startet das Spiel beim nächsten Mal eine Stufe niedriger.
+„Hyper ✦“ ist die höchste Stufe (Spiegelungen, Schattierung, mehr Detail) – für starke Grafikkarten.
 „HD-Texturen“ (Auto/An/Aus) lädt schärfere 2K-Oberflächen – nur über den Starter bzw. die Webseite, nicht in der
 Einzeldatei. Einmal geladen, läuft das Spiel auch offline weiter.
 
@@ -59,3 +60,9 @@ Lenkrad
   Einschlag gibt (½ ist ein guter Start; bei 900°-Lenkrädern ⅓). Options-Knopf = Pause.
   Force-Feedback gibt es im Browser leider nicht.
   Am Handy: Einstellungen → Lenkung → „Lenkrad“ – Touch-Lenkrad unten links, am Kranz greifen und drehen.
+
+Neu: Tempozonen und Scheunenfunde
+---------------------------------
+  Tempozone (⏱ auf der Karte): an der Lichtsäule durchfahren, dann zählt der Schnitt bis zum Ziel.
+  Scheunenfunde: Auf der Insel stehen vor vier Scheunen vergessene Autos. In der Nähe kommt ein Gerücht im Radio –
+  langsam vors Scheunentor fahren, dann steht das Auto in deiner Garage (Karte zeigt „?“ und gefundene Orte).

@@ -52,7 +52,10 @@ class Game {
     this.orbit = { yaw: 0, pitch: 0, zoom: 1, drag: false, t: 0 };
     this.tm = new TimeMachine(); this.replay = null; this.rewinding = false;
     // „Auto“ = Hyper (GPU-lastig); die dynamische Auflösung fängt schwächere Geräte ab, bei Dauer-Ruckeln kommt ein Tipp
-    this.quality = this.settings.quality === 'auto' ? 4 : +this.settings.quality;
+    // „Auto“: Stufe nach Gerät/Grafikchip; läuft es dauerhaft zu langsam, merkt sich das Spiel eine niedrigere (autoLevel)
+    this.autoQ = this.settings.quality === 'auto';
+    this.quality = this.autoQ ? (Number.isFinite(this.settings.autoLevel) ? this.settings.autoLevel : guessQuality(mobile)) : +this.settings.quality;
+    this.fx = 0; // Effekt-Stufe der Laufzeit-Regelung (0 = alles an)
     this.state = 'loading';
     this.screen = null;
     this.camMode = this.settings.cam || 0;
@@ -83,7 +86,9 @@ class Game {
     await frame();
     const R = this.renderer = new THREE.WebGLRenderer({ canvas: $('c'), antialias: this.quality === 2, powerPreference: 'high-performance' });
     // Hyper rendert am PC mindestens 1,5-fach (Supersampling); die dynamische Auflösung regelt bei Bedarf herunter
-    this.maxPR = this.quality >= 4 ? Math.min(3, Math.max(1.5, window.devicePixelRatio || 1))
+    const dpr = window.devicePixelRatio || 1;
+    this.maxPR = this.mobile ? Math.min(dpr, [0.85, 1, 1.25, 1.5, 1.75][this.quality])
+      : this.quality >= 4 ? Math.min(3, Math.max(1.5, dpr))
       : Math.min(window.devicePixelRatio || 1, this.quality >= 3 ? 3 : this.quality >= 2 ? 2 : this.quality >= 1 ? 1.5 : 1);
     this.pr = this.maxPR;
     R.setPixelRatio(this.pr);
@@ -92,7 +97,7 @@ class Game {
     R.toneMappingExposure = 1.05;
     R.outputColorSpace = THREE.SRGBColorSpace;
     R.shadowMap.enabled = this.quality >= 1;
-    R.shadowMap.type = this.quality >= 3 ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+    R.shadowMap.type = this.quality >= 3 && !this.mobile ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(62, view.w / view.h, 0.3, 3000);
     const aniso = Math.min(16, R.capabilities.getMaxAnisotropy());
@@ -115,6 +120,7 @@ class Game {
     await loadTreeImpostors(this.T, aniso, modelUrl);
     setCarDetail(this.quality);
     this.scenery = new Scenery(this.scene, this.world, this.T, this.quality);
+    this.scenery.mobile = this.mobile;
     await this.scenery.buildAsync(sec(0.5, 0.78));
     this.makeEnv();
     if (this.quality >= 3) this.setupComposer();
@@ -238,7 +244,7 @@ class Game {
   setupComposer() {
     const R = this.renderer;
     const hdr = R.extensions.has('EXT_color_buffer_half_float') || R.extensions.has('EXT_color_buffer_float');
-    const rt = new THREE.WebGLRenderTarget(view.w * this.pr, view.h * this.pr, { type: hdr ? THREE.HalfFloatType : THREE.UnsignedByteType, samples: 4 });
+    const rt = new THREE.WebGLRenderTarget(view.w * this.pr, view.h * this.pr, { type: hdr ? THREE.HalfFloatType : THREE.UnsignedByteType, samples: this.mobile ? 2 : 4 });
     const c = this.composer = new EffectComposer(R, rt);
     c.addPass(new RenderPass(this.scene, this.camera));
     // Schutzfilter: ungültige Pixel (NaN/Unendlich) durch Schwarz ersetzen und extreme Helligkeit begrenzen,
@@ -257,6 +263,9 @@ class Game {
       ao.updateGtaoMaterial({ radius: 1.6, distanceExponent: 1.2, thickness: 1.5, scale: 1.1, samples: 12, distanceFallOff: 1, screenSpaceRadius: false });
       ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 5, rings: 2, samples: 12 });
       ao.blendIntensity = 0.85;
+      // halbe Auflösung reicht für weiche Verdeckung (ein Viertel der Pixel)
+      const aoSize = ao.setSize.bind(ao);
+      ao.setSize = (w, h) => aoSize(Math.max(1, Math.ceil(w / 2)), Math.max(1, Math.ceil(h / 2)));
       // nur feste Flächen mit Normalen zählen: Sprites (Wolken, Symbole), Durchsichtiges und Flächen ohne Normalen
       // (Bremsspuren, Partikel) würden sonst ungültige Werte liefern, die die Rauschfilterung übers Bild schmiert
       ao.overrideVisibility = function () {
@@ -373,17 +382,31 @@ class Game {
     this.reflModel = model;
   }
   updateReflections() {
-    if (!this.cubeCam) return;
+    if (!this.cubeCam || (this.fx >= 1 && this.reflEnv)) return; // Laufzeit-Regelung: Spiegelbild einfrieren
     const garage = this.state === 'garage' && this.previewModel;
     const tgt = garage ? this.previewModel : this.carModel;
-    if (!tgt || !tgt.visible || (++this.cubeN % 2 && this.reflEnv)) return;
+    if (!tgt || !tgt.visible) return;
     const R = this.renderer, au = R.shadowMap.autoUpdate, grass = this.scenery.grass && this.scenery.grass.im;
     const gv = grass ? grass.visible : false;
     tgt.visible = false; if (grass) grass.visible = false; R.shadowMap.autoUpdate = false;
-    this.cubeCam.position.set(tgt.position.x, tgt.position.y + 0.9, tgt.position.z);
-    this.cubeCam.updateMatrixWorld();
-    this.cubeCam.update(R, this.scene);
-    this.reflEnv = this.reflGen.fromCubemap(this.cubeRT.texture, this.reflEnv);
+    if (!this.reflEnv) {
+      // erstes Mal: alle sechs Seiten auf einmal
+      this.cubeCam.position.set(tgt.position.x, tgt.position.y + 0.9, tgt.position.z);
+      this.cubeCam.updateMatrixWorld();
+      this.cubeCam.update(R, this.scene);
+      this.reflEnv = this.reflGen.fromCubemap(this.cubeRT.texture, this.reflEnv);
+    } else {
+      // danach eine Seite pro Bild (6× günstiger), Unschärfe-Karte nach der sechsten neu
+      const face = this.cubeN++ % 6;
+      if (face === 0) { this.cubeCam.position.set(tgt.position.x, tgt.position.y + 0.9, tgt.position.z); this.cubeCam.updateMatrixWorld(); }
+      const prev = R.getRenderTarget(), tex = this.cubeRT.texture, mip = tex.generateMipmaps;
+      tex.generateMipmaps = face === 5 && mip;
+      R.setRenderTarget(this.cubeRT, face);
+      R.render(this.scene, this.cubeCam.children[face]);
+      tex.generateMipmaps = mip;
+      R.setRenderTarget(prev);
+      if (face === 5) this.reflEnv = this.reflGen.fromCubemap(tex, this.reflEnv);
+    }
     tgt.visible = true; if (grass) grass.visible = gv; R.shadowMap.autoUpdate = au;
     if (this.reflModel !== tgt) this.applyReflections(tgt);
   }
@@ -554,7 +577,7 @@ class Game {
       ['Festival-Level', lv.level], ['Fans', fmtNum(this.save.fans)], ['Credits', fmtNum(this.save.credits) + ' CR'], ['Insgesamt verdient', fmtNum(st.earned) + ' CR'],
       ['Gefahren', st.km.toFixed(1) + ' km'], ['Rennen / Siege', `${st.races} / ${st.wins}`], ['Höchsttempo', st.top + ' km/h'], ['Beste Skill-Kette', fmtNum(st.bestChain)],
       ['Knapp vorbei', st.near], ['Zerstört', st.smashed], ['Plakate', `${this.save.posters.length} / 20`], ['Sterne', `${stars} / ${this.events.list.length * 3}`],
-      ['Autos', `${Object.keys(this.save.owned).length} / ${CARS.length}`], ['Glücksrad gedreht', st.spins],
+      ['Autos', `${Object.keys(this.save.owned).length} / ${CARS.length}`], ['Scheunenfunde', `${(this.save.barns || []).length} / ${this.events.barns.length}`], ['Glücksrad gedreht', st.spins],
     ];
     $('d-stats').innerHTML = rows.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
   }
@@ -1145,10 +1168,19 @@ class Game {
         g.fillStyle = EVENT_COLORS[ev.type]; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
         g.strokeStyle = '#fff'; g.lineWidth = 2.5; g.stroke();
         g.fillStyle = '#fff'; g.font = `${r}px sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
-        g.fillText({ race: '🏁', trap: '📷', drift: '〰', jump: '⚠' }[ev.type], x, y + 1);
+        g.fillText({ race: '🏁', trap: '📷', drift: '〰', jump: '⚠', speed: '⏱' }[ev.type], x, y + 1);
         const st = this.save.stars[ev.id] || 0;
         if (st) { g.fillStyle = '#ffd23f'; g.font = '700 10px sans-serif'; g.fillText('★'.repeat(st), x, y + r + 8); }
         this.mapHits.push({ ev, x, y });
+      }
+      // Scheunenfunde: gefunden = Scheune, gehört (Gerücht) = Fragezeichen
+      for (const f of this.events.barns) {
+        if (!f.found && !f.hinted) continue;
+        const [x, y] = P(f.x, f.z);
+        g.fillStyle = f.found ? '#8a5a3c' : 'rgba(255,210,63,.85)'; g.beginPath(); g.arc(x, y, 8, 0, 7); g.fill();
+        g.strokeStyle = '#fff'; g.lineWidth = 2; g.stroke();
+        g.fillStyle = '#fff'; g.font = '700 10px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText(f.found ? '✓' : '?', x, y + 1);
       }
       if (this.nav) {
         g.strokeStyle = '#1fe0ff'; g.lineWidth = 4; g.lineJoin = 'round'; g.beginPath();
@@ -1186,14 +1218,15 @@ class Game {
     if (ev.type === 'trap') info = `Ziel: ${ev.stars.join(' / ')} km/h${best ? ' · Rekord ' + best + ' km/h' : ''}`;
     if (ev.type === 'drift') info = `Ziel: ${ev.stars.map(fmtNum).join(' / ')} Punkte${best ? ' · Rekord ' + fmtNum(best) : ''}`;
     if (ev.type === 'jump') info = `Ziel: ${ev.stars.join(' / ')} m${best ? ' · Rekord ' + best + ' m' : ''}`;
+    if (ev.type === 'speed') info = `Schnitt: ${ev.stars.join(' / ')} km/h · ${((ev.to - ev.at) * ev.path.length / 1000).toFixed(1)} km${best ? ' · Rekord ' + best + ' km/h' : ''}`;
     $('mi-info').textContent = info;
     $('mi-stars').textContent = '★★★'.slice(0, st) + '☆☆☆'.slice(0, 3 - st);
     $('mi-travel').onclick = () => {
       this.audio.play('ui');
       if (!this.save.current) return;
       let x = ev.x, z = ev.z, yaw = ev.yaw;
-      if (ev.type === 'race' || ev.type === 'drift' || ev.type === 'trap') {
-        const back = ev.type === 'trap' ? 250 : ev.type === 'drift' ? 60 : 20;
+      if (ev.type === 'race' || ev.type === 'drift' || ev.type === 'trap' || ev.type === 'speed') {
+        const back = ev.type === 'trap' ? 250 : ev.type === 'drift' || ev.type === 'speed' ? 60 : 20;
         const p = ev.path.at(ev.s - back, P); x = p.x; z = p.z; yaw = Math.atan2(p.tx, p.tz);
       }
       if (ev.type === 'jump') { x = ev.x - Math.sin(ev.yaw) * 110; z = ev.z - Math.cos(ev.yaw) * 110; }
@@ -1219,7 +1252,8 @@ class Game {
         b.onclick = () => { this.audio.play('ui'); fn(b.dataset.v); this.saveSettings(); this.openSettings(); };
       }
     };
-    seg('s-quality', s.quality, v => { s.quality = v; this.hud.toast('Grafik: wird beim nächsten Start aktiv', 'info'); });
+    seg('s-quality', s.quality, v => { s.quality = v; if (v === 'auto') delete s.autoLevel; this.hud.toast('Grafik: wird beim nächsten Start aktiv', 'info'); });
+    $('s-quality').querySelector('[data-v="auto"]').textContent = 'Auto' + (this.autoQ ? ` (${['Niedrig', 'Mittel', 'Hoch', 'Ultra', 'Hyper'][this.quality]})` : '');
     seg('s-control', s.control, async v => {
       s.control = v;
       if (v === 'tilt') { const ok = await this.input.enableTilt(); if (!ok) { s.control = 'buttons'; this.hud.toast('Neigungssensor nicht verfügbar', 'warn'); } }
@@ -2147,20 +2181,49 @@ class Game {
   }
 
   // dynamische Auflösung: hält die Bildrate auf schwachen Handys
+  // Laufzeit-Regelung: erst Auflösung, dann teure Effekte abschalten; läuft es wieder flüssig, kommt alles zurück.
+  // Bleibt es trotz allem langsam (Auto-Grafik), startet das Spiel beim nächsten Mal eine Stufe niedriger.
   perf(dt) {
     this.fpsAcc = (this.fpsAcc || 0) + dt; this.fpsN = (this.fpsN || 0) + 1;
-    if (this.fpsAcc < 2) return;
+    if (this.fpsAcc < 1) return;
     const fps = this.fpsN / this.fpsAcc;
     this.fpsAcc = 0; this.fpsN = 0;
-    if (this.state !== 'free' && this.state !== 'race') return;
+    const el = $('fps'); if (el && !el.hidden) el.textContent = `${fps.toFixed(0)} fps · ${this.pr.toFixed(2)}x · Stufe ${this.quality}/${this.fx}`;
+    if ((this.state !== 'free' && this.state !== 'race') || this.replay) { this.goodN = 0; return; }
+    const minPR = this.mobile ? 0.6 : 0.55, midPR = Math.max(minPR, Math.min(this.maxPR, this.mobile ? 0.85 : 0.75));
     let pr = this.pr;
-    if (fps < 42 && pr > 0.6) pr = Math.max(0.6, pr - 0.15);
-    else if (fps > 57 && pr < this.maxPR) pr = Math.min(this.maxPR, pr + 0.1);
+    this.goodN = fps > 57 ? (this.goodN || 0) + 1 : 0;
+    if (fps < 45) {
+      // stark daneben → große Schritte; Effekte erst, wenn die Auflösung schon reduziert ist
+      if (pr > midPR) pr = Math.max(midPR, pr - (fps < 30 ? 0.3 : 0.15));
+      else if (this.fx < 4 && this.composer) this.setFx(this.fx + 1);
+      else if (pr > minPR) pr = Math.max(minPR, pr - 0.1);
+    } else if (this.goodN >= 3) {
+      this.goodN = 0;
+      if (pr < midPR) pr = Math.min(midPR, pr + 0.1);
+      else if (this.fx > 0) this.setFx(this.fx - 1);
+      else if (pr < this.maxPR) pr = Math.min(this.maxPR, pr + 0.1);
+    }
     if (pr !== this.pr) { this.pr = pr; this.renderer.setPixelRatio(pr); this.resize(); }
-    // schon auf kleinster Auflösung und trotzdem unter 28 Bildern/s → einmal Ultra vorschlagen
-    this.slowN = fps < 28 && pr <= 0.61 ? (this.slowN || 0) + 1 : 0;
-    if (this.slowN >= 5 && this.quality >= 4 && !this.slowTipped) { this.slowTipped = true; this.hud.toast('Tipp: Einstellungen → Grafik „Ultra“ läuft hier flüssiger', 'info'); }
-    const el = $('fps'); if (el && !el.hidden) el.textContent = `${fps.toFixed(0)} fps · ${pr.toFixed(2)}x`;
+    // dauerhaft zu langsam auf kleinster Stufe → nächster Start eine Grafikstufe niedriger (nur bei „Auto“)
+    this.slowN = fps < 30 && pr <= minPR + 0.01 && (this.fx >= 4 || !this.composer) ? (this.slowN || 0) + 1 : 0;
+    if (this.slowN >= 8 && this.quality > 0 && !this.slowTipped) {
+      this.slowTipped = true;
+      if (this.autoQ) { this.settings.autoLevel = this.quality - 1; this.saveSettings(); this.hud.toast('Grafik passt sich an: ab dem nächsten Start eine Stufe flüssiger', 'info'); }
+      else this.hud.toast('Tipp: Einstellungen → Grafik „Auto“ oder eine Stufe niedriger läuft hier flüssiger', 'info');
+    }
+  }
+  // Effekt-Stufen: 1 Spiegelbild einfrieren · 2 Umgebungsverdeckung aus · 3 weichere/kleinere Schattenkarte · 4 Leuchten aus
+  setFx(n) {
+    this.fx = clamp(n, 0, 4);
+    if (this.ao) this.ao.enabled = this.fx < 2;
+    if (this.bloom) this.bloom.enabled = this.fx < 4;
+    const sh = this.scenery.sun && this.scenery.sun.shadow;
+    if (sh) {
+      this.shadowFull ||= sh.mapSize.x;
+      const want = this.fx >= 3 ? Math.max(1024, this.shadowFull / 2) : this.shadowFull;
+      if (sh.mapSize.x !== want) { sh.mapSize.set(want, want); if (sh.map) { sh.map.dispose(); sh.map = null; } }
+    }
   }
 
   resize() {
@@ -2176,6 +2239,26 @@ class Game {
     document.documentElement.style.setProperty('--uic', (s * (this.settings.ctl || 1)).toFixed(3));
     if (this.screen === 'map' && this.drawMap) this.drawMap();
   }
+}
+
+// Grafikstufe für „Auto“ aus dem Grafikchip raten (0 Niedrig … 4 Hyper). Die Laufzeit-Regelung korrigiert den Rest.
+function guessQuality(mobile) {
+  let r = '';
+  try {
+    const c = document.createElement('canvas'), gl = c.getContext('webgl2') || c.getContext('webgl');
+    const ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+    r = gl ? String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER)) : '';
+    const lose = gl && gl.getExtension('WEBGL_lose_context'); if (lose) lose.loseContext();
+  } catch { /* egal */ }
+  if (/swiftshader|llvmpipe|softpipe|software/i.test(r)) return 1;
+  if (mobile) {
+    if (/adreno[^0-9]*(7[3-9]\d|8\d\d)|immortalis|mali-g(7[1-9]\d|9\d\d)|apple/i.test(r)) return 3;
+    if (/adreno[^0-9]*([1-5]\d\d|6[0-3]\d)\b|mali-(t\d|g[3-5]\d\b|g6\d\b|g7[0-6]\b)|powervr rogue/i.test(r)) return 1;
+    return 2;
+  }
+  if (/intel.*(uhd|hd graphics)|radeon\(tm\) (r\d|vega|graphics)|mali|adreno/i.test(r)) return 2;
+  if (/iris/i.test(r)) return 3;
+  return 4;
 }
 
 const TIME_FIXED = { day: 12.5, sunset: 19.3, night: 23 };

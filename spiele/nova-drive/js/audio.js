@@ -1,7 +1,7 @@
 // Ton komplett synthetisch (WebAudio): Motor, Reifen, Wind, Effekte und ein generatives Radio.
 import { clamp, mulberry32 } from './util.js';
 
-const TURBO = new Set(['rally', 'rally80', 'gt', 'hyper', 'wedge', 'hatch', 'wagon']);
+const TURBO = new Set(['rally', 'rally80', 'gt', 'hyper', 'wedge', 'hatch', 'wagon', 'coupe', 'sedan']);
 const clamp01 = v => Math.max(0, Math.min(1, v));
 export function isTurbo(style) { return TURBO.has(style); }
 
@@ -78,7 +78,7 @@ export class Audio {
     if (!this.ok) return;
     const t = this.ctx.currentTime, K = 0.04;
     const rpm = active ? car.rpm : 0;
-    const BASE = { muscle: 34, hyper: 48, truck: 30, van: 28, suv: 31, classic: 33, buggy: 37, mini: 44, wedge: 46, rally80: 43, wagon: 38 };
+    const BASE = { muscle: 34, hyper: 48, truck: 30, van: 28, suv: 31, classic: 33, buggy: 37, mini: 44, wedge: 46, rally80: 43, wagon: 38, kei: 52, sedan: 35, coupe: 42, cabrio: 36, proto: 55 };
     const base = style === 'ev' ? 0 : (BASE[style] || 40);
     if (style === 'ev') {
       const f = 120 + Math.abs(car.vf) * 18;
