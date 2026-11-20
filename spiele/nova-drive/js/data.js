@@ -155,7 +155,12 @@ export const EVENTS = [
 
   { id: 'j_feld', type: 'jump', name: 'Sprungschanze Feld', x: -95, z: 330, yaw: Math.PI * 1.05, stars: [50, 85, 120] },
   { id: 'j_strand', type: 'jump', name: 'Sprungschanze Strand', x: 560, z: 520, yaw: Math.PI * 1.75, stars: [50, 85, 120] },
-  { id: 'j_steppe', type: 'jump', name: 'Sprungschanze Steppe', x: 610, z: -400, yaw: Math.PI * 0.833, stars: [50, 85, 120] },
+  // (vorher x 610 z -400: Landung im Wasser – versetzt, gleiche Kennung, damit Rekorde/Sterne bleiben)
+  { id: 'j_steppe', type: 'jump', name: 'Sprungschanze Hochebene', x: 390, z: -660, yaw: Math.PI * 1.25, stars: [50, 90, 130] },
+  // weitere Schanzen (per Suche + Physiktest: flacher Anlauf, sichere Landung ohne Wasser/Straße/Häuser, 130–190 m)
+  { id: 'j_huegel', type: 'jump', name: 'Sprungschanze Hügelkamm', x: -160, z: -200, yaw: Math.PI * 1.667, stars: [60, 110, 160] },
+  { id: 'j_seewiese', type: 'jump', name: 'Sprungschanze Seewiese', x: 360, z: 240, yaw: Math.PI * 1.833, stars: [50, 95, 140] },
+  { id: 'j_weide', type: 'jump', name: 'Sprungschanze Weidenhang', x: -540, z: 480, yaw: Math.PI * 1.333, stars: [55, 100, 150] },
 
   // neue Inhalte: Rennen auf bisher freien Straßen, mehr Blitzer und Driftzonen
   { id: 'r_kueste_s', type: 'race', name: 'Küstensprint', road: 'kueste', sprint: true, at: 0.3, to: 0.7, reward: 14000, fans: 1400, ai: 7 },

@@ -225,7 +225,8 @@ export class HUD {
     if (cr || fans) {
       const t = document.createElement('div'); t.className = 'gain';
       t.textContent = `${cr ? '+' + fmtNum(cr) + ' CR' : ''}${cr && fans ? '  ' : ''}${fans ? '+' + fmtNum(fans) + ' Fans' : ''}`;
-      $('gains').appendChild(t); setTimeout(() => t.remove(), 2400);
+      const box = $('gains'); box.appendChild(t); setTimeout(() => t.remove(), 2400);
+      while (box.children.length > 4) box.firstChild.remove(); // höchstens 4 Einträge (sonst deckt die Liste das Bild zu)
     }
   }
   banner(title, value, stars, extra) {
