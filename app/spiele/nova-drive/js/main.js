@@ -1574,11 +1574,13 @@ class Game {
     // Im Rennen: Spur zeigt die Strecke voraus
     if (race) {
       $('nav').hidden = true;
+      // Ideallinie „Voll“ zeigt die Strecke schon → kein zweites Band; sonst Streckenband hellblau (gelb = „Gas weg“)
+      if (this.settings.line === 'voll' || this.cineMode) { this.ribbon.hide(); return; }
       if ((this.navT = (this.navT || 0) + dt) > 0.15 || force) {
         this.navT = 0;
         const pts = [];
         for (let s = 2; s < 230 && race.prog + s < race.total + 5; s += 2.5) { const p = race.path.at(race.pS + s, {}); pts.push({ x: p.x, z: p.z }); }
-        this.ribbon.set(pts, 0xffd23f);
+        this.ribbon.set(pts, 0x7fd8ff);
       }
       return;
     }
@@ -2147,7 +2149,7 @@ class Game {
     const pc = car.circles(), r = car.rad;
     const spd = Math.hypot(car.vel.x, car.vel.z);
     const others = [];
-    if (race) for (const a of race.ais) others.push({ o: a, ai: true });
+    if (race) for (const a of race.ais) if (a.model.visible) others.push({ o: a, ai: true });
     for (const p of this.net.cars()) others.push({ o: p, ai: true, peer: true });
     for (const t of this.traffic.cars) if (t.road && t.model.visible) others.push({ o: t, ai: false });
     for (const { o, ai, peer } of others) {

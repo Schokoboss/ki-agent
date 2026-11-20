@@ -53,7 +53,17 @@ export class RaceAI {
   update(dt, race, others, playerProg, started) {
     const path = race.path;
     if (!started) { this.place(path, race); return; }
-    if (this.done) { this.speed = Math.max(0, this.speed - 8 * dt); }
+    if (this.done) {
+      // nach dem Ziel an den Rand ausrollen (abwechselnd links/rechts), damit Nachfolgende frei durchkommen
+      this.speed = Math.max(0, this.speed - 4 * dt);
+      this.latT = (this.name.length % 2 ? 1 : -1) * (race.hw - 1.3);
+      this.lat = damp(this.lat, this.latT, 2.5, dt);
+      this.s += this.speed * dt; this.prog += this.speed * dt;
+      // Sprint: die Straße endet kurz hinter dem Ziel → dort ausblenden statt am Ende zu stapeln
+      if (!path.closed && this.s >= path.length - 4) { this.model.visible = false; return; }
+      this.place(path, race);
+      return;
+    }
     const i = path.idx(Math.round(path.wrapS(this.s) / path.ds));
     let vT = race.prof[i] * this.skill;
     // Gummiband: weit vorne etwas langsamer, weit hinten etwas schneller
@@ -81,6 +91,25 @@ export class RaceAI {
       const ideal = clamp(ahead.curv * 260, -1, 1) * (race.hw - 1.8);
       this.latT = damp(this.latT, ideal + this.lane, 0.6, dt);
     }
+    // Nachbarn neben mir (knapp davor/daneben/dahinter): Seitenabstand halten, sonst fahren Karosserien ineinander
+    let push = 0, side = null;
+    for (const o of others) {
+      if (o === this || o.done) continue;
+      const d = o.prog - this.prog;
+      if (Math.abs(d) > 6.5) continue;
+      const dl = this.lat - o.lat;
+      if (Math.abs(dl) < 2.5) {
+        push += (Math.sign(dl) || (this.lat <= 0 ? -1 : 1)) * (2.5 - Math.abs(dl));
+        if (d > 0 && (!side || d < side.d)) side = { o, d };
+      }
+    }
+    const limL = race.hw - 1.2;
+    if (push) {
+      this.latT = clamp(this.latT + push, -limL, limL);
+      // am Rand eingeklemmt → hinter dem Nachbarn bleiben statt hindurchzufahren
+      if (side && Math.abs(this.latT) >= limL - 0.05) vT = Math.min(vT, (side.o.speed || 0) - 0.5);
+    }
+    this.pushing = !!push;
     if (!this.done) {
       const top = race.top * this.skill;
       if (this.speed < vT) this.speed += race.accel * this.skill * Math.max(0.15, 1 - (this.speed / top) ** 2) * dt;
@@ -90,7 +119,7 @@ export class RaceAI {
     this.speed = Math.max(0, this.speed);
     this.s += this.speed * dt;
     this.prog += this.speed * dt;
-    this.lat = damp(this.lat, this.latT, 1.8, dt);
+    this.lat = damp(this.lat, this.latT, this.pushing ? 4 : 1.8, dt);
     this.lat = clamp(this.lat, -race.hw + 1, race.hw - 1);
     this.place(path, race);
   }

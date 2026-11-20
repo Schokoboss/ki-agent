@@ -26,6 +26,12 @@ Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 - **Bremshilfe** im Rennen (Einstellungen → Bremshilfe; „Auto“ = am Handy an): zu schnell für die Kurve voraus →
   das Spiel bremst selbst auf das Tempo der Ideallinie. Simuliert an der engsten Pass-Kehre mit Vollgas: ohne Hilfe
   32 m neben der Strecke, mit Hilfe sauber durch (58 statt Ziel 55 km/h am Scheitel).
+- **KI-Gegner fahren nicht mehr durcheinander hindurch**: vorher überlappten sich zwei Gegner 26–55 % der Rennzeit
+  (gemessen in simulierten Rennen). Jetzt halten sie Seitenabstand zu Nachbarn, reihen sich ein, wenn kein Platz ist,
+  und rollen nach dem Ziel an den Rand – 0 % Überlappung bei weiterhin 10–25 Überholmanövern pro Rennen.
+- Fehler behoben: Bei Sprints am Straßenanfang (Gipfelsturm, Vollgas-Sprint, Seebrücke, Bergpfad, Querfeldein) standen
+  alle hinteren Startreihen auf demselben Punkt übereinander – die Startlinie rückt jetzt so weit vor, dass die ganze
+  Aufstellung auf der Straße steht. Im Rennen kein doppeltes Band mehr (Streckenband + Ideallinie).
 - Rennen: Abstand zum Fahrer davor/dahinter in Sekunden. Einstellungen → **FPS anzeigen** (Bildrate, Auflösung, Stufe –
   hilft beim Einschätzen der Leistung am eigenen Gerät).
 

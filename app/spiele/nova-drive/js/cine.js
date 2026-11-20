@@ -69,7 +69,7 @@ export function introCam(g, race, cam) {
   const u = clamp((race.t - race.t0) / INTRO, 0, 1);
   // Phase 1: seitlich am Startfeld entlang (von der Pole nach hinten), niedrig
   const u1 = smooth(clamp(u / 0.58, 0, 1));
-  const s = lerp(ev.s + 10, ev.s - 34, u1);
+  const s0 = race.startS ?? ev.s, s = lerp(s0 + 10, s0 - 34, u1);
   const p = path.at(s, P);
   const side = 7.5;
   const x1 = p.x - p.tz * side, z1 = p.z + p.tx * side;
