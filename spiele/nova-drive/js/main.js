@@ -3,7 +3,7 @@ import * as THREE from '../lib/three.module.min.js';
 import { World, FESTIVAL, HALF } from './terrain.js';
 import { Scenery } from './world.js';
 import { makeTextures, makeDetailTextures, loadPhotoTextures, loadTreeImpostors } from './textures.js';
-import { buildCar, styleDims, loadCarModels, setTailGlow, setCarDetail, disposeCar } from './carmodel.js';
+import { buildCar, styleDims, loadCarModels, setTailGlow, setCarDetail, disposeCar, applyLivery, LIVERIES } from './carmodel.js';
 import { loadWorldModels, modelUrl } from './models.js';
 import { Vehicle, carContact } from './physics.js';
 import { Traffic } from './ai.js';
@@ -419,6 +419,7 @@ class Game {
     const own = this.save.owned[spec.id] || { up: {}, color: spec.colors[0] };
     if (this.carModel) { if (this.reflModel === this.carModel) this.reflModel = null; disposeCar(this.carModel); }
     this.carModel = buildCar(spec, own.color || spec.colors[0]);
+    if (own.livery) applyLivery(this.carModel, own.livery);
     this.carModel.userData.carId = spec.id;
     this.setupReflections(); this.applyReflections(this.carModel);
     this.scene.add(this.carModel);
@@ -1200,6 +1201,33 @@ class Game {
       });
       cols.appendChild(b);
     }
+    // Lackiererei: eigene Farbe (Farbwähler) und Design – nur für eigene Autos, sofort in der Vorschau
+    const paintTo = c => { if (this.previewModel && this.previewModel.userData.paintMat) this.previewModel.userData.paintMat.color.set(c); };
+    if (own) {
+      const cb = document.createElement('label'); cb.className = 'swatch custom' + (spec.colors.includes(own.color) ? '' : ' sel'); cb.title = 'Eigene Farbe';
+      if (!spec.colors.includes(own.color)) cb.style.background = own.color;
+      const ci = document.createElement('input'); ci.type = 'color'; ci.value = own.color || spec.colors[0];
+      ci.addEventListener('input', () => { cb.style.background = ci.value; paintTo(ci.value); });
+      ci.addEventListener('change', () => { own.color = ci.value; this.saveGame(); this.renderGarage(); });
+      cb.appendChild(ci); cols.appendChild(cb);
+    }
+    $('g-paint').hidden = !own;
+    if (own) {
+      const L = own.livery || { p: 'none', c2: '#ffffff', n: Math.floor(Math.random() * 98) + 1 }, box = $('g-liv');
+      box.innerHTML = '';
+      const setL = (patch, save = true) => { own.livery = { ...L, ...patch }; Object.assign(L, patch); applyLivery(this.previewModel, own.livery); if (save) this.saveGame(); };
+      for (const [k, name] of LIVERIES) {
+        const b = document.createElement('button'); b.textContent = name; b.className = L.p === k ? 'sel' : '';
+        b.onclick = () => { this.audio.play('ui'); setL({ p: k }); this.renderGarage(); };
+        box.appendChild(b);
+      }
+      $('g-c2l').hidden = L.p === 'none' || L.p === 'nummer';
+      $('g-numl').hidden = !(L.p === 'nummer' || L.p === 'rennen');
+      const c2 = $('g-c2'); c2.value = L.c2 || '#ffffff';
+      c2.oninput = () => setL({ c2: c2.value }, false); c2.onchange = () => setL({ c2: c2.value });
+      const nu = $('g-num'); nu.value = L.n ?? 7;
+      nu.oninput = () => { const v = Math.max(0, Math.min(99, parseInt(nu.value, 10) || 0)); setL({ n: v }); };
+    }
     const act = $('g-action');
     if (!own) {
       act.textContent = `Kaufen · ${fmtNum(spec.price)} CR`;
@@ -1226,6 +1254,7 @@ class Game {
     if (this.previewModel) { if (this.reflModel === this.previewModel) this.reflModel = null; disposeCar(this.previewModel); }
     this.previewColor = (own && own.color) || spec.colors[0];
     this.previewModel = buildCar(spec, this.previewColor);
+    if (own && own.livery) applyLivery(this.previewModel, own.livery);
     this.applyReflections(this.previewModel);
     this.previewId = id;
     const p = this.garagePos();

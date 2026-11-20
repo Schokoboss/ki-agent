@@ -311,7 +311,17 @@ html.portrait .wheel-wrap { flex-direction: column-reverse; } html.portrait #w-c
 .rangebox { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
 #s-codebox { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 #s-code { font: 12px/1.3 ui-monospace, monospace; color: var(--text); background: rgba(255,255,255,.07); border: 1px solid var(--line); border-radius: 10px; padding: 8px; width: 100%; resize: vertical; touch-action: auto; user-select: text; -webkit-user-select: text; }
-#s-code, #s-name, #mp-name, #mp-code { touch-action: auto; }
+#s-code, #s-name, #mp-name, #mp-code, #g-c2, #g-num, .swatch.custom input { touch-action: auto; }
+.swatch.custom { position: relative; overflow: hidden; background: conic-gradient(#ff3d3d, #ffd23f, #36e27a, #1fe0ff, #6d5dfc, #ff3d9a, #ff3d3d); }
+.swatch.custom input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border: 0; padding: 0; }
+.g-liv { display: flex; flex-wrap: wrap; gap: 5px; }
+.g-liv button { border: 1px solid var(--line); background: rgba(255,255,255,.06); color: var(--text); border-radius: 9px; padding: 5px 9px; font: inherit; font-size: 12px; }
+.g-liv button.sel { border-color: #ff3d7f; background: rgba(255,61,127,.2); }
+.g-liv2 { display: flex; gap: 10px; align-items: center; margin-top: 5px; font-size: 12px; flex-wrap: wrap; }
+.g-liv2 label { display: flex; gap: 6px; align-items: center; }
+.g-liv2 label[hidden] { display: none; }
+#g-c2 { width: 38px; height: 28px; border: 1px solid var(--line); border-radius: 7px; background: none; padding: 0; }
+#g-num { width: 56px; font: inherit; color: var(--text); background: rgba(255,255,255,.08); border: 1px solid var(--line); border-radius: 7px; padding: 4px 6px; }
 
 /* Ergebnis: zwei Spalten im Querformat */
 .res-main, .res-side { display: flex; flex-direction: column; gap: 6px; min-width: 0; }

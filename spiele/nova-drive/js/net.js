@@ -5,7 +5,7 @@
 import * as THREE from '../lib/three.module.min.js';
 import mqtt from '../lib/mqtt.esm.js';
 import { CARS } from './data.js';
-import { buildCar, styleDims, disposeCar } from './carmodel.js';
+import { buildCar, styleDims, disposeCar, applyLivery } from './carmodel.js';
 import { clamp } from './util.js';
 
 const BROKERS = ['wss://broker.hivemq.com:8884/mqtt', 'wss://broker.emqx.io:8084/mqtt'];
@@ -105,7 +105,7 @@ export class Net {
     const g = this.g, c = g.car, r = g.events && g.events.race;
     const drive = g.state === 'free' || g.state === 'race' || g.state === 'paused' || g.state === 'photo';
     return {
-      n: (g.settings.name || 'Spieler').slice(0, 16), c: g.save.current, k: (g.save.owned[g.save.current] || {}).color || null,
+      n: (g.settings.name || 'Spieler').slice(0, 16), c: g.save.current, k: (g.save.owned[g.save.current] || {}).color || null, l: (g.save.owned[g.save.current] || {}).livery || null,
       d: drive ? 1 : 0, x: +c.pos.x.toFixed(2), y: +c.pos.y.toFixed(2), z: +c.pos.z.toFixed(2), r: +c.yaw.toFixed(3), s: +c.vf.toFixed(1),
       re: r ? r.ev.id : null, rp: r ? Math.round(r.prog) : 0, rf: r && r.finished ? +r.finishT.toFixed(2) : 0, rs: r && r.started ? 1 : 0, t: Date.now(),
     };
@@ -142,7 +142,9 @@ export class Net {
     if (p.label && nm !== p.name) updateSprite(p.label, nm);
     p.last = now; p.name = nm; p.drive = !!s.d;
     p.race = { ev: s.re, prog: s.rp || 0, fin: s.rf || 0, started: !!s.rs };
-    if (p.car !== s.c || p.color !== s.k) { p.car = s.c; p.color = s.k; this.buildPeer(p); }
+    const lk = s.l ? JSON.stringify(s.l) : '';
+    if (p.car !== s.c || p.color !== s.k) { p.car = s.c; p.color = s.k; this.buildPeer(p); p.lk = null; }
+    if (p.lk !== lk && p.model) { p.lk = lk; applyLivery(p.model, s.l && typeof s.l === 'object' ? { p: String(s.l.p), c2: String(s.l.c2 || '#ffffff').slice(0, 7), n: +s.l.n || 0 } : { p: 'none' }); }
     p.buf.push({ t: now, x: s.x, y: s.y, z: s.z, r: s.r, s: s.s });
     if (p.buf.length > 20) p.buf.shift();
   }
