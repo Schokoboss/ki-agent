@@ -26,6 +26,10 @@ Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 - **Bremshilfe** im Rennen (Einstellungen → Bremshilfe; „Auto“ = am Handy an): zu schnell für die Kurve voraus →
   das Spiel bremst selbst auf das Tempo der Ideallinie. Simuliert an der engsten Pass-Kehre mit Vollgas: ohne Hilfe
   32 m neben der Strecke, mit Hilfe sauber durch (58 statt Ziel 55 km/h am Scheitel).
+- Fehler behoben: Laternen-Lichthöfe leuchteten auch tagsüber (weiße Flecken am Festival) – die Helligkeit wurde
+  an einer Stelle gesetzt, die der Shader nie las. Nachts blenden Lichthöfe direkt vor der Kamera aus statt
+  bildschirmfüllend zu werden; Scheinwerferkegel ohne hellen Fleck über der Motorhaube. Aussichtspunkte auf der Karte
+  weiß (vorher fast gleiche Farbe wie Tempozonen).
 - **33 Erfolge** (Titel/Pause → 🏅): Fahren (km, Tempo), Rennen (Siege, 3 Sterne überall, Meisterschaften), Können
   (Drift, Sprünge, Blitzer, Tempozonen, Skill-Ketten), Entdecken (Plakate, Scheunen, Aussichtspunkte), Sammeln (Autos,
   Millionär, Lackierer, Tuner, Mehrspieler, Glücksrad) – mit Fortschrittsbalken und Credits (1.000–100.000 CR).

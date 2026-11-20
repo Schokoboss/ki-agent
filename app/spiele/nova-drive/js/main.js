@@ -443,7 +443,8 @@ class Game {
       if (!this.beamMat) this.beamMat = new THREE.ShaderMaterial({
         uniforms: { op: { value: 0 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
         vertexShader: 'varying float vY; void main(){ vY = uv.y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-        fragmentShader: 'uniform float op; varying float vY; void main(){ gl_FragColor = vec4(vec3(1.0, 0.95, 0.82) * op * pow(vY, 2.2), 1.0); }',
+        // die ersten ~3 m am Scheinwerfer ausblenden: sonst stapeln sich die Kegel aus der Verfolgerkamera zu einem hellen Fleck über der Haube
+        fragmentShader: 'uniform float op; varying float vY; void main(){ gl_FragColor = vec4(vec3(1.0, 0.95, 0.82) * op * pow(vY, 2.2) * smoothstep(1.0, 0.78, vY), 1.0); }',
       });
       const d0 = styleDims(spec.style);
       for (const sx of [-1, 1]) {
@@ -1367,9 +1368,9 @@ class Game {
       // Aussichtspunkte: unentdeckt = hohles Auge, entdeckt = gefülltes
       for (const v of this.events.views || []) {
         const [x, y] = P(v.x, v.z);
-        g.fillStyle = v.found ? '#59f0c2' : 'rgba(20,40,40,.7)'; g.beginPath(); g.arc(x, y, 7, 0, 7); g.fill();
-        g.strokeStyle = '#59f0c2'; g.lineWidth = 2; g.stroke();
-        g.fillStyle = v.found ? '#063' : '#59f0c2'; g.font = '700 9px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('👁', x, y + 1);
+        g.fillStyle = v.found ? '#f2f6ff' : 'rgba(20,24,40,.75)'; g.beginPath(); g.arc(x, y, 7, 0, 7); g.fill();
+        g.strokeStyle = '#f2f6ff'; g.lineWidth = 2; g.stroke();
+        g.fillStyle = v.found ? '#223' : '#f2f6ff'; g.font = '700 9px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('👁', x, y + 1);
       }
       // Scheunenfunde: gefunden = Scheune, gehört (Gerücht) = Fragezeichen
       for (const f of this.events.barns) {
@@ -2249,7 +2250,7 @@ class Game {
     }
     setTailGlow(this.carModel, inp.brake > 0 && car.vf > 0.5, this.scenery.night);
     if (ud.headMat) ud.headMat.emissiveIntensity = 0.8 + this.scenery.night * (this.quality >= 3 ? 4.5 : 1.5);
-    if (this.beamMat) this.beamMat.uniforms.op.value = Math.max(0, this.scenery.night - 0.25) * 0.16 * (1 + (this.scenery.rain || 0));
+    if (this.beamMat) this.beamMat.uniforms.op.value = Math.max(0, this.scenery.night - 0.25) * (this.camMode === 2 ? 0.05 : 0.12) * (1 + (this.scenery.rain || 0));
     this.headL.intensity = this.scenery.night > 0.3 ? 60 * this.scenery.night : 0;
     // Schatten-Fleck
     const gy = this.world.heightAt(car.pos.x, car.pos.z);
