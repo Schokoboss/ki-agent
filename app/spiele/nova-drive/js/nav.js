@@ -285,6 +285,69 @@ export class NavRibbon {
   tick(t, op) { this.mat.uniforms.t.value = t; this.mat.uniforms.op.value = op; }
 }
 
+// ---------------------------------------------------------------- Ideallinie im Rennen
+// Band auf der Fahrbahn vor dem Auto: blau = Gas, gelb = Gas weg, rot = bremsen.
+// Farbe aus Vergleich aktuelles Tempo ↔ Zieltempo des Streckenprofils (enthält schon die Bremszonen vor Kurven).
+export class RaceLine {
+  constructor(scene, world) {
+    this.world = world;
+    this.N = 128; this.step = 1.25;
+    const N = this.N, g = new THREE.BufferGeometry();
+    this.pos = new Float32Array(N * 2 * 3); this.col = new Float32Array(N * 2 * 4); this.uv = new Float32Array(N * 2 * 2);
+    const idx = [];
+    for (let i = 0; i < N - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+    g.setIndex(idx);
+    g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('color', new THREE.BufferAttribute(this.col, 4).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('uv', new THREE.BufferAttribute(this.uv, 2).setUsage(THREE.DynamicDrawUsage));
+    this.geo = g;
+    this.mat = new THREE.ShaderMaterial({
+      uniforms: { t: { value: 0 } },
+      transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -60, fog: false,
+      vertexShader: 'attribute vec4 color; varying vec4 vC; varying vec2 vUv; void main(){ vC = color; vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: `uniform float t; varying vec4 vC; varying vec2 vUv;
+        void main(){
+          float x = abs(vUv.x - 0.5) * 2.0;
+          float edge = smoothstep(1.0, 0.7, x);
+          float chev = 0.8 + 0.2 * smoothstep(0.3, 0.0, abs(fract(vUv.y * 0.18 - t * 0.6) - (0.5 - x * 0.2)) - 0.05);
+          gl_FragColor = vec4(vC.rgb * chev, vC.a * edge);
+        }`,
+    });
+    this.mesh = new THREE.Mesh(g, this.mat);
+    this.mesh.frustumCulled = false; this.mesh.renderOrder = 25; this.mesh.visible = false;
+    scene.add(this.mesh);
+    this._p = {};
+  }
+  hide() { this.mesh.visible = false; }
+  // race: {path, prof, pS, startS, total, prog}; mode: 'voll' | 'bremsen'
+  update(race, car, mode, t) {
+    const path = race.path, prof = race.prof, W = this.world, P = this._p, N = this.N;
+    const v0 = Math.max(0, car.vf), left = Math.max(0, race.total - race.prog);
+    this.mat.uniforms.t.value = t;
+    let acc = 0;
+    for (let i = 0; i < N; i++) {
+      const d = 3 + i * this.step, s = race.pS + d;
+      const p = path.at(s, P);
+      const vt = prof[path.idx(Math.round(path.wrapS(s) / path.ds))];
+      const diff = v0 - vt; // > 0: hier musst du langsamer sein
+      let r, g, b;
+      if (diff > 1.5) { r = 1; g = 0.18; b = 0.16; } // bremsen
+      else if (diff > -2.5) { r = 1; g = 0.82; b = 0.15; } // Gas weg
+      else { r = 0.15; g = 0.62; b = 1; } // Gas
+      let a = 0.7 * Math.min(1, (d - 3) / 6) * Math.min(1, (N * this.step - d) / 30) * (d > left ? 0 : 1);
+      if (mode === 'bremsen' && diff <= -2.5) a = 0;
+      // Fahrbahn liegt auf der Streckenhöhe (+6 cm), dazwischen gerade – darüber legen, nicht aufs Gelände
+      const y = Math.max(Number.isFinite(p.y) ? p.y + 0.14 : -1e9, W.heightAt(p.x, p.z) + 0.1), w = 0.6, nx = -p.tz * w, nz = p.tx * w;
+      this.pos.set([p.x - nx, y, p.z - nz, p.x + nx, y, p.z + nz], i * 6);
+      this.col.set([r, g, b, a, r, g, b, a], i * 8);
+      this.uv.set([0, acc, 1, acc], i * 4);
+      acc += this.step;
+    }
+    this.geo.attributes.position.needsUpdate = this.geo.attributes.color.needsUpdate = this.geo.attributes.uv.needsUpdate = true;
+    this.mesh.visible = true;
+  }
+}
+
 // Sprachansagen (deutsch), wenn der Browser das kann
 export function say(text) {
   try {

@@ -174,6 +174,18 @@ export const EVENTS = [
   { id: 's_wald', type: 'speed', name: 'Tempozone Waldpiste', road: 'wald', at: 0.78, to: 0.98, stars: [90, 115, 140] },
 ];
 
+// Meisterschaften: drei Rennen, Punkte nach Platz, Klassen-Obergrenze (Wertung des Autos inkl. Tuning)
+export const CLASS_ORDER = ['D', 'C', 'B', 'A', 'S1', 'S2', 'X'];
+export const CHAMP_POINTS = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1];
+export const CHAMPS = [
+  { id: 'c_d', name: 'Einsteiger-Pokal', cls: 'D', events: ['r_festival', 'r_see', 'r_stadt'], reward: 25000, fans: 2500, car: 'dune' },
+  { id: 'c_dirt', name: 'Schotter-Meisterschaft', cls: 'C', dirt: true, events: ['r_berg', 'r_quer', 'r_wald'], reward: 40000, fans: 4000, car: 'atlas' },
+  { id: 'c_c', name: 'Küsten-Serie', cls: 'C', events: ['r_schnell', 'r_pass', 'r_kueste_s'], reward: 45000, fans: 4500, car: 'regent' },
+  { id: 'c_b', name: 'B-Klasse Grand Prix', cls: 'B', events: ['r_stadt', 'r_kueste', 'r_festival_x'], reward: 80000, fans: 8000, car: 'gruppo' },
+  { id: 'c_s', name: 'Supersport-Trophäe', cls: 'S2', events: ['r_schnell', 'r_kueste_s', 'r_pass'], reward: 180000, fans: 15000, car: 'strato' },
+  { id: 'c_x', name: 'Festival-Legenden', cls: 'X', events: ['r_kueste', 'r_festival_x', 'r_wald_x'], reward: 400000, fans: 30000, car: 'phantom' },
+];
+
 // Scheunenfunde: seltene Autos, versteckt vor Scheunen auf der Insel (Reihenfolge = Fundorte von außen nach innen)
 export const BARN_CARS = ['vira', 'gruppo', 'strato', 'zephyra'];
 

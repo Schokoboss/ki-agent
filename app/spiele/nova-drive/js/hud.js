@@ -301,6 +301,22 @@ export class HUD {
     const ch = $('res-challenge');
     if (res.challenge) { ch.hidden = false; ch.textContent = res.challenge.won ? `Du hast ${res.challenge.name} geschlagen! 🎉` : `${res.challenge.name} war schneller (${fmtTime(res.challenge.time)}).`; ch.className = res.challenge.won ? 'win' : 'lose'; }
     else ch.hidden = true;
+    // Meisterschaft: Zwischenstand bzw. Endstand
+    const chEl = $('res-champ'), C = res.champ;
+    chEl.hidden = !C;
+    if (C) {
+      const rows = C.table.map((t, i) => `<div class="cr${t.me ? ' me' : ''}"><span>${i + 1}.</span><span class="n"></span><b>${t.pts}</b></div>`);
+      chEl.innerHTML = `<div class="ch-h">🏆 ${C.name} · ${C.done ? 'Endstand' : `Stand nach Rennen ${C.round}/${C.rounds}`}</div>` + rows.slice(0, 5).join('') +
+        (C.myRank > 5 ? rows[C.myRank - 1] : '') + (C.text ? `<div class="ch-t"></div>` : '');
+      const names = chEl.querySelectorAll('.cr .n');
+      const shown = C.table.slice(0, 5).concat(C.myRank > 5 ? [C.table[C.myRank - 1]] : []);
+      shown.forEach((t, i) => { names[i].textContent = t.me ? (this.g.settings.name || 'Du') : t.name; });
+      if (C.text) chEl.querySelector('.ch-t').textContent = C.text;
+    }
+    $('res-again').textContent = C && !C.done ? 'Nächstes Rennen ▶' : 'Nochmal';
+    // in der laufenden Meisterschaft ist „Nächstes Rennen“ der Hauptknopf
+    $('res-again').classList.toggle('primary', !!(C && !C.done)); $('res-continue').classList.toggle('primary', !(C && !C.done));
+    $('res-share').hidden = !!C;
     this.lastResult = res;
     this.g.showScreen('results');
   }

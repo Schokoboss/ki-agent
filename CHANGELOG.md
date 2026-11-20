@@ -10,6 +10,11 @@ Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 - **Fahrphysik**: Autos erreichen jetzt die in der Garage angezeigte Höchstgeschwindigkeit (vorher nur ~92 % – die
   KI-Gegner fuhren aber den vollen Wert und zogen auf Geraden davon). Bremsweg hängt von den Reifen ab (100→0 in
   21–26 m statt 15 m für alle). Weniger Speicher-Müll pro Physikschritt.
+- **Ideallinie** im Rennen (Einstellungen → Ideallinie: Aus / Nur Bremszonen / Voll): Band auf der Fahrbahn,
+  blau = Gas, gelb = Gas weg, rot = bremsen – aus deinem Tempo und dem Kurvenprofil der Strecke für dein Auto.
+- **Meisterschaften** (Titel/Pause → 🏆): sechs Serien à drei Rennen mit Klassen-Obergrenze (D, Schotter, C, B, S2, X),
+  Punkte 25-18-15-12…, immer dieselben Gegner mit Autos ihrer Klasse, Zwischenstand nach jedem Rennen, Gesamtsieg =
+  Preisgeld + Auto (Dune, Atlas, Regent, Gruppo, Strato, Phantom), Platz 2/3 = Teil des Preisgelds. Fortsetzbar.
 
 ## 18.11.2026 (2)
 - **Nova Drive läuft flüssiger** (gemessen: 50–66 % weniger Dreiecke pro Bild, eigenes Auto 11 statt 40 Zeichenaufrufe):
