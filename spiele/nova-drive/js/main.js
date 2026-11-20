@@ -19,6 +19,7 @@ import { EVENT_COLORS } from './world.js';
 import { Economy, PRIZES } from './economy.js';
 import { RoadGraph, NavRibbon, RaceLine, say, fmtDist, TURN_ICON, turnText } from './nav.js';
 import { Net } from './net.js';
+import { Achievements } from './achievements.js';
 import { GTAOPass } from '../lib/postprocessing/GTAOPass.js';
 import { EffectComposer } from '../lib/postprocessing/EffectComposer.js';
 import { RenderPass } from '../lib/postprocessing/RenderPass.js';
@@ -154,6 +155,7 @@ class Game {
     this.events = new Events(this);
     this.events.init();
     this.net = new Net(this);
+    this.ach = new Achievements(this);
     this.eco = new Economy(this);
     this.graph = new RoadGraph(this.world);
     this.ribbon = new NavRibbon(this.scene, this.world);
@@ -548,6 +550,7 @@ class Game {
     if (name === 'wheel') this.openWheel();
     if (name === 'mp') this.renderMP();
     if (name === 'champ') this.renderChamps();
+    if (name === 'ach') this.ach.render($('ach-list'));
     if (name === 'wheelcal') this.startWheelCal(); else this.wc = null;
     if (this.input) this.input.calibrating = name === 'wheelcal';
     if (name === 'pause' || name === 'title') this.updateSpinBadges();
@@ -718,6 +721,8 @@ class Game {
     click('tut-x', () => { this.save.tut = 99; this.saveGame(); this.renderTut(); });
     click('t-champ', () => { this.save.seenChamp = true; this.saveGame(); $('champ-new').hidden = true; if (!this.save.current) { this.showScreen('starter'); this.renderStarter(); return; } this.backTo = 'title'; this.showScreen('champ'); });
     click('p-champ', () => { this.backTo = 'pause'; this.showScreen('champ'); });
+    click('t-ach', () => { this.backTo = 'title'; this.showScreen('ach'); });
+    click('p-ach', () => { this.backTo = 'pause'; this.showScreen('ach'); });
     click('p-mp', () => { this.backTo = 'pause'; this.showScreen('mp'); });
     click('h-mp', () => { if (this.state !== 'free' && this.state !== 'race') return; this.pause(); this.backTo = 'pause'; this.showScreen('mp'); });
     click('t-daily', () => { this.backTo = 'title'; this.showScreen('daily'); });
@@ -772,7 +777,7 @@ class Game {
     const to = this.backTo;
     if (this.wheelBusy) return;
     if (this.screen === 'wheelcal') { this.showScreen('settings'); return; }
-    if (['settings', 'map', 'garage', 'daily', 'wheel', 'install', 'mp', 'champ'].includes(this.screen)) {
+    if (['settings', 'map', 'garage', 'daily', 'wheel', 'install', 'mp', 'champ', 'ach'].includes(this.screen)) {
       if (to === 'title') this.showScreen('title');
       else if (to === 'pause') this.showScreen('pause');
       else { this.setState(this.prevState === 'race' && this.events.race ? 'race' : 'free'); this.last = performance.now(); }
@@ -1958,6 +1963,7 @@ class Game {
     if (this.screen !== 'garage' && this.previewModel) this.closeGarage();
     this.audio.tick(dt);
     this.net.update(dt);
+    if (this.state !== 'loading' && this.state !== 'title') this.ach.tick(dt);
     const cp = this.camera.position;
     this.scenery.update(dt, this.time, cp, this.audio.beat, this.car.pos);
     this.smoke.update(dt, view.h * this.pr * 0.9);
