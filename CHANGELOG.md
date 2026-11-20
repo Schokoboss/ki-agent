@@ -30,6 +30,9 @@ Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
   an einer Stelle gesetzt, die der Shader nie las. Nachts blenden Lichthöfe direkt vor der Kamera aus statt
   bildschirmfüllend zu werden; Scheinwerferkegel ohne hellen Fleck über der Motorhaube. Aussichtspunkte auf der Karte
   weiß (vorher fast gleiche Farbe wie Tempozonen).
+- **Wochen-Herausforderungen** (im Tagesaufgaben-Bildschirm): jede Kalenderwoche drei neue Aufgaben – ein bestimmtes
+  Rennen mit Klassen-Obergrenze gewinnen, 3 Sterne bei einem Event, dazu km/Siege/Meisterschaftsrennen; 20.000–25.000 CR
+  je Aufgabe, alle drei = +25.000 CR + Glücksrad-Dreh. Für alle Spieler dieselben (aus der Kalenderwoche berechnet).
 - **6 Sprungschanzen statt 3**: Hügelkamm (bis ~190 m), Seewiese, Weidenhang – Standorte per Suche (flacher Anlauf,
   freie Landezone) und mit der echten Fahrphysik bei 130/170 km/h geprüft. Fehler behoben: die alte Steppe-Schanze
   schickte das Auto ins Meer – versetzt als „Hochebene“ (Rekorde/Sterne bleiben). Drei Kandidaten mit Wasserlandung

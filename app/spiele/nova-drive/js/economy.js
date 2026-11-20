@@ -1,6 +1,6 @@
 // Geld & Co.: Tagesbonus, Tagesaufgaben, Glücksrad, Statistik, Verkaufswert.
 // Alles reine Spielwährung – es gibt keine Käufe mit echtem Geld.
-import { CARS, UPGRADES } from './data.js';
+import { CARS, UPGRADES, EVENTS, CLASS_ORDER } from './data.js';
 import { mulberry32, fmtNum, clamp } from './util.js';
 
 const TASKS = [
@@ -28,6 +28,15 @@ export const PRIZES = [
   { label: '50.000', cr: 50000, w: 9, color: '#b84dff' },
   { label: '100.000', cr: 100000, w: 5, color: '#ff3b3b' },
 ];
+
+// Kalenderwoche (ISO) als Schlüssel, z. B. „2026-W47“, und Tage bis Montag
+export function weekKey(d = new Date()) {
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = t.getUTCDay() || 7; t.setUTCDate(t.getUTCDate() + 4 - day);
+  const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  return `${t.getUTCFullYear()}-W${String(Math.ceil(((t - y0) / 864e5 + 1) / 7)).padStart(2, '0')}`;
+}
+export function daysToMonday(d = new Date()) { const w = d.getDay() || 7; return 8 - w; }
 
 export function today() {
   const d = new Date();
@@ -67,11 +76,64 @@ export class Economy {
   }
   taskText(t) { const d = TASKS.find(x => x.type === t.type); return d ? d.text(t.goal) : t.type; }
 
+  // ---------- Wochen-Herausforderungen: 3 Aufgaben je Kalenderwoche (für alle gleich), alle drei = Bonus
+  ensureWeekly() {
+    const s = this.g.save, key = weekKey();
+    if (s.weekly && s.weekly.key === key) return s.weekly;
+    let h = 7; for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) | 0;
+    const rnd = mulberry32(h), pick = a => a[Math.floor(rnd() * a.length)];
+    const races = EVENTS.filter(e => e.type === 'race'), others = EVENTS.filter(e => e.type === 'drift' || e.type === 'trap' || e.type === 'speed' || e.type === 'jump');
+    const r = pick(races), cls = pick(r.dirt ? ['C', 'B'] : ['D', 'C', 'B', 'A']), e = pick(others);
+    const tasks = [
+      { type: 'winRace', ev: r.id, cls, done: false, cr: 25000 },
+      { type: 'stars3', ev: e.id, done: false, cr: 20000 },
+      pick([{ type: 'km', goal: 40, prog: 0, done: false, cr: 20000 }, { type: 'wins', goal: 5, prog: 0, done: false, cr: 25000 }, { type: 'champRace', goal: 3, prog: 0, done: false, cr: 25000 }]),
+    ];
+    s.weekly = { key, tasks, bonus: false };
+    this.g.saveGame && this.g.saveGame();
+    return s.weekly;
+  }
+  weeklyText(t) {
+    const ev = id => (EVENTS.find(e => e.id === id) || {}).name || id;
+    if (t.type === 'winRace') return `Gewinne „${ev(t.ev)}“ mit einem Auto bis Klasse ${t.cls}`;
+    if (t.type === 'stars3') return `Hol 3 Sterne bei „${ev(t.ev)}“`;
+    if (t.type === 'km') return `Fahre ${t.goal} km`;
+    if (t.type === 'wins') return `Gewinne ${t.goal} Rennen`;
+    if (t.type === 'champRace') return `Fahre ${t.goal} Meisterschaftsrennen`;
+    return t.type;
+  }
+  // kind: 'race' {ev, pos, cls, champ} · 'stars' {ev, stars} · 'km' {amount}
+  weekly(kind, d) {
+    const W = this.ensureWeekly(); let changed = false;
+    for (const t of W.tasks) {
+      if (t.done) continue;
+      if (kind === 'race' && t.type === 'winRace' && d.ev === t.ev && d.pos === 1 && CLASS_ORDER.indexOf(d.cls) <= CLASS_ORDER.indexOf(t.cls)) t.done = true;
+      if (kind === 'race' && t.type === 'wins' && d.pos === 1) t.prog++;
+      if (kind === 'race' && t.type === 'champRace' && d.champ) t.prog++;
+      if (kind === 'stars' && t.type === 'stars3' && d.ev === t.ev && d.stars >= 3) t.done = true;
+      if (kind === 'km' && t.type === 'km') t.prog += d.amount;
+      if (t.goal && t.prog >= t.goal) { t.prog = t.goal; t.done = true; }
+      if (t.done) {
+        changed = true;
+        this.g.hud.banner('Wochen-Herausforderung!', `+${fmtNum(t.cr)} CR`, null, this.weeklyText(t));
+        this.g.audio.play('bank');
+        this.g.reward(t.cr, 1000, false);
+      }
+    }
+    if (!W.bonus && W.tasks.every(t => t.done)) {
+      W.bonus = true; changed = true;
+      this.addSpin('Alle Wochen-Herausforderungen');
+      this.g.reward(25000, 2500, true);
+      this.g.hud.toast('🗓 Alle 3 Wochen-Herausforderungen geschafft! +25.000 CR + Glücksrad-Dreh', 'info');
+    }
+    if (changed) this.g.saveGame();
+  }
+
   track(type, amount = 1) {
     this.ensureDaily();
     const s = this.g.save;
     const st = s.stats;
-    if (type === 'km') st.km += amount;
+    if (type === 'km') { st.km += amount; this.weekly('km', { amount }); }
     if (type === 'smash') st.smashed += amount;
     if (type === 'near') st.near += amount;
     if (type === 'speed') st.top = Math.max(st.top, amount);

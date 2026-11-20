@@ -316,6 +316,7 @@ export class Events {
   }
   giveStars(ev, stars) {
     const had = this.g.save.stars[ev.id] || 0;
+    this.g.eco.weekly('stars', { ev: ev.id, stars });
     if (stars > had) {
       this.g.save.stars[ev.id] = stars;
       const n = stars - had;
@@ -602,6 +603,7 @@ export class Events {
     if (isBest) { g.save.best[ev.id] = r.finishT; g.saveGhost(ev.id, r.ghostRec, r.finishT); }
     const stars = pos === 1 ? 3 : pos <= 3 ? 2 : 1;
     g.save.stats.races++;
+    g.eco.weekly('race', { ev: ev.id, pos, cls: g.carClassOf(), champ: !!r.champ });
     if (g.tutEvent) g.tutEvent('finish');
     if (pos === 1) g.save.stats.wins++;
     const had = g.save.stars[ev.id] || 0;
