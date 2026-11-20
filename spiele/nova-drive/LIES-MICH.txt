@@ -76,4 +76,6 @@ Meisterschaften, Lackiererei, Ideallinie
   Ideallinie (Einstellungen): blau = Gas, gelb = Gas weg, rot = bremsen. „Nur Bremszonen“ zeigt nur gelb/rot.
   Bremshilfe (Einstellungen): bremst im Rennen automatisch vor zu schnellen Kurven. „Auto“ = am Handy an, am PC aus.
   👁 Aussichtspunkte: 8 Stück am Straßenrand der höchsten Stellen – kurz anhalten.
+  🗓 Wochen-Herausforderungen (bei den Tagesaufgaben): drei Aufgaben pro Woche, montags neu.
+  🏅 Erfolge (Titel/Pause): 33 Ziele mit Fortschritt und Belohnung.
   FPS anzeigen (Einstellungen): zeigt die Bildrate oben – wenn es ruckelt, diese Zahl hilft bei der Fehlersuche.

@@ -16,7 +16,7 @@ import { Particles, Smoke, Skids, Rain } from './effects.js';
 import { CARS, UPGRADES, carStats, rating, carClass, CLASS_COLORS, EVENTS, RADIO, TIPS, CHAMPS, CLASS_ORDER } from './data.js';
 import { clamp, lerp, damp, fmtNum, fmtTime, wrapAngle, breathe, view, updateView, logicalPoint, localPoint } from './util.js';
 import { EVENT_COLORS } from './world.js';
-import { Economy, PRIZES } from './economy.js';
+import { Economy, PRIZES, daysToMonday } from './economy.js';
 import { RoadGraph, NavRibbon, RaceLine, say, fmtDist, TURN_ICON, turnText } from './nav.js';
 import { Net } from './net.js';
 import { Achievements } from './achievements.js';
@@ -579,6 +579,17 @@ class Game {
       box.appendChild(row);
     }
     $('d-bonus').textContent = d.bonus ? '🎡 Bonus-Dreh für heute abgeholt' : '🎡 Alle 3 geschafft = Glücksrad-Dreh';
+    // Wochen-Herausforderungen
+    const W = this.eco.ensureWeekly(), wb = $('w-tasks'), dl = daysToMonday();
+    $('w-left').textContent = `· neue in ${dl} Tag${dl > 1 ? 'en' : ''}${W.bonus ? ' · Bonus abgeholt ✓' : ' · alle 3 = +25.000 CR + Dreh'}`;
+    wb.innerHTML = '';
+    for (const t of W.tasks) {
+      const row = document.createElement('div'); row.className = 'task' + (t.done ? ' done' : '');
+      const f = t.done ? 1 : t.goal ? Math.min(1, t.prog / t.goal) : 0;
+      row.innerHTML = `<div class="tk-top"><span class="tk-name"></span><span class="tk-cr">${t.done ? '✓' : '+' + fmtNum(t.cr) + ' CR'}</span></div>` + (t.goal ? `<div class="bar"><i style="width:${(f * 100).toFixed(1)}%"></i></div><div class="tk-prog">${t.type === 'km' ? t.prog.toFixed(1) : Math.floor(t.prog)} / ${t.goal}</div>` : '');
+      row.querySelector('.tk-name').textContent = this.eco.weeklyText(t);
+      wb.appendChild(row);
+    }
     const lg = this.save.login || { streak: 0 };
     $('d-streak').innerHTML = [1, 2, 3, 4, 5, 6, 7].map(i => `<span class="${i <= lg.streak ? 'on' : ''}">${i}</span>`).join('');
     const st = this.save.stats, lv = this.level();
