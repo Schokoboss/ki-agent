@@ -1,7 +1,7 @@
 // Gegner im Rennen (folgen der Ideallinie mit Tempo-Profil) und Verkehr auf der Insel.
 import * as THREE from '../lib/three.module.min.js';
 import { clamp, lerp, damp, mulberry32 } from './util.js';
-import { buildCar, styleDims } from './carmodel.js';
+import { buildCar, styleDims, disposeCar } from './carmodel.js';
 import { SURF } from './terrain.js';
 
 const P = {};
@@ -43,7 +43,7 @@ export class RaceAI {
     this.speed = 0; this.s = 0; this.prog = 0; this.lat = 0; this.latT = 0; this.lane = 0;
     this.done = false; this.finish = Infinity; this.bump = 0; this.wheelRot = 0; this.slide = 0;
   }
-  dispose(scene) { scene.remove(this.model); }
+  dispose(scene) { scene.remove(this.model); disposeCar(this.model); }
   circles() {
     const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw), h = this.half;
     return [[this.pos.x + sy * h, this.pos.z + cy * h], [this.pos.x - sy * h, this.pos.z - cy * h]];

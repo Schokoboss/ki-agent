@@ -3,7 +3,7 @@ import * as THREE from '../lib/three.module.min.js';
 import { World, FESTIVAL, HALF } from './terrain.js';
 import { Scenery } from './world.js';
 import { makeTextures, makeDetailTextures, loadPhotoTextures, loadTreeImpostors } from './textures.js';
-import { buildCar, styleDims, loadCarModels, setTailGlow, setCarDetail } from './carmodel.js';
+import { buildCar, styleDims, loadCarModels, setTailGlow, setCarDetail, disposeCar } from './carmodel.js';
 import { loadWorldModels, modelUrl } from './models.js';
 import { Vehicle, carContact } from './physics.js';
 import { Traffic } from './ai.js';
@@ -416,7 +416,7 @@ class Game {
   setPlayerCar(id) {
     const spec = this.carSpec(id) || CARS[0];
     const own = this.save.owned[spec.id] || { up: {}, color: spec.colors[0] };
-    if (this.carModel) this.scene.remove(this.carModel);
+    if (this.carModel) { if (this.reflModel === this.carModel) this.reflModel = null; disposeCar(this.carModel); }
     this.carModel = buildCar(spec, own.color || spec.colors[0]);
     this.carModel.userData.carId = spec.id;
     this.setupReflections(); this.applyReflections(this.carModel);
@@ -1125,7 +1125,7 @@ class Game {
   }
   previewCar(id) {
     const spec = this.carSpec(id), own = this.save.owned[id];
-    if (this.previewModel) this.scene.remove(this.previewModel);
+    if (this.previewModel) { if (this.reflModel === this.previewModel) this.reflModel = null; disposeCar(this.previewModel); }
     this.previewColor = (own && own.color) || spec.colors[0];
     this.previewModel = buildCar(spec, this.previewColor);
     this.applyReflections(this.previewModel);
@@ -1140,7 +1140,7 @@ class Game {
     return { x, z, y: this.world.heightAt(x, z) };
   }
   closeGarage() {
-    if (this.previewModel) { this.scene.remove(this.previewModel); this.previewModel = null; this.previewId = null; }
+    if (this.previewModel) { if (this.reflModel === this.previewModel) this.reflModel = null; disposeCar(this.previewModel); this.previewModel = null; this.previewId = null; }
     this.carModel.visible = true;
     const x = this.car.pos.x, z = this.car.pos.z, yaw = this.car.yaw, changed = this.carModel.userData.carId !== this.save.current;
     this.setPlayerCar(this.save.current);

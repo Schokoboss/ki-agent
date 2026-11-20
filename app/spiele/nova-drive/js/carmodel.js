@@ -138,6 +138,7 @@ export function setCarDetail(q) { DETAIL = q; }
 // Grundschicht pixelweise (Objektraum-Rauschen), der Klarlack bleibt spiegelglatt → Glitzern in der Sonne.
 export function carPaint(color, detail = DETAIL) {
   const m = new THREE.MeshPhysicalMaterial({ color, metalness: 0.5, roughness: 0.34, clearcoat: 1, clearcoatRoughness: 0.025, envMapIntensity: 1.4 });
+  m.name = 'paint';
   const U = { uFlake: { value: detail >= 4 ? 1 : 0.75 }, uDirt: { value: 0 } };
   m.userData.flake = U.uFlake; m.userData.dirt = U.uDirt;
   m.onBeforeCompile = sh => {
@@ -234,51 +235,88 @@ function fromTemplate(spec, color, opts) {
       } else if (o.material.name === 'glass') { o.material.envMapIntensity = 1.6; }
     });
     // gleiche Materialien zusammenfassen: ~40 → ~15 Zeichenaufrufe fürs eigene Auto (und nochmal so viele im Schatten)
-    mergeByMaterial(bodyG);
-    for (const w of wheels) mergeByMaterial(w.spin);
+    // zusammengefasste Geometrie je Vorlage nur einmal bauen und teilen (sonst wächst der Grafikspeicher mit jeder Vorschau)
+    // (mit Referenzzähler: wird das letzte Auto dieser Vorlage entfernt, wird der Speicher wieder frei)
+    T.merged ||= new Map();
+    root.userData.merged = [];
+    mergeByMaterial(bodyG, T.merged, 'body', root.userData.merged);
+    wheels.forEach((w, i) => mergeByMaterial(w.spin, T.merged, 'wheel' + i, root.userData.merged));
   }
   const exh = [];
   const exN = spec.style === 'gt' || spec.style === 'muscle' || spec.style === 'hyper' ? 2 : 1;
   for (let i = 0; i < exN; i++) exh.push(new THREE.Vector3(exN === 2 ? (i ? 0.48 : -0.48) : 0.5, S.clr + 0.09, -S.L / 2 - 0.12));
-  root.userData = { bodyG, wheels, paintMat, tailMat, headMat: root.userData.headMat, dims: S, exhaust: exh, style: spec.style, gltf: true, lodKind: opts.lod ? (LODT === T.mid ? 'mid' : 'lod') : 'full' };
+  root.userData = { bodyG, wheels, paintMat, tailMat, headMat: root.userData.headMat, merged: root.userData.merged || [], dims: S, exhaust: exh, style: spec.style, gltf: true, lodKind: opts.lod ? (LODT === T.mid ? 'mid' : 'lod') : 'full' };
   return root;
 }
 
 // alle Meshes unter group (beliebig verschachtelt) nach Material + Attributsatz zu je einem Mesh verschmelzen
 const _gi = new THREE.Matrix4();
-function mergeByMaterial(group) {
+const mergeKey = o => o.material.name + '|' + Object.keys(o.geometry.attributes).filter(k => ['position', 'normal', 'uv', 'color'].includes(k)).sort().join(',');
+function mergeByMaterial(group, cache, role, refs) {
   group.updateMatrixWorld(true);
   _gi.copy(group.matrixWorld).invert();
-  const buckets = new Map(), meshes = [];
+  const meshes = [];
   group.traverse(o => { if (o.isMesh && !o.isSkinnedMesh && !Array.isArray(o.material)) meshes.push(o); });
   if (meshes.length < 3) return;
-  for (const o of meshes) {
-    const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
-    for (const k of Object.keys(g.attributes)) {
-      if (!['position', 'normal', 'uv', 'color'].includes(k)) { g.deleteAttribute(k); continue; }
-      // komprimierte Modelle (meshopt): Ganzzahl-Koordinaten → erst in Kommazahlen, sonst schneidet die Verschiebung sie ab
-      const A = g.attributes[k];
-      if (A.normalized || !(A.array instanceof Float32Array) || A.isInterleavedBufferAttribute) {
-        const f = new Float32Array(A.count * A.itemSize);
-        for (let i = 0; i < A.count; i++) for (let c = 0; c < A.itemSize; c++) f[i * A.itemSize + c] = A.getComponent ? A.getComponent(i, c) : [A.getX(i), A.getY(i), A.getZ(i), A.getW(i)][c];
-        g.setAttribute(k, new THREE.BufferAttribute(f, A.itemSize));
+  // Materialien dieser Instanz (Lack/Rücklicht/Scheinwerfer sind je Auto eigene) nach Gruppenschlüssel
+  const inst = new Map();
+  for (const o of meshes) { const k = mergeKey(o); let e = inst.get(k); if (!e) inst.set(k, e = { mat: o.material, shadow: false, order: o.renderOrder }); e.shadow ||= o.castShadow; }
+  let entry = cache && cache.get(role);
+  if (!entry) {
+    const buckets = new Map();
+    for (const o of meshes) {
+      const g = o.geometry.clone(); // Index bleibt (kompakt); fehlt er bei einem Teil, wird unten der ganze Eimer entindiziert
+      for (const k of Object.keys(g.attributes)) {
+        if (!['position', 'normal', 'uv', 'color'].includes(k)) { g.deleteAttribute(k); continue; }
+        // komprimierte Modelle (meshopt): Ganzzahl-Koordinaten → erst in Kommazahlen, sonst schneidet die Verschiebung sie ab
+        const A = g.attributes[k];
+        if (A.normalized || !(A.array instanceof Float32Array) || A.isInterleavedBufferAttribute) {
+          const f = new Float32Array(A.count * A.itemSize);
+          for (let i = 0; i < A.count; i++) for (let c = 0; c < A.itemSize; c++) f[i * A.itemSize + c] = A.getComponent(i, c);
+          g.setAttribute(k, new THREE.BufferAttribute(f, A.itemSize));
+        }
       }
+      g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(_gi, o.matrixWorld));
+      g.morphAttributes = {};
+      const key = mergeKey(o);
+      let b = buckets.get(key); if (!b) buckets.set(key, b = []);
+      b.push(g);
     }
-    g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(_gi, o.matrixWorld));
-    g.morphAttributes = {};
-    const key = o.material.uuid + '|' + Object.keys(g.attributes).sort().join(',');
-    let b = buckets.get(key); if (!b) buckets.set(key, b = { mat: o.material, geos: [], shadow: false, order: o.renderOrder });
-    b.geos.push(g); b.shadow ||= o.castShadow;
+    const geos = new Map();
+    for (const [key, list] of buckets) {
+      const all = list.every(g => g.index) ? list : list.map(g => (g.index ? g.toNonIndexed() : g));
+      const g = all.length > 1 ? mergeGeometries(all) : all[0];
+      if (!g) return; // passt nicht zusammen → Original behalten
+      geos.set(key, g);
+    }
+    entry = { geos, refs: 0, cache, role };
+    if (cache) cache.set(role, entry);
   }
-  const merged = [];
-  for (const b of buckets.values()) {
-    const g = b.geos.length > 1 ? mergeGeometries(b.geos) : b.geos[0];
-    if (!g) return; // passt nicht zusammen → Original behalten
-    const m = new THREE.Mesh(g, b.mat); m.castShadow = b.shadow; m.renderOrder = b.order;
-    merged.push(m);
-  }
+  entry.refs++;
+  if (refs) refs.push(entry);
+  const geos = entry.geos;
   for (const c of [...group.children]) group.remove(c);
-  for (const m of merged) group.add(m);
+  for (const [key, g] of geos) {
+    const e = inst.get(key);
+    if (!e) continue;
+    const m = new THREE.Mesh(g, e.mat); m.castShadow = e.shadow; m.renderOrder = e.order;
+    group.add(m);
+  }
+}
+
+// Auto aus der Szene nehmen und eigene Materialien freigeben (Geometrie ist mit der Vorlage geteilt)
+export function disposeCar(model) {
+  if (!model) return;
+  if (model.parent) model.parent.remove(model);
+  const ud = model.userData || {}, seen = new Set();
+  for (const e of ud.merged || []) {
+    if (--e.refs > 0) continue;
+    for (const g of e.geos.values()) g.dispose();
+    if (e.cache && e.cache.get(e.role) === e) e.cache.delete(e.role);
+  }
+  ud.merged = [];
+  for (const m of [ud.paintMat, ud.tailMat, ud.headMat]) if (m && !seen.has(m)) { seen.add(m); m.dispose(); }
+  model.traverse(o => { if (o.isMesh && o.material && o.material.userData && o.material.userData.own && !seen.has(o.material)) { seen.add(o.material); o.material.dispose(); } });
 }
 
 // spec: Eintrag aus CARS (style), color: Lackfarbe, opts.lod: true = Verkehr (2 Draw-Calls), 'far' = Verkehr weit weg, 'ai' = Gegner

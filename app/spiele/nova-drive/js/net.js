@@ -5,7 +5,7 @@
 import * as THREE from '../lib/three.module.min.js';
 import mqtt from '../lib/mqtt.esm.js';
 import { CARS } from './data.js';
-import { buildCar, styleDims } from './carmodel.js';
+import { buildCar, styleDims, disposeCar } from './carmodel.js';
 import { clamp } from './util.js';
 
 const BROKERS = ['wss://broker.hivemq.com:8884/mqtt', 'wss://broker.emqx.io:8084/mqtt'];
@@ -150,7 +150,7 @@ export class Net {
   // ---------------------------------------------------------------- Darstellung der anderen
   buildPeer(p) {
     const g = this.g;
-    if (p.model) g.scene.remove(p.model);
+    if (p.model) disposeCar(p.model);
     const spec = CARS.find(c => c.id === p.car) || CARS[0];
     p.spec = spec;
     p.model = buildCar(spec, p.color || spec.colors[0], { lod: 'ai' });
@@ -167,8 +167,8 @@ export class Net {
     };
   }
   dropPeer(p) {
-    if (p.model) this.g.scene.remove(p.model);
-    if (p.label) this.g.scene.remove(p.label);
+    if (p.model) disposeCar(p.model);
+    if (p.label) { this.g.scene.remove(p.label); p.label.material.map.dispose(); p.label.material.dispose(); }
     p.model = null; p.label = null;
   }
   update(dt) {

@@ -2,6 +2,15 @@
 
 Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 
+## 20.11.2026
+- **Nova Drive stabiler**: Speicherleck behoben – jede Auto-Vorschau in der Garage, jeder Autowechsel und jedes Rennen
+  ließ Grafikspeicher zurück (konnte Handys nach längerem Spielen abstürzen lassen). Zusammengefasste Automodelle werden
+  geteilt und mit Referenzzähler freigegeben; Gegner, Geist, Scheunenautos und Mitspieler geben ihre Materialien frei.
+  Gemessen: Garage 3× durch alle 21 Autos → Grafikspeicher bleibt konstant (vorher +600 Geometrien, JS-Speicher ×2).
+- **Fahrphysik**: Autos erreichen jetzt die in der Garage angezeigte Höchstgeschwindigkeit (vorher nur ~92 % – die
+  KI-Gegner fuhren aber den vollen Wert und zogen auf Geraden davon). Bremsweg hängt von den Reifen ab (100→0 in
+  21–26 m statt 15 m für alle). Weniger Speicher-Müll pro Physikschritt.
+
 ## 18.11.2026 (2)
 - **Nova Drive läuft flüssiger** (gemessen: 50–66 % weniger Dreiecke pro Bild, eigenes Auto 11 statt 40 Zeichenaufrufe):
   - Grafik „Auto“ wählt die Stufe nach Gerät/Grafikchip (Handy Ultra, starker PC Hyper, Software-Grafik Niedrig) statt

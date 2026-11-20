@@ -4,7 +4,8 @@ import { clamp, lerp, damp } from './util.js';
 import { SURF, SURF_PROPS } from './terrain.js';
 
 const GEARS = [0.2, 0.36, 0.52, 0.68, 0.84, 1.03];
-const _g = { x: 0, z: 0 };
+const TOP_K = 1.085; // Beschleunigungskurve endet etwas über der Anzeige → Gleichgewicht mit dem Luftwiderstand ≈ Anzeige
+const _g = { x: 0, z: 0 }, _up = new THREE.Vector3();
 let stamp = 1;
 
 export class Vehicle {
@@ -70,13 +71,14 @@ export class Vehicle {
     if (this.grounded) {
       let a = 0;
       if (inp.throttle > 0 && vf > -1) {
-        const r = clamp(vf / top, 0, 1.3);
+        // Kurve gegen eine etwas höhere Spitze: so erreicht das Auto die angezeigte Höchstgeschwindigkeit wirklich
+        const r = clamp(vf / (top * TOP_K), 0, 1.3);
         a += inp.throttle * st.accel * (0.9 - 0.12 * r) * Math.max(0, 1 - Math.pow(r, 2.6));
         if (this.nitroOn) a += 6.5;
         if (this.shift > 0) a *= 0.55;
       } else if (inp.throttle > 0 && vf <= -1) a += 24 * inp.throttle;
       if (inp.brake > 0) {
-        if (vf > 1) a -= inp.brake * 25;
+        if (vf > 1) a -= inp.brake * 9.81 * (1.0 + 0.55 * st.grip) * gripMul; // Bremsweg 100→0 ≈ 20–26 m je nach Reifen
         else if (vf > -top * 0.22) a -= inp.brake * st.accel * 0.65;
       }
       vf += a * dt;
@@ -198,7 +200,7 @@ export class Vehicle {
       this.rpm = damp(this.rpm, clamp(target, 0.16, 1.05), 14, dt);
     }
     // Ausrichtung am Boden
-    const tUp = this.grounded ? new THREE.Vector3(-_g.x, 1, -_g.z).normalize() : this.up;
+    const tUp = this.grounded ? _up.set(-_g.x, 1, -_g.z).normalize() : this.up;
     this.up.lerp(tUp, 1 - Math.exp(-10 * dt)).normalize();
   }
 

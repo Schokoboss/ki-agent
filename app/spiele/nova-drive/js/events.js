@@ -5,7 +5,7 @@ import { INTRO } from './cine.js';
 import { clamp, fmtTime, fmtNum, mulberry32 } from './util.js';
 import { RaceAI, speedProfile } from './ai.js';
 import { EVENT_COLORS } from './world.js';
-import { buildCar } from './carmodel.js';
+import { buildCar, disposeCar } from './carmodel.js';
 
 const ICONS = { race: '🏁', trap: '📷', drift: '〰', jump: '⚠', speed: '⏱' };
 const P = {};
@@ -145,7 +145,7 @@ export class Events {
         f.model.rotation.y = f.yaw;
         f.model.traverse(o => { if (o.isMesh) o.castShadow = true; });
         g.scene.add(f.model);
-      } else if (d > 260 && f.model) { g.scene.remove(f.model); f.model = null; }
+      } else if (d > 260 && f.model) { disposeCar(f.model); f.model = null; }
       if (d < 280 && !f.hinted) { f.hinted = true; g.hud.toast('📻 Gerücht: In einer Scheune hier in der Nähe soll ein vergessenes Auto stehen…', 'radio'); }
       if (d < 8 && car.speedKmh < 45) this.findBarn(f);
     }
@@ -154,7 +154,7 @@ export class Events {
     const g = this.g;
     f.found = true;
     (g.save.barns ||= []).push(f.id);
-    if (f.model) { g.scene.remove(f.model); f.model = null; }
+    if (f.model) { disposeCar(f.model); f.model = null; }
     const n = g.save.barns.length, total = this.barns.length;
     if (!g.save.owned[f.car]) {
       g.save.owned[f.car] = { up: {}, color: f.spec.colors[0] };
@@ -404,7 +404,7 @@ export class Events {
     const g = this.g, r = this.race;
     if (!r) return;
     for (const ai of r.ais) ai.dispose(g.scene);
-    if (r.ghost) g.scene.remove(r.ghost.model);
+    if (r.ghost) { g.scene.remove(r.ghost.model); r.ghost.model.traverse(o => { if (o.isMesh) o.material.dispose(); }); }
     for (const e of this.list) if (e.beacon) e.beacon.hidden = false;
     g.scenery.setGate(0, null); g.scenery.setGate(1, null);
     g.traffic.active = true;
@@ -533,6 +533,7 @@ export class Events {
 function makeGhostModel(carId, color) {
   const spec = CARS.find(c => c.id === carId) || CARS[0];
   const m = buildCar(spec, color || '#8af', { lod: true });
+  if (m.userData.paintMat) m.userData.paintMat.dispose(); // wird unten durch durchsichtige Kopien ersetzt
   m.traverse(o => {
     if (o.isMesh) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.38; o.material.depthWrite = false; o.castShadow = false; }
   });
