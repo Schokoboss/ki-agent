@@ -15,6 +15,9 @@ Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 - **Meisterschaften** (Titel/Pause → 🏆): sechs Serien à drei Rennen mit Klassen-Obergrenze (D, Schotter, C, B, S2, X),
   Punkte 25-18-15-12…, immer dieselben Gegner mit Autos ihrer Klasse, Zwischenstand nach jedem Rennen, Gesamtsieg =
   Preisgeld + Auto (Dune, Atlas, Regent, Gruppo, Strato, Phantom), Platz 2/3 = Teil des Preisgelds. Fortsetzbar.
+- **Lackiererei** (Garage, eigene Autos): freie Farbe per Farbwähler (🌈-Feld) und Designs – Rennstreifen, Seitenband,
+  Zweifarbig, Startnummer (0–99, auf beiden Türen lesbar), Streifen + Nummer – mit Zweitfarbe; sofort in der Vorschau,
+  je Auto gespeichert, auch Mitspieler sehen dein Design. Umgesetzt als Shader-Muster im Lack (kein extra Modell).
 
 ## 18.11.2026 (2)
 - **Nova Drive läuft flüssiger** (gemessen: 50–66 % weniger Dreiecke pro Bild, eigenes Auto 11 statt 40 Zeichenaufrufe):

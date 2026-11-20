@@ -304,6 +304,71 @@ function mergeByMaterial(group, cache, role, refs) {
   }
 }
 
+// ---------------------------------------------------------------- Lackdesign (Lackiererei in der Garage)
+// Muster im Objektraum des Autos (vorne +z, oben +y, seitlich x): Rennstreifen, Seitenband, zweifarbig, Startnummer.
+const LIV = { none: 0, streifen: 1, seite: 2, zwei: 3, nummer: 4, rennen: 5 };
+export const LIVERIES = [['none', 'Keins'], ['streifen', 'Rennstreifen'], ['seite', 'Seitenband'], ['zwei', 'Zweifarbig'], ['nummer', 'Startnummer'], ['rennen', 'Streifen + Nummer']];
+function numberTex(n) {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f4f4f4'; g.beginPath(); g.arc(64, 64, 60, 0, 7); g.fill();
+  g.lineWidth = 6; g.strokeStyle = '#151515'; g.stroke();
+  g.fillStyle = '#151515'; g.font = 'italic 900 70px "Chakra Petch", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(String(n), 64, 68);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  return t;
+}
+function patchLivery(sh, U) {
+  Object.assign(sh.uniforms, U);
+  sh.vertexShader = 'varying vec3 vLivP; varying vec3 vLivN;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vLivP = position; vLivN = normal;');
+  sh.fragmentShader = 'uniform float uLiv, uClr; uniform vec3 uC2; uniform vec4 uDim; uniform sampler2D uNum; varying vec3 vLivP; varying vec3 vLivN;\n' +
+    sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+    if (uLiv > 0.5) {
+      vec3 p = vLivP, n = normalize(vLivN);
+      float L = uDim.x, belt = uDim.w, m = 0.0, aa = 0.007;
+      if (uLiv < 1.5 || uLiv > 4.5) { // zwei Rennstreifen längs über Haube, Dach, Heck
+        float ax = abs(p.x);
+        m = max(m, smoothstep(0.07 - aa, 0.07 + aa, ax) * smoothstep(0.27 + aa, 0.27 - aa, ax) * step(belt * 0.55, p.y));
+      }
+      if (uLiv > 1.5 && uLiv < 2.5) { // Seitenband
+        float yb = uClr + (belt - uClr) * 0.58, side = smoothstep(0.5, 0.75, abs(n.x));
+        m = max(m, side * smoothstep(yb - 0.09 - aa, yb - 0.09 + aa, p.y) * smoothstep(yb + 0.07 + aa, yb + 0.07 - aa, p.y) * smoothstep(L * 0.5 - 0.08, L * 0.5 - 0.3, abs(p.z)));
+      }
+      if (uLiv > 2.5 && uLiv < 3.5) m = max(m, smoothstep(belt - 0.03 - aa, belt - 0.03 + aa, p.y)); // zweifarbig: oben Zweitfarbe
+      diffuseColor.rgb = mix(diffuseColor.rgb, uC2, m);
+      if (uLiv > 3.5) { // Startnummer auf beiden Türen (liest sich von außen richtig herum)
+        float side = smoothstep(0.6, 0.8, abs(n.x)), r = 0.27, yc = uClr + (belt - uClr) * 0.55;
+        vec2 q = vec2(-(p.z + 0.05) * sign(p.x), p.y - yc) / (2.0 * r) + 0.5;
+        if (side > 0.0 && q.x > 0.0 && q.y > 0.0 && q.x < 1.0 && q.y < 1.0) {
+          vec4 t = texture2D(uNum, q);
+          diffuseColor.rgb = mix(diffuseColor.rgb, t.rgb, t.a * side);
+        }
+      }
+    }`);
+}
+// liv: { p: Muster, c2: Zweitfarbe, n: Nummer } – ändert nur Uniforms (kein Neuaufbau), Shader wird einmal erweitert
+export function applyLivery(model, liv) {
+  const m = model && model.userData.paintMat, S = model && model.userData.dims;
+  if (!m || !S) return;
+  let U = m.userData.liv;
+  const want = LIV[liv && liv.p] || 0;
+  if (!U) {
+    if (!want) return;
+    U = m.userData.liv = { uLiv: { value: 0 }, uC2: { value: new THREE.Color('#ffffff') }, uNum: { value: null }, uDim: { value: new THREE.Vector4(S.L, S.W, S.H, S.belt) }, uClr: { value: S.clr } };
+    const prev = m.onBeforeCompile;
+    m.onBeforeCompile = (sh, r) => { if (prev) prev.call(m, sh, r); patchLivery(sh, U); };
+    const pk = m.customProgramCacheKey.bind(m);
+    m.customProgramCacheKey = () => pk() + '|liv';
+    m.needsUpdate = true;
+  }
+  U.uLiv.value = want;
+  U.uC2.value.set((liv && liv.c2) || '#ffffff');
+  if (want >= 4) {
+    const n = Math.max(0, Math.min(99, Math.round((liv && liv.n) || 0)));
+    if (U.num !== n) { if (U.tex) U.tex.dispose(); U.tex = numberTex(n); U.num = n; U.uNum.value = U.tex; }
+  }
+}
+
 // Auto aus der Szene nehmen und eigene Materialien freigeben (Geometrie ist mit der Vorlage geteilt)
 export function disposeCar(model) {
   if (!model) return;
@@ -315,7 +380,7 @@ export function disposeCar(model) {
     if (e.cache && e.cache.get(e.role) === e) e.cache.delete(e.role);
   }
   ud.merged = [];
-  for (const m of [ud.paintMat, ud.tailMat, ud.headMat]) if (m && !seen.has(m)) { seen.add(m); m.dispose(); }
+  for (const m of [ud.paintMat, ud.tailMat, ud.headMat]) if (m && !seen.has(m)) { seen.add(m); if (m.userData.liv && m.userData.liv.tex) m.userData.liv.tex.dispose(); m.dispose(); }
   model.traverse(o => { if (o.isMesh && o.material && o.material.userData && o.material.userData.own && !seen.has(o.material)) { seen.add(o.material); o.material.dispose(); } });
 }
 
