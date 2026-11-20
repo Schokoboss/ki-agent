@@ -3,7 +3,7 @@ import * as THREE from '../lib/three.module.min.js';
 import { World, FESTIVAL, HALF } from './terrain.js';
 import { Scenery } from './world.js';
 import { makeTextures, makeDetailTextures, loadPhotoTextures, loadTreeImpostors } from './textures.js';
-import { buildCar, styleDims, loadCarModels, setTailGlow, setCarDetail, disposeCar, applyLivery, LIVERIES } from './carmodel.js';
+import { buildCar, styleDims, loadCarModels, setTailGlow, setCarDetail, disposeCar, applyLivery, LIVERIES, applyMods, RIMS, TINTS, WINGS } from './carmodel.js';
 import { loadWorldModels, modelUrl } from './models.js';
 import { Vehicle, carContact } from './physics.js';
 import { Traffic } from './ai.js';
@@ -423,6 +423,7 @@ class Game {
     if (this.carModel) { if (this.reflModel === this.carModel) this.reflModel = null; disposeCar(this.carModel); }
     this.carModel = buildCar(spec, own.color || spec.colors[0]);
     if (own.livery) applyLivery(this.carModel, own.livery);
+    if (own.mods) applyMods(this.carModel, own.mods);
     this.carModel.userData.carId = spec.id;
     this.setupReflections(); this.applyReflections(this.carModel);
     this.scene.add(this.carModel);
@@ -846,6 +847,7 @@ class Game {
     if (s === 0 && this.tutAcc > 0.8) this.tutSet(1);
     else if (s === 1 && Math.abs(inp.steer || 0) > 0.45 && car.speedKmh > 25) { this.tutAcc = (this.tutAcc || 0) + dt; if (this.tutAcc > 0.7) this.tutSet(2); }
     else if (s === 2 && this.tutT > 75) this.tutSet(3); // wer nicht driftet, kommt trotzdem weiter
+    else if (s === 5 && this.tutT > 9) this.tutSet(99); // „Geschafft“-Karte auch nach Neustart wieder ausblenden
     // Text an Gerät/Steuerung anpassen und Sichtbarkeit (Kino, Rennen) nachführen – 2× pro Sekunde reicht
     this._tutR = (this._tutR || 0) - dt;
     if (this._tutR <= 0) { this._tutR = 0.5; this.renderTut(); }
@@ -1303,6 +1305,18 @@ class Game {
       c2.oninput = () => setL({ c2: c2.value }, false); c2.onchange = () => setL({ c2: c2.value });
       const nu = $('g-num'); nu.value = L.n ?? 7;
       nu.oninput = () => { const v = Math.max(0, Math.min(99, parseInt(nu.value, 10) || 0)); setL({ n: v }); };
+      // Felgen, Scheibentönung, Heckspoiler
+      const M = own.mods || {}, setM = patch => { own.mods = { ...M, ...patch }; Object.assign(M, patch); applyMods(this.previewModel, own.mods); this.saveGame(); this.audio.play('ui'); this.renderGarage(); };
+      const row = (id, list, key, dot) => {
+        const box = $(id); box.innerHTML = '';
+        for (const [k, name, col] of list) {
+          const b = document.createElement('button'); b.className = (M[key] || list[0][0]) === k ? 'sel' : '';
+          b.innerHTML = dot ? `<i class="dot" style="background:${col || '#c4c8d0'}"></i>` : '';
+          b.append(name); b.onclick = () => setM({ [key]: k });
+          box.appendChild(b);
+        }
+      };
+      row('g-rims', RIMS, 'rim', true); row('g-tint', TINTS, 'tint'); row('g-wing', WINGS, 'wing');
     }
     const act = $('g-action');
     if (!own) {
@@ -1331,6 +1345,7 @@ class Game {
     this.previewColor = (own && own.color) || spec.colors[0];
     this.previewModel = buildCar(spec, this.previewColor);
     if (own && own.livery) applyLivery(this.previewModel, own.livery);
+    if (own && own.mods) applyMods(this.previewModel, own.mods);
     this.applyReflections(this.previewModel);
     this.previewId = id;
     const p = this.garagePos();

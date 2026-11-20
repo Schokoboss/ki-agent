@@ -369,6 +369,57 @@ export function applyLivery(model, liv) {
   }
 }
 
+// ---------------------------------------------------------------- Anbauteile & Optik (Garage → Lackiererei)
+export const RIMS = [['std', 'Silber', null], ['schwarz', 'Schwarz', '#1b1c20'], ['gold', 'Gold', '#d4a62a'], ['bronze', 'Bronze', '#8c5a2b'], ['weiss', 'Weiß', '#ececec'], ['neon', 'Neon', '#36e27a']];
+export const TINTS = [['klar', 'Klar'], ['leicht', 'Leicht getönt'], ['stark', 'Stark getönt']];
+export const WINGS = [['none', 'Keiner'], ['lippe', 'Abrisslippe'], ['gt', 'GT-Flügel']];
+const _own = m => { m.userData.own = true; return m; };
+// mods: { rim, tint, wing } – nur für volle Modelle (Spieler, Garage); ändert Materialien/Teile ohne Neuaufbau
+export function applyMods(model, mods = {}) {
+  const ud = model && model.userData;
+  if (!ud || !ud.bodyG || ud.lodKind !== 'full') return;
+  // Felgen: eigenes Material je Auto, Originalfarbe merken
+  if (!ud.rimMats) {
+    ud.rimMats = new Map();
+    model.traverse(o => { if (o.isMesh && o.material && o.material.name === 'rim') { let c = ud.rimMats.get(o.material); if (!c) { c = _own(o.material.clone()); c.userData.orig = { color: c.color.clone(), metal: c.metalness, rough: c.roughness }; ud.rimMats.set(o.material, c); } o.material = c; } });
+  }
+  const rim = RIMS.find(r => r[0] === mods.rim) || RIMS[0];
+  for (const m of ud.rimMats.values()) {
+    const o = m.userData.orig;
+    if (rim[2]) { m.color.set(rim[2]); m.metalness = mods.rim === 'schwarz' || mods.rim === 'weiss' ? 0.5 : 0.9; m.roughness = mods.rim === 'schwarz' ? 0.35 : 0.22; }
+    else { m.color.copy(o.color); m.metalness = o.metal; m.roughness = o.rough; }
+  }
+  // Scheiben tönen
+  if (!ud.glassMats) {
+    ud.glassMats = new Map();
+    model.traverse(o => { if (o.isMesh && o.material && o.material.name === 'glass') { let c = ud.glassMats.get(o.material); if (!c) { c = _own(o.material.clone()); c.userData.orig = { color: c.color.clone(), op: c.opacity }; ud.glassMats.set(o.material, c); } o.material = c; } });
+  }
+  for (const m of ud.glassMats.values()) {
+    const o = m.userData.orig, k = mods.tint === 'stark' ? 2 : mods.tint === 'leicht' ? 1 : 0;
+    m.color.copy(o.color).multiplyScalar([1, 0.55, 0.25][k]);
+    m.opacity = Math.min(0.97, o.op + [0, 0.18, 0.36][k]);
+  }
+  // Heckspoiler: aus einfachen Teilen nach den Maßen des Autos
+  if (ud.wing) { ud.bodyG.remove(ud.wing); ud.wing.traverse(o => { if (o.isMesh) { o.geometry.dispose(); if (o.material.userData.own) o.material.dispose(); } }); ud.wing = null; }
+  const S = ud.dims;
+  if (mods.wing === 'lippe' || mods.wing === 'gt') {
+    const g = new THREE.Group(), paint = ud.paintMat, dark = _own(new THREE.MeshStandardMaterial({ color: 0x141416, roughness: 0.5, metalness: 0.2 }));
+    const add = (geo, mat, x, y, z, rx = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.x = rx; m.castShadow = true; g.add(m); return m; };
+    const zt = -S.L / 2;
+    if (mods.wing === 'lippe') add(new THREE.BoxGeometry(S.W * 0.78, 0.04, 0.2), paint, 0, S.tail + 0.03, zt + 0.16, -0.25);
+    else {
+      const y = S.tail + 0.34, z = zt + 0.32;
+      add(new THREE.BoxGeometry(S.W * 0.9, 0.06, 0.4), paint, 0, y, z, 0.12);
+      add(new THREE.BoxGeometry(S.W * 0.86, 0.015, 0.035), dark, 0, y + 0.045, z - 0.2, -0.6);
+      for (const sx of [-1, 1]) {
+        add(new THREE.BoxGeometry(0.014, 0.14, 0.34), dark, sx * S.W * 0.455, y + 0.015, z);
+        add(new THREE.BoxGeometry(0.04, 0.34, 0.1), dark, sx * S.W * 0.28, S.tail + 0.16, z + 0.04, -0.15);
+      }
+    }
+    ud.bodyG.add(g); ud.wing = g;
+  }
+}
+
 // Auto aus der Szene nehmen und eigene Materialien freigeben (Geometrie ist mit der Vorlage geteilt)
 export function disposeCar(model) {
   if (!model) return;
@@ -382,6 +433,7 @@ export function disposeCar(model) {
   ud.merged = [];
   for (const m of [ud.paintMat, ud.tailMat, ud.headMat]) if (m && !seen.has(m)) { seen.add(m); if (m.userData.liv && m.userData.liv.tex) m.userData.liv.tex.dispose(); m.dispose(); }
   model.traverse(o => { if (o.isMesh && o.material && o.material.userData && o.material.userData.own && !seen.has(o.material)) { seen.add(o.material); o.material.dispose(); } });
+  if (ud.wing) ud.wing.traverse(o => { if (o.isMesh) o.geometry.dispose(); });
 }
 
 // spec: Eintrag aus CARS (style), color: Lackfarbe, opts.lod: true = Verkehr (2 Draw-Calls), 'far' = Verkehr weit weg, 'ai' = Gegner

@@ -30,6 +30,8 @@ Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
   an einer Stelle gesetzt, die der Shader nie las. Nachts blenden Lichthöfe direkt vor der Kamera aus statt
   bildschirmfüllend zu werden; Scheinwerferkegel ohne hellen Fleck über der Motorhaube. Aussichtspunkte auf der Karte
   weiß (vorher fast gleiche Farbe wie Tempozonen).
+- **Tuning-Optik** in der Lackiererei: Felgenfarbe (Silber, Schwarz, Gold, Bronze, Weiß, Neon), Scheibentönung
+  (klar/leicht/stark), Heckspoiler (Abrisslippe oder GT-Flügel in Wagenfarbe, nach den Maßen jedes Autos gebaut).
 - **Wochen-Herausforderungen** (im Tagesaufgaben-Bildschirm): jede Kalenderwoche drei neue Aufgaben – ein bestimmtes
   Rennen mit Klassen-Obergrenze gewinnen, 3 Sterne bei einem Event, dazu km/Siege/Meisterschaftsrennen; 20.000–25.000 CR
   je Aufgabe, alle drei = +25.000 CR + Glücksrad-Dreh. Für alle Spieler dieselben (aus der Kalenderwoche berechnet).
