@@ -30,6 +30,10 @@ Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
   an einer Stelle gesetzt, die der Shader nie las. Nachts blenden Lichthöfe direkt vor der Kamera aus statt
   bildschirmfüllend zu werden; Scheinwerferkegel ohne hellen Fleck über der Motorhaube. Aussichtspunkte auf der Karte
   weiß (vorher fast gleiche Farbe wie Tempozonen).
+- **6 Sprungschanzen statt 3**: Hügelkamm (bis ~190 m), Seewiese, Weidenhang – Standorte per Suche (flacher Anlauf,
+  freie Landezone) und mit der echten Fahrphysik bei 130/170 km/h geprüft. Fehler behoben: die alte Steppe-Schanze
+  schickte das Auto ins Meer – versetzt als „Hochebene“ (Rekorde/Sterne bleiben). Drei Kandidaten mit Wasserlandung
+  bzw. Absturz verworfen. Gewinn-Liste links höchstens 4 Einträge.
 - **33 Erfolge** (Titel/Pause → 🏅): Fahren (km, Tempo), Rennen (Siege, 3 Sterne überall, Meisterschaften), Können
   (Drift, Sprünge, Blitzer, Tempozonen, Skill-Ketten), Entdecken (Plakate, Scheunen, Aussichtspunkte), Sammeln (Autos,
   Millionär, Lackierer, Tuner, Mehrspieler, Glücksrad) – mit Fortschrittsbalken und Credits (1.000–100.000 CR).
