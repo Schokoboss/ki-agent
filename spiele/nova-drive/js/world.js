@@ -269,7 +269,8 @@ export class Scenery {
     if (this.winLitMat) this.winLitMat.emissiveIntensity = this.night * 1.3;
     if (this.lampHeadMat) { this.lampHeadMat.color.set(this.night > 0.3 ? 0xfff0c0 : 0x9a9a9a); if (this.q >= 3 && this.night > 0.3) this.lampHeadMat.color.multiplyScalar(2.4); }
     if (this.ledMat && this.q >= 3) this.ledMat.color.setScalar(1.25 + this.night * 0.9);
-    if (this.glowMat) this.glowMat.opacity = this.night * (this.q >= 3 ? 0.5 : 0.9);
+    // ShaderMaterial liest nur seine Uniforms (material.opacity wirkte hier nie → Lichthöfe leuchteten auch tagsüber)
+    if (this.glowMat) this.glowMat.uniforms.opacity.value = this.night * (this.q >= 3 ? 0.5 : 0.9);
     if (this.cloudMat) {
       this.cloudMat.color.copy(u.horizon.value).lerp(new THREE.Color(0xffffff), 0.6 * (1 - this.night));
       this.cloudMat.opacity = 0.85 - this.night * 0.6;
@@ -1760,7 +1761,8 @@ export class Scenery {
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
     g.setAttribute('size', new THREE.BufferAttribute(size, 1));
     this.glowMat = makePointMaterial(this.T.glow, true);
-    this.glowMat.opacity = 0;
+    this.glowMat.uniforms.opacity.value = 0;
+    this.glowMat.uniforms.nearFade.value = 1;
     const p = new THREE.Points(g, this.glowMat);
     p.frustumCulled = false;
     this.scene.add(p);
@@ -1955,10 +1957,14 @@ export function fixMirror(mesh, map) {
 
 export function makePointMaterial(map, additive) {
   return new THREE.ShaderMaterial({
-    uniforms: { map: { value: map }, opacity: { value: 1 }, scale: { value: 600 } },
+    // nearFade (0/1): Lichthöfe nah an der Kamera ausblenden und in der Größe begrenzen (sonst bildschirmfüllende Flecken)
+    uniforms: { map: { value: map }, opacity: { value: 1 }, scale: { value: 600 }, nearFade: { value: 0 } },
     transparent: true, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending, vertexColors: true,
-    vertexShader: `attribute float size; varying vec3 vC; uniform float scale; void main(){ vC = color; vec4 mv = modelViewMatrix*vec4(position,1.); gl_PointSize = size*scale/max(1.0,-mv.z); gl_Position = projectionMatrix*mv; }`,
-    fragmentShader: `uniform sampler2D map; uniform float opacity; varying vec3 vC; void main(){ vec4 t = texture2D(map, gl_PointCoord); gl_FragColor = vec4(vC, t.a*opacity); if (gl_FragColor.a < 0.01) discard; }`,
+    vertexShader: `attribute float size; varying vec3 vC; varying float vF; uniform float scale, nearFade; void main(){ vC = color; vec4 mv = modelViewMatrix*vec4(position,1.);
+      float d = -mv.z; gl_PointSize = size*scale/max(1.0,d); vF = 1.0;
+      if (nearFade > 0.5) { vF = smoothstep(6.0, 30.0, d); gl_PointSize = min(gl_PointSize, 260.0); }
+      gl_Position = projectionMatrix*mv; }`,
+    fragmentShader: `uniform sampler2D map; uniform float opacity; varying vec3 vC; varying float vF; void main(){ vec4 t = texture2D(map, gl_PointCoord); gl_FragColor = vec4(vC, t.a*opacity*vF); if (gl_FragColor.a < 0.01) discard; }`,
   });
 }
 

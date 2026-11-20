@@ -144,7 +144,7 @@ export class Events {
       used[name] = (used[name] || 0) + 1;
       if (used[name] > 1) name += ' ' + ['', '', 'II', 'III', 'IV', 'V'][used[name]];
       const v = { id: 'v_' + i, name, x, z, found: found.includes('v_' + i), marker: null };
-      v.marker = S.addMarker(x, z, '#59f0c2', '🔭');
+      v.marker = S.addMarker(x, z, '#e8f0ff', '🔭');
       return v;
     });
   }
