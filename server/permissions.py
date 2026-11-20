@@ -52,6 +52,11 @@ def einteilen(name: str, args: dict, ctx) -> tuple[str | None, str]:
         innen = tools._inside_workspace(p, ctx)
         grund = tools.approval_reason("read_file" if name == "send_to_phone" else name, args, ctx)
         return ("dateien", f"{name}: {p}") if innen else ("dateien_aussen", grund or f"{name}: {p}")
+    if name == "minecraft_diamonds":
+        welt = str(args.get("world") or "")
+        if re.search(r"[\\/:]", welt):  # eigener Pfad statt Weltname → wie jede Datei außerhalb
+            return "dateien_aussen", f"Minecraft-Welt lesen: {welt[:120]}"
+        return None, "Minecraft-Welt lesen (nur lesen)"
     if name == "open_on_laptop":
         ziel = str(args.get("target") or "").strip()
         if re.match(r"^https?://", ziel, re.I):

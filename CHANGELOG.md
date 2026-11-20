@@ -2,6 +2,13 @@
 
 Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 
+## 20.11.2026
+- **Diamant-Finder** (`minecraft_diamonds`, `server/diamonds.py`): liest eigene Minecraft-Welten nur lesend
+  (NBT/Anvil, nur Standardbibliothek), findet Diamant-Adern (oder Netherit, Smaragd, Gold, Eisen, Lapis, Redstone)
+  um die gespeicherte Spielerposition, mit Koordinaten, Richtung, Tiefe, Lava-Warnung, Höhlen-Hinweis und Karte im
+  Chat. Weltformate 1.13 bis 26.x inkl. neuer Ordnerstruktur ab 26.1 (`dimensions/`, `players/data`,
+  `singleplayer_uuid`). Test: `werkzeuge/tests/test_diamanten.py` (in `alle_tests.py`).
+
 ## 04.11.2026
 - Startseite: Karte „Zum Startbildschirm hinzufügen“ (Installieren-Knopf, wo der Browser ihn anbietet).
 - Pausen im Zeit-Modus können nie negativ werden (Schutz gegen Uhr-Sprünge).

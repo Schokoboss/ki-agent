@@ -1015,6 +1015,16 @@ TOOL_SPECS = [
            "style": _s("Style preset"), "profile": _s("Profile name"),
            "options": {"type": "object", "description": "Option overrides, e.g. {\"SATURATION\": 1.25, \"BLOOM\": true}"},
            "activate": {"type": "boolean", "description": "Make it the active shaderpack (default true)"}}),
+    _spec("minecraft_diamonds", "Find diamonds (or other ores) in the user's OWN Minecraft Java world: reads the saved "
+          "world files (read-only) and lists the nearest ore veins with exact X Y Z coordinates, direction, depth and lava "
+          "warnings, plus a map image in the chat. Default: last played world, around the player's saved position. "
+          "Only finds ores in areas the player has already loaded; not for servers or Bedrock. action=worlds lists worlds.",
+          {"action": _s("find (default) or worlds"), "world": _s("World name (default: last played)"),
+           "ore": _s("diamant (default), netherit, smaragd, gold, eisen, lapis or redstone"),
+           "radius": {"type": "integer", "description": "Search radius in blocks, 16–512 (default 128)"},
+           "x": {"type": "number", "description": "Optional search center X instead of the player position"},
+           "z": {"type": "number", "description": "Optional search center Z"},
+           "y": {"type": "number", "description": "Optional Y of the center (for the distance)"}}),
     _spec("make_video", "Create a video with narration: each scene gets a painted image, a spoken German text and "
           "subtitles. Use 3–6 scenes with 1–2 short sentences each. format: short (vertical, TikTok/Shorts) or wide (YouTube).",
           {"title": _s("Video title"), "format": _s("short or wide"),

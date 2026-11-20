@@ -25,6 +25,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import diamonds
 import games
 import minecraft
 import remote
@@ -1174,7 +1175,7 @@ Regeln:
 - Nutze Werkzeuge statt zu raten; mehrere nacheinander sind ok. Brauchst du eins, ruf es SOFORT auf, ohne vorher zu antworten. Bei mehreren Fragen: für jede das passende Werkzeug.
 - Das weißt du NIE selbst – immer Werkzeug: Laptop-Akku/RAM/Uhrzeit → laptop_status · Wetter → weather · Fakten, News, Preise, Ergebnisse, alles Aktuelle → research (Quellen als [1], [2] nennen) · Rechnen → calculate (Prozent „17.5% * 240“) · Dateiinhalte → read_file/list_files.
 - Bild malen → create_image (englischer, ausführlicher Prompt). Brief/Bewerbung/Referat als Datei → make_document. Erinnern/Timer → set_reminder. Am Handy anrufen, SMS, WhatsApp, Navi, Kalendereintrag, Musik → phone_action (Termin = type calendar, NICHT set_reminder; danach sagen, dass der Nutzer auf den Knopf tippen soll).
-- Spezialaufgaben haben eigene Werkzeuge: Video (make_video, edit_video, record_screen), Minecraft-Shader (minecraft_shader, direkt create), Spiele (make_game), Programmieren/Apps (edit_file, project_tree, find_in_files, run_node, publish_web), Laptop bedienen (laptop_screenshot, laptop_control mit x/y 0–1000, media_control, open_on_laptop, run_powershell), Routinen „jeden Morgen …“ (routine). Fehlen sie dir, lade die Gruppe mit more_tools (video, minecraft, code, laptop, organize, web{', mcp' if MCP and MCP.kurzinfo() else ''}).{chr(10) + '- Angebundene Integrationen (MCP): ' + MCP.kurzinfo() + ' – Werkzeuge mit more_tools(group=mcp) laden, sie heißen mcp_<server>_<werkzeug>.' if MCP and MCP.kurzinfo() else ''}
+- Spezialaufgaben haben eigene Werkzeuge: Video (make_video, edit_video, record_screen), Minecraft-Shader (minecraft_shader, direkt create), Diamanten/Erze in der eigenen Minecraft-Welt finden (minecraft_diamonds), Spiele (make_game), Programmieren/Apps (edit_file, project_tree, find_in_files, run_node, publish_web), Laptop bedienen (laptop_screenshot, laptop_control mit x/y 0–1000, media_control, open_on_laptop, run_powershell), Routinen „jeden Morgen …“ (routine). Fehlen sie dir, lade die Gruppe mit more_tools (video, minecraft, code, laptop, organize, web{', mcp' if MCP and MCP.kurzinfo() else ''}).{chr(10) + '- Angebundene Integrationen (MCP): ' + MCP.kurzinfo() + ' – Werkzeuge mit more_tools(group=mcp) laden, sie heißen mcp_<server>_<werkzeug>.' if MCP and MCP.kurzinfo() else ''}
 - Programmieren: Projekte unter „Projekte/<Name>“ anlegen; Code erst verstehen, dann mit edit_file gezielt ändern, mit run_python/run_node/run_powershell (cwd = Projektordner) testen, bis es läuft. Apps als EINE HTML-Datei schreiben und mit publish_web aufs Handy bringen.
 - Spiele: IMMER make_game – erst create, dann code (nur das game-Objekt; Steuerung, Ton, Menü, Highscore hat die Vorlage). Figuren als Emoji, Schwierigkeit über state.level, jede Aktion mit sound(). „Fertig“ erst sagen, wenn der Test „ERGEBNIS: OK“ meldet – sonst Fehler beheben und erneut code senden. Spiel nie selbst als getestet ausgeben.
 - Fragen zu eigenen Projekten, Notizen oder Code von {u} → erst knowledge (search); „lern den Ordner …“ → knowledge (add).
@@ -1335,7 +1336,7 @@ TOOL_GROUPS = {
                "lock_laptop", "record_screen"},
     "code": {"edit_file", "project_tree", "find_in_files", "run_node", "run_powershell", "publish_web", "make_game"},
     "video": {"make_video", "edit_video", "record_screen", "create_image"},
-    "minecraft": {"minecraft_shader"},
+    "minecraft": {"minecraft_shader", "minecraft_diamonds"},
     "organize": {"routine", "reminders"},
     "mcp": set(),  # dynamisch: alle Werkzeuge der angebundenen MCP-Server
 }
@@ -1347,7 +1348,7 @@ GROUP_WORDS = {
     "code": r"programm|code|skript|script|app\b|spiel|game|webseite|website|html|javascript|python|node|projekt|"
             r"funktion|fehler im|bug|datei.*ändern|ändere",
     "video": r"video|short|tiktok|reel|clip|schneid|gif|film",
-    "minecraft": r"minecraft|shader|iris|optifine",
+    "minecraft": r"minecraft|shader|iris|optifine|diamant|diamond|\bdias?\b|netherit|antiker schutt|smaragd|\berze?\b",
     "organize": r"jeden (tag|morgen|abend|montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag)|täglich|"
                 r"werktags|routine|erinnerung|wöchentlich",
     "mcp": r"\bmcp\b|integration",
@@ -2048,6 +2049,42 @@ def tool_minecraft_shader(run: Run, args: dict) -> str:
         raise ValueError(str(e))
 
 
+def tool_minecraft_diamonds(run: Run, args: dict) -> str:
+    """Diamanten (und andere Erze) in einer eigenen Minecraft-Welt finden – die Welt wird nur gelesen."""
+    if str(args.get("action") or "find").lower() in ("worlds", "welten", "list"):
+        return diamonds.welten_text()
+
+    def zahl(k):
+        v = args.get(k)
+        try:
+            return float(v) if v not in (None, "") else None
+        except (TypeError, ValueError):
+            raise ValueError(f"{k} muss eine Zahl sein.")
+    run.emit(t="status", d="Durchsuche deine Minecraft-Welt …")
+    try:
+        erg = diamonds.suchen(args.get("world"), args.get("ore") or "diamant", int(zahl("radius") or 128),
+                              zahl("x"), zahl("z"), zahl("y"), melden=lambda t: run.emit(t="status", d=t))
+    except diamonds.DiamantFehler as e:
+        raise ValueError(str(e))
+    text = diamonds.bericht(erg)
+    png = diamonds.karte(erg)
+    folder = WORKSPACE / "Minecraft"
+    folder.mkdir(parents=True, exist_ok=True)
+    welt = re.sub(r"[^A-Za-z0-9_-]+", "-", erg["welt"]).strip("-")[:30] or "Welt"
+    out = folder / f"{erg['erz'].capitalize()}-Karte_{welt}_{time.strftime('%Y%m%d_%H%M%S')}.png"
+    out.write_bytes(png)
+    img_id = f"{uuid.uuid4().hex}.png"
+    UPLOADS.mkdir(parents=True, exist_ok=True)
+    (UPLOADS / img_id).write_bytes(png)
+    run.emit(t="image", id=img_id)
+    run.tool_extra[run.current_call] = {"_image": img_id, "_imgfile": str(out)}
+    if minecraft.minecraft_running():
+        text += ("\nMinecraft läuft gerade: Was du in den letzten Minuten entdeckt hast, steht erst nach dem nächsten "
+                 "Speichern in der Welt (automatisch alle 5 Minuten oder „Speichern und zurück zum Titelbildschirm“).")
+    return (text + f"\nKarte ist im Chat: Norden oben, weißer Punkt = Mitte (Strich = Blickrichtung), Rauten = Adern mit "
+            f"Nummer, oranger Rand = Lava, dunkle Felder = noch nie geladen, Balken = {erg['massstab']} Blöcke.")
+
+
 def tool_make_video(run: Run, args: dict) -> str:
     scenes = args.get("scenes") or []
     if isinstance(scenes, str):
@@ -2242,6 +2279,7 @@ def tool_laptop_control(run: Run, args: dict) -> str:
 
 OFFERED: set[str] = set()  # Dateien außerhalb des Arbeitsordners, die der Nutzer ans Handy freigegeben hat
 SERVER_TOOLS = {"laptop_control": tool_laptop_control, "publish_web": tool_publish_web, "make_game": tool_make_game, "create_image": tool_create_image, "minecraft_shader": tool_minecraft_shader,
+                "minecraft_diamonds": tool_minecraft_diamonds,
                 "make_video": tool_make_video, "record_screen": tool_record_screen, "edit_video": tool_edit_video, "phone_action": tool_phone_action, "routine": lambda run, args: ROUTINES.tool(run, args),
                 "set_reminder": tool_set_reminder, "reminders": tool_list_reminders,
                 "send_to_phone": tool_send_to_phone, "laptop_screenshot": tool_laptop_screenshot}

@@ -78,6 +78,13 @@ Nova kann auch **direkt auf dem Handy** laufen – ganz ohne Laptop, sogar ohne 
 - **Minecraft-Shader bauen:** „Bau mir einen warmen Shader mit hohen Wellen“ – Nova stellt deine geprüften
   Packs AuroraCraft/BedRush ein (Stile: warm, kalt, bunt, düster, hell, realistisch, traumhaft; Profile;
   einzelne Optionen), packt sie und installiert sie als `Nova-….zip` in `.minecraft\shaderpacks`.
+- **Diamant-Finder:** „Wo sind Diamanten in meiner Welt?“ – Nova liest deine Minecraft-Einzelspielerwelt (Java,
+  **nur lesen**, es wird nichts verändert) und nennt die nächsten Diamant-Adern mit Koordinaten (X Y Z), Richtung,
+  wie tief, ⚠ Lava daneben, „liegt frei an einer Höhle“ – dazu eine Karte im Chat (Norden oben, du in der Mitte).
+  Auch Netherit, Smaragd, Gold, Eisen, Lapis, Redstone; andere Welt, andere Stelle oder Umkreis bis 512 Blöcke einfach
+  dazusagen. Findet nur, was das Spiel schon geladen und gespeichert hat (Autospeichern alle 5 Minuten); geht nicht
+  auf Servern und nicht mit Bedrock. Alte und neue Weltordner (ab 26.1) werden erkannt, auch Modrinth/Prism/CurseForge.
+  Ohne Nova: `python server/diamonds.py` (`--welten`, `--erz netherit`, `--radius 200`, `--karte karte.png`).
 - **Videos:** „Mach ein Short über Füchse“ – Szenen mit gemalten Bildern, Stimme (Hedda), Untertiteln
   und Zoom; außerdem Bildschirm aufnehmen, schneiden, zusammenfügen, GIF, verkleinern, Musik drunter.
   Videos landen in `workspace\Videos` und lassen sich in der App abspielen.

@@ -456,6 +456,7 @@ const TOOL_META = {
   download_file: ['Download', 'download', a => (a.url || '').replace(/^https?:\/\//, '')],
   save_file: ['Datei speichern', 'file', a => a.name],
   minecraft_shader: ['Minecraft-Shader', 'spark', a => a.action === 'options' ? 'Optionen ansehen' : a.action === 'list' ? 'installierte Packs' : `${a.name || ''} ${a.style || ''}`.trim()],
+  minecraft_diamonds: ['Diamant-Finder', 'search', a => a.action === 'worlds' ? 'Welten ansehen' : [a.ore || 'Diamanten', a.world, a.radius && `${a.radius} Blöcke`].filter(Boolean).join(' · ')],
   make_video: ['Video erstellen', 'play', a => `${a.title || ''} · ${(a.scenes || []).length} Szenen`],
   record_screen: ['Bildschirm aufnehmen', 'laptop', a => `${a.seconds || 20} s`],
   edit_video: ['Video bearbeiten', 'play', a => a.action],
