@@ -318,6 +318,8 @@ html.portrait .wheel-wrap { flex-direction: column-reverse; } html.portrait #w-c
 .g-liv { display: flex; flex-wrap: wrap; gap: 5px; }
 .g-liv button { border: 1px solid var(--line); background: rgba(255,255,255,.06); color: var(--text); border-radius: 9px; padding: 5px 9px; font: inherit; font-size: 12px; }
 .g-liv button.sel { border-color: #ff3d7f; background: rgba(255,61,127,.2); }
+.g-liv { margin-top: 3px; }
+.g-liv button .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; border: 1px solid rgba(255,255,255,.5); }
 .g-liv2 { display: flex; gap: 10px; align-items: center; margin-top: 5px; font-size: 12px; flex-wrap: wrap; }
 .g-liv2 label { display: flex; gap: 6px; align-items: center; }
 .g-liv2 label[hidden] { display: none; }
