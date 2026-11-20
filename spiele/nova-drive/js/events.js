@@ -396,14 +396,19 @@ export class Events {
     if (!mp && !ghost && !champ && g.net && g.net.active) mp = g.net.sendRace(ev, !!g.settings.mpAI);
     const path = ev.path, st = g.car.stats;
     const sprint = !!ev.sprint;
-    const total = sprint ? (ev.to - ev.at) * path.length - 12 : ev.laps * path.length;
+    // Startaufstellung (2 Autos pro Reihe, 10 m Abstand) muss auf der Straße stehen: beginnt ein Sprint am
+    // Straßenanfang, rückt die Startlinie nach vorn (vorher klemmten alle hinteren Reihen auf denselben Punkt)
+    const nAI = mp ? mp.ai : g.quality === 0 ? Math.min(ev.ai, 5) : ev.ai;
+    const gridLen = 10 + Math.ceil((nAI + (mp ? mp.ids.length : 1)) / 2) * 10 + 4;
+    const startS = !path.closed && ev.s < gridLen ? gridLen : ev.s;
+    const total = sprint ? (ev.to - ev.at) * path.length - 12 - (startS - ev.s) : ev.laps * path.length;
     const wet = W.rain > 0.4 ? (W.rain - 0.4) / 0.6 : 0;
     const latAcc = 9.81 * st.grip * 1.16 * (1 - 0.15 * wet);
     const top = st.top / 3.6;
     const prof = speedProfile(path, top * 0.99, latAcc, 12.5, W, st.offroad);
     const race = {
       ev, path, prof, total, hw: ev.hw, world: W, dirt: !!ev.dirt, top, accel: st.accel * 0.95,
-      startS: ev.s, t: -3.6 - INTRO, t0: -3.6 - INTRO, started: false, ais: [], cps: [], next: 0, prog: 0, pS: ev.s, lastPos: 0,
+      startS, t: -3.6 - INTRO, t0: -3.6 - INTRO, started: false, ais: [], cps: [], next: 0, prog: 0, pS: startS, lastPos: 0,
       ghostRec: [], ghost: null, ghostData: ghost, finished: false, finishT: 0, crashes: 0, laps: sprint ? 1 : ev.laps, missed: false,
       mp, humans: new Map(), wall0: performance.now() / 1000, champ,
     };
@@ -411,7 +416,7 @@ export class Events {
     race.cps.push(total);
     // Gegner
     const diff = [0.88, 0.95, 1.0][mp ? 1 : g.settings.difficulty ?? 1]; // Mehrspieler: überall gleich stark
-    const n = mp ? mp.ai : g.quality === 0 ? Math.min(ev.ai, 5) : ev.ai;
+    const n = nAI;
     const rnd = mulberry32(mp ? mp.seed : champ ? champ.seed : Date.now() & 0xffff);
     const names = [...AI_NAMES].sort(() => rnd() - 0.5);
     const pool = champ && champ.pool.length ? champ.pool : CARS.filter(c => !ev.dirt || c.offroad > 0.2);
@@ -423,7 +428,7 @@ export class Events {
       const pd = ai.model.userData.paintMat && ai.model.userData.paintMat.userData.dirt;
       if (pd && ev.dirt) pd.value = 0.35 + rnd() * 0.4;
       const row = Math.floor(i / 2), side = i % 2 ? 1 : -1;
-      ai.s = ev.s - 10 - row * 10; ai.prog = -10 - row * 10;
+      ai.s = startS - 10 - row * 10; ai.prog = -10 - row * 10;
       ai.lat = ai.latT = side * Math.min(2.8, ev.hw - 1.6); ai.lane = side * 0.6;
       ai.place(path, race);
       race.ais.push(ai);
@@ -432,7 +437,7 @@ export class Events {
     const me = mp ? mp.ids.indexOf(g.net.id) : 0;
     const slot = n + (me < 0 ? mp.ids.length : me);
     const prow = Math.floor(slot / 2), pside = slot % 2 ? 1 : -1;
-    const ps = ev.s - 10 - prow * 10;
+    const ps = startS - 10 - prow * 10;
     const pp = path.at(ps, P);
     const plat = pside * Math.min(2.8, ev.hw - 1.6);
     g.car.reset(pp.x - pp.tz * plat, pp.z + pp.tx * plat, Math.atan2(pp.tx, pp.tz));
@@ -524,6 +529,7 @@ export class Events {
       ai.update(dt, r, others, r.prog, r.started);
       if (!ai.done && ai.prog >= r.total) { ai.done = true; ai.finish = r.t; }
     }
+    if (r.started) separateAIs(r);
     // Geist
     if (r.started && !r.finished) {
       r.recT = (r.recT || 0) + dt;
@@ -611,6 +617,24 @@ export class Events {
   }
 }
 
+// ---------------------------------------------------------------- KI untereinander: nicht durcheinander fahren
+// Überlappen sich zwei Gegner, weicht der hintere sanft zur Seite aus (oder der vordere, wenn dort Platz ist);
+// ist die Straße zu schmal, bleibt der hintere dahinter. Längs-/Querabstand in Strecken-Koordinaten (prog/lat).
+const SEP_LEN = 4.4, SEP_LAT = 1.9; // Fahrzeuglänge/-breite
+function separateAIs(r) {
+  const A = r.ais;
+  for (let i = 0; i < A.length; i++) for (let j = i + 1; j < A.length; j++) {
+    const a = A[i], b = A[j];
+    if (a.done || b.done) continue;
+    const ds = b.prog - a.prog;
+    if (Math.abs(ds) >= SEP_LEN || Math.abs(b.lat - a.lat) >= SEP_LAT) continue;
+    // Karosserien berühren sich trotz Ausweichen → der hintere reiht sich dahinter ein
+    const back = ds >= 0 ? a : b, front = ds >= 0 ? b : a, gap = SEP_LEN - Math.abs(ds);
+    back.prog -= gap; back.s -= gap; back.speed = Math.min(back.speed, front.speed);
+    back.place(r.path, r);
+  }
+}
+
 // ---------------------------------------------------------------- Geist
 function makeGhostModel(carId, color) {
   const spec = CARS.find(c => c.id === carId) || CARS[0];
@@ -631,3 +655,4 @@ function placeGhost(gh, t, W) {
   gh.model.rotation.y = d[a][2] + dy * f;
   gh.model.visible = i < d.length + rate * 2;
 }
+export { separateAIs as __separateAIs }; // für Tests
