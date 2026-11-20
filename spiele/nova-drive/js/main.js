@@ -7,7 +7,7 @@ import { buildCar, styleDims, loadCarModels, setTailGlow, setCarDetail, disposeC
 import { loadWorldModels, modelUrl } from './models.js';
 import { Vehicle, carContact } from './physics.js';
 import { Traffic } from './ai.js';
-import { Events, Skills, TYPE_NAMES } from './events.js';
+import { Events, Skills, TYPE_NAMES, pushPair } from './events.js';
 import { HUD, makeMapImage } from './hud.js';
 import { Audio, isTurbo } from './audio.js';
 import { TimeMachine, introCam, INTRO, Replay, REPLAY_FRAMES } from './cine.js';
@@ -2015,7 +2015,8 @@ class Game {
     if (intro && !race.mp && (raw.throttle > 0.5 || this.skipCine || this.input.took('Enter') || this.input.took('PadA'))) { race.t = race.t0 + INTRO; this.skipCine = false; }
     if (intro !== (this.cineMode === 'intro')) this.setCine(intro && race.t < race.t0 + INTRO ? 'intro' : null, race);
     let inp = raw;
-    if (race && !race.started) inp = { throttle: 0, brake: 1, steer: raw.steer, handbrake: true, nitro: false, rev: raw.throttle };
+    // vor dem Start: keine Bremse (bei Stillstand wäre das der Rückwärtsgang) – das Auto wird unten auf dem Startplatz gehalten
+    if (race && !race.started) inp = { throttle: 0, brake: 0, steer: raw.steer, handbrake: true, nitro: false, rev: raw.throttle };
     if (race && race.finished) inp = { throttle: 0.3, brake: 0, steer: 0, handbrake: false, nitro: false };
     // Bremshilfe (Rennen): zu schnell für die Kurve vor dir → automatisch bremsen (Profil = das der Ideallinie)
     this.assistBrake = 0;
@@ -2035,6 +2036,10 @@ class Game {
     let n = 0;
     while (this.acc >= h && n < 8) { car.step(h, inp); this.acc -= h; n++; }
     if (n >= 8) this.acc = 0;
+    if (race && !race.started && race.grid) {
+      const G = race.grid; car.pos.x = G.x; car.pos.z = G.z; car.pos.y = this.world.heightAt(G.x, G.z);
+      car.vel.set(0, 0, 0); car.yaw = G.yaw; car.yawRate = 0;
+    }
     if (race && !race.started && raw.throttle) car.rpm = damp(car.rpm, 0.85, 6, dt);
     // Windschatten hinter Gegnern
     // Kollisionen mit anderen Autos
@@ -2182,9 +2187,10 @@ class Game {
     const pc = car.circles(), r = car.rad;
     const spd = Math.hypot(car.vel.x, car.vel.z);
     const others = [];
-    if (race) for (const a of race.ais) if (a.model.visible) others.push({ o: a, ai: true });
+    // vor dem Start stehen alle fest auf ihren Startplätzen – kein gegenseitiges Wegschieben
+    if (race && race.started) for (const a of race.ais) if (a.model.visible) others.push({ o: a, ai: true });
     for (const p of this.net.cars()) others.push({ o: p, ai: true, peer: true });
-    for (const t of this.traffic.cars) if (t.road && t.model.visible) others.push({ o: t, ai: false });
+    if (this.traffic.active) for (const t of this.traffic.cars) if (t.road && t.model.visible) others.push({ o: t, ai: false });
     for (const { o, ai, peer } of others) {
       const dx = o.pos.x - car.pos.x, dz = o.pos.z - car.pos.z;
       const d = Math.hypot(dx, dz);
@@ -2195,6 +2201,8 @@ class Game {
       if (!st) { st = { min: 99, contact: false, t: 0 }; this.nearMap.set(o, st); }
       if (hit) {
         st.contact = true;
+        // Gegner mit echter Physik: beide werden geschoben, Schwung wird geteilt, seitliche Treffer drehen
+        if (o.veh) { pushPair(car, o.veh, hit, 0.5); continue; }
         const vx = car.vel.x - o.vx, vz = car.vel.z - o.vz;
         const vn = vx * hit.nx + vz * hit.nz;
         const share = peer ? 0.5 : ai ? 0.6 : 1; // Mitspieler: jeder schiebt sich selbst die Hälfte weg

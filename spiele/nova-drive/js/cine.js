@@ -19,7 +19,7 @@ export class TimeMachine {
       c: [c.pos.x, c.pos.y, c.pos.z, c.vel.x, c.vel.y, c.vel.z, c.yaw, c.yawRate, c.steer, c.gear, c.rpm, c.nitro,
         c.up.x, c.up.y, c.up.z, c.vf, c.grounded ? 1 : 0, c.wheelRot],
       r: r ? [r.t, r.prog, r.pS, r.next, r.missed ? 1 : 0, r.started ? 1 : 0, r.lastCount || 0, r.lastRank || 0] : null,
-      a: r ? r.ais.map(a => [a.s, a.prog, a.lat, a.latT, a.speed, a.done ? 1 : 0, a.finish, a.slide, a.wheelRot, a.bump]) : null,
+      a: r ? r.ais.map(a => { const v = a.veh; return [v.pos.x, v.pos.y, v.pos.z, v.vel.x, v.vel.y, v.vel.z, v.yaw, v.yawRate, v.steer, v.wheelRot, v.up.x, v.up.y, v.up.z, a.s, a.prog, a.lat, a.latT, a.done ? 1 : 0, a.finish, v.grounded ? 1 : 0]; }) : null,
     };
   }
   record(g, dt) {
@@ -45,9 +45,11 @@ export class TimeMachine {
     if (r && s.a) s.a.forEach((a, i) => {
       const ai = r.ais[i];
       if (!ai) return;
-      [ai.s, ai.prog, ai.lat, ai.latT, ai.speed] = a;
-      ai.done = !!a[5]; ai.finish = a[6]; ai.slide = a[7]; ai.wheelRot = a[8]; ai.bump = a[9];
-      ai.place(r.path, r);
+      const v = ai.veh;
+      v.pos.set(a[0], a[1], a[2]); v.vel.set(a[3], a[4], a[5]); v.yaw = a[6]; v.yawRate = a[7]; v.steer = a[8]; v.wheelRot = a[9];
+      v.up.set(a[10], a[11], a[12]).normalize(); v.vf = a[3] * Math.sin(a[6]) + a[5] * Math.cos(a[6]); v.grounded = !!a[19];
+      ai.s = a[13]; ai.prog = a[14]; ai.lat = a[15]; ai.latT = a[16]; ai.done = !!a[17]; ai.finish = a[18];
+      ai.model.visible = true; ai.sync(0);
     });
   }
   // dt Sekunden zurück (mit doppeltem Tempo aufgerufen); liefert false, wenn das Gedächtnis leer ist
