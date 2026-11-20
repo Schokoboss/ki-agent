@@ -133,6 +133,7 @@
     <div class="sub">Festival der Sonnenküste</div>
     <div class="menu">
       <button id="t-drive" class="btn primary">Fahren</button>
+      <button id="t-champ" class="btn">🏆 Meisterschaften</button>
       <button id="t-mp" class="btn">👥 Mehrspieler</button>
       <button id="t-garage" class="btn">Garage</button>
       <button id="t-daily" class="btn">Tagesaufgaben</button>
@@ -157,6 +158,15 @@
       <li>Danach Nova Drive über das neue Symbol starten.</li>
     </ol>
     <button class="btn primary" data-back>Alles klar</button>
+  </div>
+</section>
+
+<!-- Meisterschaften -->
+<section id="champ" class="screen dim" hidden>
+  <div class="panel wide">
+    <div class="g-top"><button class="btn back" data-back>‹ Zurück</button><h2>🏆 Meisterschaften</h2></div>
+    <p class="muted small">Drei Rennen, Punkte nach Platz (25 · 18 · 15 · 12 …), immer dieselben Gegner. Dein Auto darf höchstens die angegebene Klasse haben (Tuning zählt mit). Gesamtsieg = Preisgeld + Auto.</p>
+    <div id="ch-list"></div>
   </div>
 </section>
 
@@ -244,6 +254,7 @@
   <div class="panel">
     <h2>Pause</h2>
     <button id="p-resume" class="btn primary">Weiter</button>
+    <button id="p-champ" class="btn">🏆 Meisterschaften</button>
     <button id="p-mp" class="btn">👥 Mehrspieler</button>
     <button id="p-photo" class="btn">📸 Fotomodus</button>
     <div class="row nav-row"><button id="p-nav-race" class="btn">🧭 Nächstes Rennen</button><button id="p-nav-fest" class="btn">🧭 Festival</button></div>
@@ -278,6 +289,8 @@
       <div class="seg touch-only" id="s-ctl"><button data-v="0.85">Klein</button><button data-v="1">Normal</button><button data-v="1.2">Groß</button></div>
       <label class="touch-only">Vibration</label>
       <div class="seg touch-only" id="s-haptic"><button data-v="1">An</button><button data-v="0">Aus</button></div>
+      <label>Ideallinie</label>
+      <div class="seg" id="s-line"><button data-v="aus">Aus</button><button data-v="bremsen">Nur Bremszonen</button><button data-v="voll">Voll</button></div>
       <label>Auto-Gas</label>
       <div class="seg" id="s-autogas"><button data-v="0">Aus</button><button data-v="1">An</button></div>
       <label>Gegner</label>
@@ -320,6 +333,7 @@
     </div>
     <div class="res-side">
       <div id="res-challenge" hidden></div>
+      <div id="res-champ" hidden></div>
       <div id="res-breakdown"></div>
       <div id="res-reward"></div>
       <div class="row">

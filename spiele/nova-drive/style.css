@@ -448,6 +448,22 @@ html.turned .screen, html.turned .screen * { touch-action: none; }
 #mp-msg { text-align: center; min-height: 1em; }
 #mp-msg.warn { color: #ff8a8a; }
 #res-table .row.human { background: rgba(255,61,127,.14); }
+/* Meisterschaften */
+#ch-list { display: flex; flex-direction: column; gap: 8px; }
+.ch-card { display: grid; grid-template-columns: 56px 1fr auto; gap: 10px; align-items: center; background: rgba(255,255,255,.06); border: 1px solid var(--line); border-radius: 14px; padding: 10px; }
+.ch-card.won { border-color: #ffd23f; background: rgba(255,210,63,.1); }
+.ch-cls { border-radius: 10px; font-weight: 800; font-style: italic; text-align: center; padding: 10px 0; color: #111; font-size: 15px; }
+.ch-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; }
+.ch-body b { font-size: 15px; }
+.ch-state { font-weight: 700; }
+.ch-state.ok { color: #36e27a; } .ch-state.no { color: #ff8a8a; } .ch-state.run { color: #1fe0ff; }
+.ch-card .btn { min-height: 40px; padding: 8px 14px; }
+#res-champ { background: rgba(255,210,63,.08); border: 1px solid rgba(255,210,63,.4); border-radius: 12px; padding: 6px 10px; font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
+#res-champ[hidden] { display: none; }
+#res-champ .ch-h { font-weight: 800; color: #ffd23f; margin-bottom: 2px; }
+#res-champ .cr { display: grid; grid-template-columns: 26px 1fr auto; gap: 6px; }
+#res-champ .cr.me { color: #1fe0ff; font-weight: 700; }
+#res-champ .ch-t { margin-top: 4px; font-weight: 700; }
 
 /* Touch-Lenkrad */
 #c-wheel { display: none; pointer-events: auto; position: absolute; left: calc(10px + var(--sl)); bottom: calc(8px + var(--sb)); width: calc(172px * var(--uic)); height: calc(172px * var(--uic)); border-radius: 50%; touch-action: none; }

@@ -13,11 +13,11 @@ import { Audio, isTurbo } from './audio.js';
 import { TimeMachine, introCam, INTRO, Replay, REPLAY_FRAMES } from './cine.js';
 import { Input, isWheelId } from './input.js';
 import { Particles, Smoke, Skids, Rain } from './effects.js';
-import { CARS, UPGRADES, carStats, rating, carClass, CLASS_COLORS, EVENTS, RADIO, TIPS } from './data.js';
+import { CARS, UPGRADES, carStats, rating, carClass, CLASS_COLORS, EVENTS, RADIO, TIPS, CHAMPS, CLASS_ORDER } from './data.js';
 import { clamp, lerp, damp, fmtNum, fmtTime, wrapAngle, breathe, view, updateView, logicalPoint, localPoint } from './util.js';
 import { EVENT_COLORS } from './world.js';
 import { Economy, PRIZES } from './economy.js';
-import { RoadGraph, NavRibbon, say, fmtDist, TURN_ICON, turnText } from './nav.js';
+import { RoadGraph, NavRibbon, RaceLine, say, fmtDist, TURN_ICON, turnText } from './nav.js';
 import { Net } from './net.js';
 import { GTAOPass } from '../lib/postprocessing/GTAOPass.js';
 import { EffectComposer } from '../lib/postprocessing/EffectComposer.js';
@@ -39,7 +39,7 @@ class Game {
   constructor() {
     this.save = Object.assign({ credits: 25000, fans: 0, owned: {}, current: null, best: {}, stars: {}, posters: [], races: 0, wins: 0 }, store.get(SAVE_KEY) || {});
     this.settings = Object.assign({ quality: 'auto', control: 'buttons', autoGas: false, sfx: 0.8, music: 0.45, station: 0, cam: 0, name: '', difficulty: 1, time: 'dyn',
-      sens: 1, tiltInvert: false, ctl: 1, haptic: true, weather: 'dyn', voice: true, device: 'auto', keyHelp: true, hd: 'auto', mpAI: false, wheel: null, wheelGain: 2 }, store.get(SET_KEY) || {});
+      sens: 1, tiltInvert: false, ctl: 1, haptic: true, weather: 'dyn', voice: true, device: 'auto', keyHelp: true, hd: 'auto', mpAI: false, wheel: null, wheelGain: 2, line: 'voll' }, store.get(SET_KEY) || {});
     // ?pc in der Adresse (z. B. vom Starter am Laptop) schaltet den PC-Modus fest ein
     const q = new URLSearchParams(location.search);
     if (q.has('pc')) this.settings.device = 'pc';
@@ -156,6 +156,7 @@ class Game {
     this.eco = new Economy(this);
     this.graph = new RoadGraph(this.world);
     this.ribbon = new NavRibbon(this.scene, this.world);
+    this.raceLine = new RaceLine(this.scene, this.world);
     this.spawnAtFestival();
     this.scenery.setTime(this.settings.time === 'dyn' ? 17.2 : TIME_FIXED[this.settings.time] ?? 17.2);
     this.updateEnv(true);
@@ -543,6 +544,7 @@ class Game {
     if (name === 'daily') this.openDaily();
     if (name === 'wheel') this.openWheel();
     if (name === 'mp') this.renderMP();
+    if (name === 'champ') this.renderChamps();
     if (name === 'wheelcal') this.startWheelCal(); else this.wc = null;
     if (this.input) this.input.calibrating = name === 'wheelcal';
     if (name === 'pause' || name === 'title') this.updateSpinBadges();
@@ -709,6 +711,8 @@ class Game {
     this.updateInstallBtn();
     click('t-settings', () => { this.backTo = 'title'; this.showScreen('settings'); });
     click('t-mp', () => { this.backTo = 'title'; this.showScreen('mp'); });
+    click('t-champ', () => { if (!this.save.current) { this.showScreen('starter'); this.renderStarter(); return; } this.backTo = 'title'; this.showScreen('champ'); });
+    click('p-champ', () => { this.backTo = 'pause'; this.showScreen('champ'); });
     click('p-mp', () => { this.backTo = 'pause'; this.showScreen('mp'); });
     click('h-mp', () => { if (this.state !== 'free' && this.state !== 'race') return; this.pause(); this.backTo = 'pause'; this.showScreen('mp'); });
     click('t-daily', () => { this.backTo = 'title'; this.showScreen('daily'); });
@@ -740,11 +744,15 @@ class Game {
     click('p-map', () => { this.backTo = 'pause'; this.showScreen('map'); });
     click('p-settings', () => { this.backTo = 'pause'; this.showScreen('settings'); });
     click('p-abort', () => { this.events.endRace(true); this.resume(); this.state = 'free'; });
-    click('p-restart', () => { const ev = this.events.race.ev, gd = this.events.race.ghostData; this.events.endRace(true); this.events.startRace(ev, gd); });
+    click('p-restart', () => { const r = this.events.race, ev = r.ev, gd = r.ghostData, ch = r.champ; this.events.endRace(true); this.events.startRace(ev, gd, ch ? { champ: { ...ch, counted: false } } : {}); });
     click('p-title', () => { if (this.events.race) this.events.endRace(true); this.spawnAtFestival(); this.showScreen('title'); });
     // Ergebnisse
     click('res-continue', () => { this.events.endRace(); this.setState('free'); });
-    click('res-again', () => { const r = this.events.race; const ev = r.ev, gd = r.ghostData; this.events.endRace(); this.events.startRace(ev, gd); });
+    click('res-again', () => {
+      const r = this.events.race; const ev = r.ev, gd = r.ghostData;
+      if (r.champ && this.save.champRun && this.save.champRun.id === r.champ.id) { this.events.endRace(); this.startChampRace(); return; }
+      this.events.endRace(); this.events.startRace(ev, gd);
+    });
     click('res-share', () => this.shareChallenge());
     // Zurück-Knöpfe
     for (const b of document.querySelectorAll('[data-back]')) b.addEventListener('click', e => { e.preventDefault(); this.audio.play('ui'); this.back(); });
@@ -759,11 +767,101 @@ class Game {
     const to = this.backTo;
     if (this.wheelBusy) return;
     if (this.screen === 'wheelcal') { this.showScreen('settings'); return; }
-    if (['settings', 'map', 'garage', 'daily', 'wheel', 'install', 'mp'].includes(this.screen)) {
+    if (['settings', 'map', 'garage', 'daily', 'wheel', 'install', 'mp', 'champ'].includes(this.screen)) {
       if (to === 'title') this.showScreen('title');
       else if (to === 'pause') this.showScreen('pause');
       else { this.setState(this.prevState === 'race' && this.events.race ? 'race' : 'free'); this.last = performance.now(); }
     }
+  }
+
+  // ---------------------------------------------------------------- Meisterschaften
+  carClassOf(id = this.save.current) {
+    const spec = this.carSpec(id), own = this.save.owned[id] || {};
+    return spec ? carClass(rating(carStats(spec, own.up || {}))) : 'D';
+  }
+  champFits(C, id = this.save.current) { return CLASS_ORDER.indexOf(this.carClassOf(id)) <= CLASS_ORDER.indexOf(C.cls); }
+  renderChamps() {
+    const box = $('ch-list'); box.innerHTML = '';
+    const run = this.save.champRun, done = this.save.champs || {}, mine = this.carClassOf(), spec = this.carSpec();
+    for (const C of CHAMPS) {
+      const card = document.createElement('div');
+      const won = done[C.id] && done[C.id].best === 1, running = run && run.id === C.id;
+      card.className = 'ch-card' + (won ? ' won' : '');
+      const prize = this.carSpec(C.car);
+      const races = C.events.map(id => (this.events.byId(id) || {}).name || id).join(' · ');
+      let state, cls;
+      if (running) { state = `Läuft: Rennen ${run.round + 1}/3 · ${run.points.__me || 0} Punkte`; cls = 'run'; }
+      else if (won) { state = '🏆 Gewonnen'; cls = 'ok'; }
+      else if (done[C.id]) { state = `Bestes Ergebnis: ${done[C.id].best}. Platz`; cls = ''; }
+      else if (!this.champFits(C)) { state = `Dein ${spec ? spec.name : 'Auto'} ist Klasse ${mine} – zu stark`; cls = 'no'; }
+      else { state = 'Dein Auto passt ✓'; cls = 'ok'; }
+      card.innerHTML = `<div class="ch-cls" style="background:${CLASS_COLORS[C.cls]}">≤ ${C.cls}</div>
+        <div class="ch-body"><b></b><span class="muted r"></span><span class="p"></span><span class="ch-state ${cls}"></span></div><button class="btn primary">${running ? 'Weiter ▶' : 'Starten'}</button>`;
+      card.querySelector('b').textContent = C.name + (C.dirt ? ' · Schotter' : '');
+      card.querySelector('.r').textContent = races;
+      card.querySelector('.p').textContent = `Preis: ${fmtNum(C.reward)} CR + ${prize ? prize.maker + ' ' + prize.name : ''}`;
+      card.querySelector('.ch-state').textContent = state;
+      card.querySelector('button').onclick = () => { this.audio.play('ui'); this.startChamp(C.id); };
+      box.appendChild(card);
+    }
+  }
+  startChamp(id) {
+    const C = CHAMPS.find(c => c.id === id);
+    if (!C) return;
+    if (!this.champFits(C)) { this.hud.toast(`Dein Auto ist Klasse ${this.carClassOf()} – hier ist höchstens ${C.cls} erlaubt. Wechsle in der Garage.`, 'warn'); return; }
+    let run = this.save.champRun;
+    if (!run || run.id !== id) run = this.save.champRun = { id, round: 0, points: {}, seed: Math.floor(Math.random() * 1e9) };
+    this.saveGame();
+    this.startChampRace();
+  }
+  startChampRace() {
+    const run = this.save.champRun, C = run && CHAMPS.find(c => c.id === run.id);
+    if (!C) return;
+    const ev = this.events.byId(C.events[run.round]);
+    if (!ev) return;
+    // Gegner-Autos aus derselben Klasse (bei Schotter geländetauglich)
+    const ci = CLASS_ORDER.indexOf(C.cls);
+    let pool = CARS.filter(c => { const k = CLASS_ORDER.indexOf(carClass(rating(carStats(c, {})))); return k <= ci && k >= ci - 1 && (!C.dirt || c.offroad > 0.3); });
+    if (pool.length < 3) pool = CARS.filter(c => CLASS_ORDER.indexOf(carClass(rating(carStats(c, {})))) <= ci);
+    if (this.state === 'photo') { $('c').style.filter = ''; $('ph-vig').hidden = true; }
+    if (this.events.race) this.events.endRace(true);
+    if (this.nav) this.clearNav();
+    if (this.state === 'title') this.startDriving();
+    this.setState('free');
+    this.camYaw = undefined; this.camY = undefined;
+    this.events.startRace(ev, null, { champ: { id: C.id, seed: run.seed, pool, counted: false } });
+  }
+  // nach jedem Meisterschaftsrennen: Punkte addieren, Zwischen-/Endstand für die Ergebnisanzeige
+  champAfterRace(list) {
+    const run = this.save.champRun, C = run && CHAMPS.find(c => c.id === run.id);
+    if (!C) return null;
+    for (const e of list) { const k = e.me ? '__me' : e.name; run.points[k] = (run.points[k] || 0) + e.pts; }
+    run.round++;
+    const table = Object.entries(run.points).map(([k, pts]) => ({ name: k === '__me' ? null : k, me: k === '__me', pts })).sort((a, b) => b.pts - a.pts || (a.me ? -1 : 1));
+    const myRank = table.findIndex(t => t.me) + 1, done = run.round >= C.events.length;
+    let text = '';
+    if (done) {
+      this.save.champs ||= {};
+      const prev = this.save.champs[C.id];
+      this.save.champs[C.id] = { best: Math.min(prev ? prev.best : 99, myRank) };
+      delete this.save.champRun;
+      if (myRank === 1) {
+        const prize = this.carSpec(C.car);
+        let extra = '';
+        if (prize && !this.save.owned[prize.id]) { this.save.owned[prize.id] = { up: {}, color: prize.colors[0] }; extra = ` + ${prize.maker} ${prize.name} (in der Garage)`; }
+        else if (prize) { const cr = Math.round(prize.price * 0.5); this.save.credits += cr; extra = ` + ${fmtNum(cr)} CR (Auto schon vorhanden)`; }
+        this.reward(C.reward, C.fans, true);
+        text = `🏆 Meister! +${fmtNum(C.reward)} CR${extra}`;
+        this.eco.addSpin && this.eco.addSpin('Meisterschaft: ' + C.name);
+        this.confetti();
+      } else if (myRank <= 3) {
+        const cr = Math.round(C.reward * (myRank === 2 ? 0.4 : 0.2));
+        this.reward(cr, Math.round(C.fans * 0.3), true);
+        text = `${myRank}. Platz in der Meisterschaft · +${fmtNum(cr)} CR`;
+      } else text = `${myRank}. Platz in der Meisterschaft – versuch es nochmal!`;
+    }
+    this.saveGame();
+    return { name: C.name, round: run.round, rounds: C.events.length, table, myRank, done, text };
   }
 
   // ---------------------------------------------------------------- Mehrspieler (verschiedene Geräte)
@@ -1271,6 +1369,7 @@ class Game {
     seg('s-device', s.device, v => { s.device = v; this.applyControlMode(); this.resize(); this.hud.toast(this.pc ? 'PC-Modus: Tastatur, Maus & Gamepad' : 'Handy-Modus: Touch-Steuerung', 'info'); });
     seg('s-haptic', s.haptic ? '1' : '0', v => { s.haptic = v === '1'; this.applyControlMode(); });
     seg('s-wheelgain', s.wheelGain || 2, v => { s.wheelGain = +v; this.applyControlMode(); });
+    seg('s-line', s.line || 'voll', v => { s.line = v; });
     $('s-wheelcal').onclick = () => { this.audio.play('ui'); this.showScreen('wheelcal'); };
     const wp = this.findWheelPad();
     $('s-wheelinfo').textContent = s.wheel ? '✓ eingerichtet' + (wp && wp.id !== s.wheel.id ? ' (anderes Gerät angeschlossen)' : '') : wp ? 'erkannt – bitte einrichten' : 'nicht eingerichtet';
@@ -1848,6 +1947,9 @@ class Game {
     }
 
     this.hud.minimap(dt, car, extra);
+    // Ideallinie (nicht während Kamerafahrt/Wiederholung oder nach dem Ziel)
+    if (race && !race.finished && this.settings.line !== 'aus' && !(race.t0 !== undefined && race.t < race.t0 + INTRO)) this.raceLine.update(race, car, this.settings.line, this.time);
+    else this.raceLine.hide();
     if (!race || race.started) this.tm.record(this, dt);
     if (this.nitroWas !== car.nitroOn) { this.nitroWas = car.nitroOn; if (car.nitroOn) this.audio.play('nitro'); document.body.classList.toggle('nitro', car.nitroOn); }
   }
@@ -1885,6 +1987,7 @@ class Game {
   }
   startReplay(race) {
     race.replayStart = true;
+    this.raceLine.hide();
     const frames = this.tm.buf.slice(-REPLAY_FRAMES);
     if (frames.length < 60 || this.quality < 1) { race.replayDone = true; return; }
     this.replay = new Replay(this, frames);

@@ -1,6 +1,6 @@
 // Events auf der Insel: Rennen, Blitzer, Driftzonen, Schanzen, Plakate – und die Skill-Kette.
 import * as THREE from '../lib/three.module.min.js';
-import { EVENTS, CARS, BARN_CARS } from './data.js';
+import { EVENTS, CARS, BARN_CARS, CHAMP_POINTS } from './data.js';
 import { INTRO } from './cine.js';
 import { clamp, fmtTime, fmtNum, mulberry32 } from './util.js';
 import { RaceAI, speedProfile } from './ai.js';
@@ -333,7 +333,8 @@ export class Events {
     const g = this.g, W = g.world;
     this.cancelSide();
     let mp = opts.mp || null;
-    if (!mp && !ghost && g.net && g.net.active) mp = g.net.sendRace(ev, !!g.settings.mpAI);
+    const champ = opts.champ || null; // Meisterschaft: feste Gegner (Name/Auto) über alle Rennen der Serie
+    if (!mp && !ghost && !champ && g.net && g.net.active) mp = g.net.sendRace(ev, !!g.settings.mpAI);
     const path = ev.path, st = g.car.stats;
     const sprint = !!ev.sprint;
     const total = sprint ? (ev.to - ev.at) * path.length - 12 : ev.laps * path.length;
@@ -345,16 +346,16 @@ export class Events {
       ev, path, prof, total, hw: ev.hw, world: W, dirt: !!ev.dirt, top, accel: st.accel * 0.95,
       startS: ev.s, t: -3.6 - INTRO, t0: -3.6 - INTRO, started: false, ais: [], cps: [], next: 0, prog: 0, pS: ev.s, lastPos: 0,
       ghostRec: [], ghost: null, ghostData: ghost, finished: false, finishT: 0, crashes: 0, laps: sprint ? 1 : ev.laps, missed: false,
-      mp, humans: new Map(), wall0: performance.now() / 1000,
+      mp, humans: new Map(), wall0: performance.now() / 1000, champ,
     };
     for (let s = 160; s < total - 20; s += 170) race.cps.push(s);
     race.cps.push(total);
     // Gegner
     const diff = [0.88, 0.95, 1.0][mp ? 1 : g.settings.difficulty ?? 1]; // Mehrspieler: überall gleich stark
     const n = mp ? mp.ai : g.quality === 0 ? Math.min(ev.ai, 5) : ev.ai;
-    const rnd = mulberry32(mp ? mp.seed : Date.now() & 0xffff);
+    const rnd = mulberry32(mp ? mp.seed : champ ? champ.seed : Date.now() & 0xffff);
     const names = [...AI_NAMES].sort(() => rnd() - 0.5);
-    const pool = CARS.filter(c => !ev.dirt || c.offroad > 0.2);
+    const pool = champ && champ.pool.length ? champ.pool : CARS.filter(c => !ev.dirt || c.offroad > 0.2);
     for (let i = 0; i < n; i++) {
       const spec = pool[Math.floor(rnd() * pool.length)];
       const col = spec.colors[Math.floor(rnd() * spec.colors.length)];
@@ -404,6 +405,7 @@ export class Events {
     const g = this.g, r = this.race;
     if (!r) return;
     for (const ai of r.ais) ai.dispose(g.scene);
+    if (g.raceLine) g.raceLine.hide();
     if (r.ghost) { g.scene.remove(r.ghost.model); r.ghost.model.traverse(o => { if (o.isMesh) o.material.dispose(); }); }
     for (const e of this.list) if (e.beacon) e.beacon.hidden = false;
     g.scenery.setGate(0, null); g.scenery.setGate(1, null);
@@ -508,6 +510,12 @@ export class Events {
     for (const h of r.humans.values()) rows.push({ name: h.name, time: h.fin || Infinity, live: !h.fin, human: true, car: h.spec });
     rows.sort((a, b) => (a.time === b.time ? 0 : a.time - b.time));
     const pos = rows.findIndex(x => x.me) + 1;
+    // Meisterschaft: Punkte nach Platz eintragen
+    let champRes = null;
+    if (r.champ && !r.champ.counted) {
+      r.champ.counted = true;
+      champRes = g.champAfterRace(rows.map((x, i) => ({ name: x.me ? null : x.name, me: !!x.me, pts: CHAMP_POINTS[i] || 0 })));
+    }
     const pay = g.eco.racePayout(ev, pos, r.crashes, g.settings.difficulty);
     const cr = pay.total, fans = pay.fans;
     const best = g.save.best[ev.id];
@@ -525,7 +533,7 @@ export class Events {
     g.saveGame();
     let challenge = null;
     if (r.ghostData && r.ghostData.name) challenge = { name: r.ghostData.name, time: r.ghostData.time, won: r.finishT < r.ghostData.time };
-    g.hud.showResults({ ev, rows, pos, cr, fans, time: r.finishT, isBest, best, challenge, ghost: r.ghostRec, lines: pay.lines });
+    g.hud.showResults({ ev, rows, pos, cr, fans, time: r.finishT, isBest, best, challenge, ghost: r.ghostRec, lines: pay.lines, champ: champRes });
   }
 }
 
