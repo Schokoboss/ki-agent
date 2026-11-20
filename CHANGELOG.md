@@ -18,6 +18,16 @@ Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 - **Lackiererei** (Garage, eigene Autos): freie Farbe per Farbwähler (🌈-Feld) und Designs – Rennstreifen, Seitenband,
   Zweifarbig, Startnummer (0–99, auf beiden Türen lesbar), Streifen + Nummer – mit Zweitfarbe; sofort in der Vorschau,
   je Auto gespeichert, auch Mitspieler sehen dein Design. Umgesetzt als Shader-Muster im Lack (kein extra Modell).
+- **Einführung für neue Spieler**: kleine Karte oben (1/5 Gas · Lenken · Drift · Navi zur Lichtsäule · erstes Rennen),
+  Texte passend zu Touch/Tastatur/Gamepad/Lenkrad, wegklickbar, +5.000 CR am Ende; alte Spielstände sehen sie nicht.
+  „NEU“-Hinweis an den Meisterschaften im Titelmenü.
+- **8 Aussichtspunkte** (👁 auf der Karte): automatisch die höchsten Stellen an den Straßen, am Fahrbahnrand langsam
+  anhalten → +1.500 CR, alle 8 → +20.000 CR; Profil zählt mit.
+- **Bremshilfe** im Rennen (Einstellungen → Bremshilfe; „Auto“ = am Handy an): zu schnell für die Kurve voraus →
+  das Spiel bremst selbst auf das Tempo der Ideallinie. Simuliert an der engsten Pass-Kehre mit Vollgas: ohne Hilfe
+  32 m neben der Strecke, mit Hilfe sauber durch (58 statt Ziel 55 km/h am Scheitel).
+- Rennen: Abstand zum Fahrer davor/dahinter in Sekunden. Einstellungen → **FPS anzeigen** (Bildrate, Auflösung, Stufe –
+  hilft beim Einschätzen der Leistung am eigenen Gerät).
 
 ## 18.11.2026 (2)
 - **Nova Drive läuft flüssiger** (gemessen: 50–66 % weniger Dreiecke pro Bild, eigenes Auto 11 statt 40 Zeichenaufrufe):

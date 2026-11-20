@@ -66,3 +66,14 @@ Neu: Tempozonen und Scheunenfunde
   Tempozone (⏱ auf der Karte): an der Lichtsäule durchfahren, dann zählt der Schnitt bis zum Ziel.
   Scheunenfunde: Auf der Insel stehen vor vier Scheunen vergessene Autos. In der Nähe kommt ein Gerücht im Radio –
   langsam vors Scheunentor fahren, dann steht das Auto in deiner Garage (Karte zeigt „?“ und gefundene Orte).
+
+Meisterschaften, Lackiererei, Ideallinie
+----------------------------------------
+  🏆 Meisterschaften (Titel/Pause): drei Rennen am Stück, Punkte nach Platz, Klassen-Obergrenze für dein Auto.
+     Gesamtsieg = Preisgeld + neues Auto. Abbrechen geht – „Weiter ▶“ macht später beim nächsten Rennen weiter.
+  🎨 Lackiererei (Garage, eigenes Auto): Regenbogen-Feld = eigene Farbe; Design: Rennstreifen, Seitenband,
+     zweifarbig, Startnummer – mit Zweitfarbe und Nummer.
+  Ideallinie (Einstellungen): blau = Gas, gelb = Gas weg, rot = bremsen. „Nur Bremszonen“ zeigt nur gelb/rot.
+  Bremshilfe (Einstellungen): bremst im Rennen automatisch vor zu schnellen Kurven. „Auto“ = am Handy an, am PC aus.
+  👁 Aussichtspunkte: 8 Stück am Straßenrand der höchsten Stellen – kurz anhalten.
+  FPS anzeigen (Einstellungen): zeigt die Bildrate oben – wenn es ruckelt, diese Zahl hilft bei der Fehlersuche.

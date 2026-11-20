@@ -132,6 +132,7 @@ class Game {
     this.input = new Input();
     this.input.bindTouch(document);
     this.applyControlMode();
+    $('fps').hidden = !this.settings.showFps;
     // Effekte
     this.smoke = new Smoke(this.scene, this.T.puff, this.quality >= 1 ? 260 : 140);
     this.sparks = new Particles(this.scene, this.T.glow, 220, true);
@@ -459,10 +460,11 @@ class Game {
   rating(id = this.save.current) { const s = this.carSpec(id); return rating(carStats(s, (this.save.owned[id] || {}).up || {})); }
 
   spawnAtFestival() {
-    const F = FESTIVAL, id = this.net && this.net.room ? this.net.id : '';
-    // im Mehrspieler-Raum nebeneinander statt aufeinander starten
-    const o = id ? ((id.charCodeAt(0) * 7 + id.charCodeAt(1)) % 5 - 2) * 4 : 0;
-    this.car.reset(F.x + 18 + o, F.z - 30, Math.PI);
+    const F = FESTIVAL, net = this.net;
+    // im Mehrspieler-Raum nebeneinander statt aufeinander: fester Platz nach Reihenfolge der Kennungen im Raum
+    let o = 0, row = 0;
+    if (net && net.room) { const slot = [net.id, ...net.peers.keys()].sort().indexOf(net.id); o = (slot % 5 - 2) * 4.5; row = Math.floor(slot / 5) * 9; }
+    this.car.reset(F.x + 18 + o, F.z - 30 + row, Math.PI);
     this.syncCar(0);
   }
 
@@ -549,6 +551,7 @@ class Game {
     if (name === 'wheelcal') this.startWheelCal(); else this.wc = null;
     if (this.input) this.input.calibrating = name === 'wheelcal';
     if (name === 'pause' || name === 'title') this.updateSpinBadges();
+    if (name === 'title') { const nb = $('champ-new'); if (nb) nb.hidden = !!this.save.seenChamp; }
   }
   updateSpinBadges() {
     const n = this.save.spins || 0;
@@ -580,7 +583,7 @@ class Game {
       ['Festival-Level', lv.level], ['Fans', fmtNum(this.save.fans)], ['Credits', fmtNum(this.save.credits) + ' CR'], ['Insgesamt verdient', fmtNum(st.earned) + ' CR'],
       ['Gefahren', st.km.toFixed(1) + ' km'], ['Rennen / Siege', `${st.races} / ${st.wins}`], ['Höchsttempo', st.top + ' km/h'], ['Beste Skill-Kette', fmtNum(st.bestChain)],
       ['Knapp vorbei', st.near], ['Zerstört', st.smashed], ['Plakate', `${this.save.posters.length} / 20`], ['Sterne', `${stars} / ${this.events.list.length * 3}`],
-      ['Autos', `${Object.keys(this.save.owned).length} / ${CARS.length}`], ['Scheunenfunde', `${(this.save.barns || []).length} / ${this.events.barns.length}`], ['Glücksrad gedreht', st.spins],
+      ['Autos', `${Object.keys(this.save.owned).length} / ${CARS.length}`], ['Scheunenfunde', `${(this.save.barns || []).length} / ${this.events.barns.length}`], ['Aussichtspunkte', `${(this.save.views || []).length} / ${(this.events.views || []).length}`], ['Glücksrad gedreht', st.spins],
     ];
     $('d-stats').innerHTML = rows.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
   }
@@ -712,7 +715,8 @@ class Game {
     this.updateInstallBtn();
     click('t-settings', () => { this.backTo = 'title'; this.showScreen('settings'); });
     click('t-mp', () => { this.backTo = 'title'; this.showScreen('mp'); });
-    click('t-champ', () => { if (!this.save.current) { this.showScreen('starter'); this.renderStarter(); return; } this.backTo = 'title'; this.showScreen('champ'); });
+    click('tut-x', () => { this.save.tut = 99; this.saveGame(); this.renderTut(); });
+    click('t-champ', () => { this.save.seenChamp = true; this.saveGame(); $('champ-new').hidden = true; if (!this.save.current) { this.showScreen('starter'); this.renderStarter(); return; } this.backTo = 'title'; this.showScreen('champ'); });
     click('p-champ', () => { this.backTo = 'pause'; this.showScreen('champ'); });
     click('p-mp', () => { this.backTo = 'pause'; this.showScreen('mp'); });
     click('h-mp', () => { if (this.state !== 'free' && this.state !== 'race') return; this.pause(); this.backTo = 'pause'; this.showScreen('mp'); });
@@ -773,6 +777,61 @@ class Game {
       else if (to === 'pause') this.showScreen('pause');
       else { this.setState(this.prevState === 'race' && this.events.race ? 'race' : 'free'); this.last = performance.now(); }
     }
+  }
+
+  brakeAssistOn() { const v = this.settings.brakeAssist; return v === 'on' || (v !== 'off' && !this.pc); }
+
+  // ---------------------------------------------------------------- Einführung für neue Spieler
+  // Schritte: 0 Gas · 1 Lenken · 2 Drift · 3 zur Lichtsäule (Navi) · 4 erstes Rennen · 5 fertig (Belohnung) · 99 aus
+  tutText(step) {
+    const pc = this.pc, pad = this.input.padUsed, wheel = pad && this.input.wheelUsed;
+    const gas = wheel ? 'Gaspedal' : pad ? 'RT' : pc ? 'W oder ↑' : '▲ (rechts)';
+    const steer = wheel ? 'Lenkrad drehen' : pad ? 'linker Stick' : pc ? 'A/D oder ←/→' : this.settings.control === 'tilt' ? 'Handy neigen' : this.settings.control === 'slider' ? 'links wischen' : this.settings.control === 'wheel' ? 'Lenkrad links unten drehen' : '◀ ▶ (links)';
+    const hb = wheel ? 'linke Schaltwippe' : pad ? 'A' : pc ? 'Leertaste' : 'HB';
+    return [
+      `Gas geben: ${gas} halten`,
+      `Lenken: ${steer}`,
+      `Driften: in einer Kurve kurz ${hb} drücken und gegenlenken`,
+      'Fahr zur lila Lichtsäule 🏁 – das Navi zeigt den Weg. Dort Rennen starten.',
+      `Dein erstes Rennen! Rot auf der Ideallinie = bremsen. Fehler? ⏪ halten = zurückspulen`,
+      'Geschafft! +5.000 CR · Im Menü warten 🏆 Meisterschaften, die 🎨 Lackiererei (Garage) und 👥 Mehrspieler.',
+    ][step] || '';
+  }
+  renderTut() {
+    const el = $('tut'), s = this.save.tut;
+    // nicht über Bannern (Willkommen, Rekorde) und nicht in Kamerafahrten
+    el.hidden = !(s >= 0 && s <= 5) || (!!this.events.race && s < 4) || !!this.cineMode || $('banner').classList.contains('show');
+    if (el.hidden) return;
+    $('tut-step').textContent = s < 5 ? `${s + 1}/5` : '✓';
+    $('tut-text').textContent = this.tutText(s);
+    el.classList.toggle('done', s === 5);
+  }
+  tutSet(s) {
+    this.save.tut = s; this.tutT = 0; this.tutAcc = 0; this.saveGame(); this.renderTut();
+    if (s >= 1 && s <= 4) this.audio.play('cp');
+    if (s === 3 && !this.events.race) this.navToNextRace();
+    if (s === 5) { this.reward(5000, 500, true); setTimeout(() => { if (this.save.tut === 5) this.tutSet(99); }, 9000); }
+  }
+  tutEvent(kind) {
+    const s = this.save.tut;
+    if (!(s >= 0 && s < 5)) return;
+    if (kind === 'drift' && s === 2) this.tutSet(3);
+    else if (kind === 'race' && s <= 3) this.tutSet(4);
+    else if (kind === 'finish' && s === 4) this.tutSet(5);
+  }
+  tutTick(dt, inp) {
+    if (this.save.tut === undefined) this.save.tut = this.save.stats && this.save.stats.races > 0 ? 99 : 0; // alte Spielstände: keine Einführung
+    const s = this.save.tut;
+    if (!(s >= 0 && s <= 5)) { if (!$('tut').hidden) $('tut').hidden = true; return; }
+    this.tutT = (this.tutT || 0) + dt;
+    const car = this.car;
+    if (s === 0 && car.speedKmh > 55) this.tutAcc = (this.tutAcc || 0) + dt;
+    if (s === 0 && this.tutAcc > 0.8) this.tutSet(1);
+    else if (s === 1 && Math.abs(inp.steer || 0) > 0.45 && car.speedKmh > 25) { this.tutAcc = (this.tutAcc || 0) + dt; if (this.tutAcc > 0.7) this.tutSet(2); }
+    else if (s === 2 && this.tutT > 75) this.tutSet(3); // wer nicht driftet, kommt trotzdem weiter
+    // Text an Gerät/Steuerung anpassen und Sichtbarkeit (Kino, Rennen) nachführen – 2× pro Sekunde reicht
+    this._tutR = (this._tutR || 0) - dt;
+    if (this._tutR <= 0) { this._tutR = 0.5; this.renderTut(); }
   }
 
   // ---------------------------------------------------------------- Meisterschaften
@@ -1300,6 +1359,13 @@ class Game {
         if (st) { g.fillStyle = '#ffd23f'; g.font = '700 10px sans-serif'; g.fillText('★'.repeat(st), x, y + r + 8); }
         this.mapHits.push({ ev, x, y });
       }
+      // Aussichtspunkte: unentdeckt = hohles Auge, entdeckt = gefülltes
+      for (const v of this.events.views || []) {
+        const [x, y] = P(v.x, v.z);
+        g.fillStyle = v.found ? '#59f0c2' : 'rgba(20,40,40,.7)'; g.beginPath(); g.arc(x, y, 7, 0, 7); g.fill();
+        g.strokeStyle = '#59f0c2'; g.lineWidth = 2; g.stroke();
+        g.fillStyle = v.found ? '#063' : '#59f0c2'; g.font = '700 9px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('👁', x, y + 1);
+      }
       // Scheunenfunde: gefunden = Scheune, gehört (Gerücht) = Fragezeichen
       for (const f of this.events.barns) {
         if (!f.found && !f.hinted) continue;
@@ -1399,6 +1465,8 @@ class Game {
     seg('s-haptic', s.haptic ? '1' : '0', v => { s.haptic = v === '1'; this.applyControlMode(); });
     seg('s-wheelgain', s.wheelGain || 2, v => { s.wheelGain = +v; this.applyControlMode(); });
     seg('s-line', s.line || 'voll', v => { s.line = v; });
+    seg('s-assist', s.brakeAssist || 'auto', v => { s.brakeAssist = v; });
+    seg('s-fps', s.showFps ? '1' : '0', v => { s.showFps = v === '1'; $('fps').hidden = !s.showFps; });
     $('s-wheelcal').onclick = () => { this.audio.play('ui'); this.showScreen('wheelcal'); };
     const wp = this.findWheelPad();
     $('s-wheelinfo').textContent = s.wheel ? '✓ eingerichtet' + (wp && wp.id !== s.wheel.id ? ' (anderes Gerät angeschlossen)' : '') : wp ? 'erkannt – bitte einrichten' : 'nicht eingerichtet';
@@ -1914,6 +1982,18 @@ class Game {
     let inp = raw;
     if (race && !race.started) inp = { throttle: 0, brake: 1, steer: raw.steer, handbrake: true, nitro: false, rev: raw.throttle };
     if (race && race.finished) inp = { throttle: 0.3, brake: 0, steer: 0, handbrake: false, nitro: false };
+    // Bremshilfe (Rennen): zu schnell für die Kurve vor dir → automatisch bremsen (Profil = das der Ideallinie)
+    this.assistBrake = 0;
+    if (race && race.started && !race.finished && this.brakeAssistOn() && !inp.handbrake && !(inp.brake > 0.5)) {
+      const path = race.path, at = d => race.prof[path.idx(Math.round(path.wrapS(race.pS + d) / path.ds))];
+      const look = Math.max(12, car.vf * 0.55); // etwa eine halbe Sekunde voraus
+      let vt = Infinity; for (let d = 4; d <= look; d += 4) vt = Math.min(vt, at(d));
+      const over = car.vf - vt;
+      if (over > 0.6) {
+        this.assistBrake = clamp(over / 4, 0.3, 1);
+        inp = { ...inp, throttle: 0, brake: Math.max(inp.brake || 0, this.assistBrake), nitro: false };
+      }
+    }
     // Physik in festen Schritten
     this.acc = (this.acc || 0) + dt;
     const h = 1 / 120;
@@ -1976,6 +2056,7 @@ class Game {
     }
 
     this.hud.minimap(dt, car, extra);
+    this.tutTick(dt, inp);
     // Ideallinie (nicht während Kamerafahrt/Wiederholung oder nach dem Ziel)
     if (race && !race.finished && this.settings.line !== 'aus' && !(race.t0 !== undefined && race.t < race.t0 + INTRO)) this.raceLine.update(race, car, this.settings.line, this.time);
     else this.raceLine.hide();

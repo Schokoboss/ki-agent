@@ -64,7 +64,7 @@
   </div>
   <div id="race" hidden>
     <div id="r-pos">1<small>/8</small></div>
-    <div class="r-col"><div id="r-lap">Runde 1/3</div><div id="r-time">0:00.00</div><div id="r-ghost"></div></div>
+    <div class="r-col"><div id="r-lap">Runde 1/3</div><div id="r-time">0:00.00</div><div id="r-ghost"></div><div id="r-gap"></div></div>
   </div>
   <div id="tr">
     <button id="h-map" class="hb" aria-label="Karte">🗺</button>
@@ -81,6 +81,7 @@
     <div id="nav-total"></div>
     <button id="nav-x" aria-label="Navigation beenden">✕</button>
   </div>
+  <div id="tut" hidden><span id="tut-step"></span><b id="tut-text"></b><button id="tut-x" aria-label="Einführung schließen">✕</button></div>
   <div id="gains"></div>
   <div id="skill"><div id="skill-name"></div><div class="sk-row"><span id="skill-total"></span><span id="skill-mult"></span></div></div>
   <div id="toasts"></div>
@@ -133,7 +134,7 @@
     <div class="sub">Festival der Sonnenküste</div>
     <div class="menu">
       <button id="t-drive" class="btn primary">Fahren</button>
-      <button id="t-champ" class="btn">🏆 Meisterschaften</button>
+      <button id="t-champ" class="btn">🏆 Meisterschaften <i class="new-badge" id="champ-new" hidden>NEU</i></button>
       <button id="t-mp" class="btn">👥 Mehrspieler</button>
       <button id="t-garage" class="btn">Garage</button>
       <button id="t-daily" class="btn">Tagesaufgaben</button>
@@ -244,7 +245,7 @@
 <section id="map" class="screen" hidden>
   <canvas id="map-canvas"></canvas>
   <div class="map-top"><button class="btn back" data-back>‹ Zurück</button><div id="map-posters"></div></div>
-  <div class="map-legend"><span style="--c:#7a6bff">🏁 Rennen</span><span style="--c:#ff9a1f">📷 Blitzer</span><span style="--c:#ff3d9a">〰 Drift</span><span style="--c:#ffd400">⚠ Schanze</span><span style="--c:#2ee6a6">⏱ Tempo</span></div>
+  <div class="map-legend"><span style="--c:#7a6bff">🏁 Rennen</span><span style="--c:#ff9a1f">📷 Blitzer</span><span style="--c:#ff3d9a">〰 Drift</span><span style="--c:#ffd400">⚠ Schanze</span><span style="--c:#2ee6a6">⏱ Tempo</span><span style="--c:#59f0c2">👁 Aussicht</span></div>
   <div id="map-info" hidden>
     <span id="mi-type"></span>
     <div id="mi-name"></div>
@@ -296,6 +297,10 @@
       <div class="seg touch-only" id="s-haptic"><button data-v="1">An</button><button data-v="0">Aus</button></div>
       <label>Ideallinie</label>
       <div class="seg" id="s-line"><button data-v="aus">Aus</button><button data-v="bremsen">Nur Bremszonen</button><button data-v="voll">Voll</button></div>
+      <label>Bremshilfe</label>
+      <div class="seg" id="s-assist"><button data-v="auto">Auto (Handy an)</button><button data-v="on">An</button><button data-v="off">Aus</button></div>
+      <label>FPS anzeigen</label>
+      <div class="seg" id="s-fps"><button data-v="0">Aus</button><button data-v="1">An</button></div>
       <label>Auto-Gas</label>
       <div class="seg" id="s-autogas"><button data-v="0">Aus</button><button data-v="1">An</button></div>
       <label>Gegner</label>

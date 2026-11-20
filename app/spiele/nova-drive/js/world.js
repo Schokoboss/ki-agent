@@ -1782,6 +1782,17 @@ export class Scenery {
     return b;
   }
 
+  // kleiner Bodenmarker (Ring + Symbol, ohne Lichtsäule) – z. B. Aussichtspunkte
+  addMarker(x, z, color, icon) {
+    const y = this.world.heightAt(x, z);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(4.5, 5.4, 36), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide }));
+    ring.rotation.x = -Math.PI / 2; ring.position.set(x, y + 0.3, z);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: iconTexture(icon, color), depthWrite: false, fog: false }));
+    sp.scale.set(5, 5, 1); sp.position.set(x, y + 6, z);
+    this.scene.add(ring, sp);
+    return { ring, sp, x, z, y };
+  }
+
   buildGates() {
     this.gates = [];
     for (let k = 0; k < 2; k++) {

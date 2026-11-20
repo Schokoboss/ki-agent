@@ -128,6 +128,9 @@ Kino & Zeit (`js/cine.js`): Kamerafahrt vor dem Rennen, Wiederholung mit TV-Kame
 **Leistung**: Grafik „Auto“ rät die Stufe aus dem Grafikchip (`guessQuality` in `js/main.js`) und lernt nach unten
 (`settings.autoLevel`); Laufzeit-Regelung `perf()`/`setFx()`; Gelände-Detailstufen `updateTerrainLod`, Kacheln für feste
 Instanz-Bündel `chunkStatic` (`js/world.js`). Messskripte: Zeichenaufrufe/Dreiecke je Ort mit `renderer.info`.
+**Spielinhalte**: Meisterschaften (`CHAMPS` in `js/data.js`, Ablauf `champAfterRace` in `js/main.js`), Ideallinie
+(`RaceLine` in `js/nav.js`), Lackiererei (`applyLivery` in `js/carmodel.js`), Einführung (`tutTick`), Aussichtspunkte
+und Scheunenfunde (`initViews`/`initBarns` in `js/events.js`).
 **Mehrspieler** (`js/net.js`): Räume mit 5-stelligem Code über MQTT/WebSocket (öffentlicher Dienst HiveMQ, Ersatz EMQX;
 zum Testen `index.html?broker=ws://localhost:PORT/mqtt`). **Lenkrad**: USB-Lenkrad mit Einrichtungs-Assistent
 (Einstellungen → USB-Lenkrad), am Handy Touch-Lenkrad als Lenkart.

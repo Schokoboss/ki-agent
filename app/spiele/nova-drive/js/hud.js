@@ -268,7 +268,8 @@ export class HUD {
     const c = $('countdown');
     c.textContent = text; c.classList.remove('show'); void c.offsetWidth; c.classList.add('show');
   }
-  raceStart(r) { $('race').hidden = false; $('free-info').hidden = true; }
+  raceStart(r) { $('race').hidden = false; $('free-info').hidden = true; this.raceGap(''); }
+  raceGap(t) { const e = $('r-gap'); if (e.textContent !== t) e.textContent = t; }
   raceEnd() { $('race').hidden = true; $('free-info').hidden = false; }
   raceInfo(r, rank, lap) {
     $('r-pos').innerHTML = `${rank}<small>/${r.field || r.ais.length + 1}</small>`;

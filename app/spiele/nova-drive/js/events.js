@@ -26,6 +26,7 @@ export class Skills {
     this.last = name;
     this.g.hud.skill(name, pts, this.points, this.mult);
     this.g.audio.play('skill');
+    if (/Drift/.test(name) && this.g.tutEvent) this.g.tutEvent('drift');
     const car = this.g.car;
     car.nitro = Math.min(car.stats.nitroCap, car.nitro + 0.12 + pts / 6000);
     if (this.g.events.drift) this.g.events.drift.score += pts;
@@ -107,6 +108,63 @@ export class Events {
       this.list.push(ev);
     }
     this.initBarns();
+    this.initViews();
+  }
+
+  // ---------- Aussichtspunkte: die höchsten Stellen an den Straßen (mind. 380 m auseinander, nicht an Events)
+  initViews() {
+    const W = this.g.world, S = this.g.scenery, cand = [];
+    const NAME = { kueste: 'Küstenblick', pass: 'Passhöhe', see: 'Seeblick', wald: 'Waldblick', waldweg: 'Waldblick', berg: 'Gipfelblick', stadt: 'Stadtblick', markt: 'Stadtblick', schnell: 'Weitblick', festival: 'Festivalblick' };
+    for (const r of W.roads) {
+      const p = r.path, step = 4;
+      for (let i = 0; i < p.n; i += step) {
+        let top = true;
+        for (let k = -48; k <= 48 && top; k += 4) { const j = p.idx(i + k); if (j !== i && p.y[j] > p.y[i]) top = false; }
+        if (top && p.y[i] > 12) cand.push({ x: p.x[i], z: p.z[i], y: p.y[i], tx: p.tx[i], tz: p.tz[i], road: r.id });
+      }
+    }
+    cand.sort((a, b) => b.y - a.y);
+    const picks = [];
+    for (const c of cand) {
+      if (picks.length >= 8) break;
+      if (picks.some(q => Math.hypot(q.x - c.x, q.z - c.z) < 380)) continue;
+      if (this.list.some(e => Math.hypot(e.x - c.x, e.z - c.z) < 90)) continue;
+      picks.push(c);
+    }
+    const found = this.g.save.views || [], used = {};
+    this.views = picks.map((c, i) => {
+      // neben die Fahrbahn (Seite mit freier Sicht = tiefer liegendes Gelände)
+      const nx = -c.tz, nz = c.tx, hw = (W.roadById[c.road] ? W.roadById[c.road].def.hw : 6) + 1.5; // am Fahrbahnrand (nicht im Hang)
+      const side = W.heightAt(c.x + nx * 30, c.z + nz * 30) < W.heightAt(c.x - nx * 30, c.z - nz * 30) ? 1 : -1;
+      const x = c.x + nx * hw * side, z = c.z + nz * hw * side;
+      // mehrfach vorkommende Namen bekommen die Himmelsrichtung (Karte: oben = Nord = −z)
+      const dir = Math.abs(x) > Math.abs(z) ? (x > 0 ? 'Ost' : 'West') : (z < 0 ? 'Nord' : 'Süd');
+      const base = NAME[c.road] || 'Aussicht', dup = picks.filter(q => (NAME[q.road] || 'Aussicht') === base).length > 1;
+      let name = dup ? `${base} ${dir}` : base;
+      used[name] = (used[name] || 0) + 1;
+      if (used[name] > 1) name += ' ' + ['', '', 'II', 'III', 'IV', 'V'][used[name]];
+      const v = { id: 'v_' + i, name, x, z, found: found.includes('v_' + i), marker: null };
+      v.marker = S.addMarker(x, z, '#59f0c2', '🔭');
+      return v;
+    });
+  }
+  updateViews() {
+    const g = this.g, car = g.car;
+    for (const v of this.views || []) {
+      const d = Math.hypot(car.pos.x - v.x, car.pos.z - v.z), vis = !v.found && d < 500;
+      v.marker.ring.visible = v.marker.sp.visible = vis;
+      if (vis) v.marker.sp.position.y = v.marker.y + 6 + Math.sin(performance.now() / 500 + v.x) * 0.4;
+      if (!v.found && d < 12 && car.speedKmh < 35) {
+        v.found = true;
+        (g.save.views ||= []).push(v.id);
+        const n = g.save.views.length;
+        g.reward(1500, 300, true);
+        g.hud.banner('Aussichtspunkt', v.name, null, `${n} / ${this.views.length} entdeckt · +1.500 CR · Tipp: Pause → 📸 Fotomodus`);
+        g.audio.play('cp');
+        if (n === this.views.length) { g.reward(20000, 2000, true); g.hud.toast('Alle Aussichtspunkte entdeckt! +20.000 CR', 'info'); }
+        g.saveGame();
+      }
+    }
   }
 
   // ---------- Scheunenfunde: vier weit verteilte Scheunen, vor dem Tor steht ein verstaubtes Auto
@@ -187,6 +245,7 @@ export class Events {
     this.updateSpeedZone(dt);
     this.updateJump(dt);
     this.updateBarns();
+    this.updateViews();
   }
 
   // ---------- Tempozone: Schnitt von Start bis Ziel
@@ -392,6 +451,7 @@ export class Events {
     g.hud.prompt(null);
     g.hud.raceStart(race);
     g.setState('race');
+    if (g.tutEvent) g.tutEvent('race');
     this.updateGates();
   }
 
@@ -482,6 +542,19 @@ export class Events {
     for (const h of r.humans.values()) if ((h.fin && (!r.finished || h.fin < r.finishT)) || (!h.fin && !r.finished && h.prog > r.prog)) rank++;
     if (r.lastRank && rank < r.lastRank && r.started && !r.finished) g.skills.add('Überholt', 220 * (r.lastRank - rank));
     r.lastRank = rank; r.rank = rank;
+    // Abstand zum Fahrer davor/dahinter in Sekunden (bei aktuellem Tempo), 4× pro Sekunde
+    r.gapT = (r.gapT || 0) - dt;
+    if (r.gapT <= 0 && r.started && !r.finished) {
+      r.gapT = 0.25;
+      let ah = null, be = null;
+      const all = [...r.ais.filter(a => !a.done).map(a => ({ name: a.name, prog: a.prog })), ...[...r.humans.values()].filter(h => !h.fin).map(h => ({ name: h.name, prog: h.prog }))];
+      for (const o of all) {
+        if (o.prog > r.prog && (!ah || o.prog < ah.prog)) ah = o;
+        if (o.prog <= r.prog && (!be || o.prog > be.prog)) be = o;
+      }
+      const v = Math.max(12, Math.abs(car.vf)), f = d => (d / v).toFixed(1).replace('.', ',') + ' s';
+      g.hud.raceGap((ah ? `▲ ${ah.name} ${f(ah.prog - r.prog)}` : '') + (ah && be ? ' · ' : '') + (be ? `▼ ${be.name} ${f(r.prog - be.prog)}` : ''));
+    } else if (r.finished && r.gapT > -1) { r.gapT = -9; g.hud.raceGap(''); }
     const lap = r.ev.sprint ? 1 : clamp(Math.floor(Math.max(0, r.prog) / r.path.length) + 1, 1, r.laps);
     g.hud.raceInfo(r, rank, lap);
     if (r.finished) {
@@ -523,6 +596,7 @@ export class Events {
     if (isBest) { g.save.best[ev.id] = r.finishT; g.saveGhost(ev.id, r.ghostRec, r.finishT); }
     const stars = pos === 1 ? 3 : pos <= 3 ? 2 : 1;
     g.save.stats.races++;
+    if (g.tutEvent) g.tutEvent('finish');
     if (pos === 1) g.save.stats.wins++;
     const had = g.save.stars[ev.id] || 0;
     if (stars > had) g.save.stars[ev.id] = stars;
