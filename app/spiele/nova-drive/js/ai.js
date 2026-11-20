@@ -1,8 +1,10 @@
-// Gegner im Rennen (folgen der Ideallinie mit Tempo-Profil) und Verkehr auf der Insel.
+// Gegner im Rennen (echte Fahrphysik mit Fahrer-Programm) und Verkehr auf der Insel.
 import * as THREE from '../lib/three.module.min.js';
 import { clamp, lerp, damp, mulberry32 } from './util.js';
 import { buildCar, styleDims, disposeCar } from './carmodel.js';
 import { SURF } from './terrain.js';
+import { Vehicle } from './physics.js';
+import { carStats } from './data.js';
 
 const P = {};
 
@@ -32,128 +34,147 @@ export function speedProfile(path, top, latAcc, brake, world, offroad) {
   return v;
 }
 
+// Gegner im Rennen: echtes Fahrzeug mit derselben Physik wie der Spieler (eigene Autowerte), gesteuert von einem
+// Fahrer-Programm: Gas/Bremse nach Kurvenprofil des eigenen Autos, Lenken auf eine Ziellinie vor dem Auto,
+// Überholen/Ausweichen, kleine Fehler je nach Können, Zurücksetzen nach Abflug. Lässt sich schieben und drehen.
+const AI_H = 1 / 60; // Physik-Schritt der Gegner (60 Hz reicht und spart Rechenzeit)
 export class RaceAI {
-  constructor(scene, spec, color, name, skill) {
+  constructor(scene, spec, color, name, skill, world, opts = {}) {
     this.spec = spec; this.name = name; this.skill = skill;
     this.model = buildCar(spec, color, { lod: 'ai' });
     this.dims = styleDims(spec.style);
-    this.half = (this.dims.L / 2 - this.dims.W / 2) * 0.85; this.rad = this.dims.W / 2 * 0.95;
+    this.stats = carStats(spec, opts.up || {});
+    this.veh = new Vehicle(world, this.stats, this.dims);
+    this.half = this.veh.half; this.rad = this.veh.rad;
     scene.add(this.model);
-    this.pos = new THREE.Vector3(); this.yaw = 0; this.vx = 0; this.vz = 0;
-    this.speed = 0; this.s = 0; this.prog = 0; this.lat = 0; this.latT = 0; this.lane = 0;
-    this.done = false; this.finish = Infinity; this.bump = 0; this.wheelRot = 0; this.slide = 0;
+    this.pos = this.veh.pos;
+    this.s = 0; this.prog = 0; this.lat = 0; this.latT = 0; this.lane = 0;
+    this.done = false; this.finish = Infinity; this.acc = 0;
+    // Persönlichkeit: wie spät gebremst wird, wie unruhig gelenkt wird, wie oft Fehler passieren
+    const r = opts.rnd || Math.random;
+    this.brakeK = 0.9 + 0.08 * r();           // Anteil der echten Bremsleistung, mit der geplant wird
+    this.noiseA = (1.15 - skill) * 0.9 * (0.6 + r() * 0.8);
+    this.noiseP = r() * 10; this.mistake = 0; this.mistakeCool = 4 + r() * 8;
+    this.stuckT = 0; this.offT = 0; this.prof = null;
   }
+  get yaw() { return this.veh.yaw; }
+  get vx() { return this.veh.vel.x; }
+  get vz() { return this.veh.vel.z; }
+  get speed() { return Math.max(0, this.veh.vf); }
   dispose(scene) { scene.remove(this.model); disposeCar(this.model); }
-  circles() {
-    const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw), h = this.half;
-    return [[this.pos.x + sy * h, this.pos.z + cy * h], [this.pos.x - sy * h, this.pos.z - cy * h]];
+  circles() { return this.veh.circles(); }
+  // eigenes Tempo-Profil (aus den Werten des eigenen Autos) einmal pro Rennen
+  setup(race) {
+    const st = this.stats, W = race.world, wet = W.rain > 0.4 ? (W.rain - 0.4) / 0.6 : 0;
+    const latAcc = 9.81 * st.grip * 1.12 * (1 - 0.15 * wet), brake = 9.81 * (1.0 + 0.55 * st.grip) * this.brakeK * 0.88;
+    this.prof = speedProfile(race.path, st.top / 3.6 * 0.99, latAcc, brake, W, st.offroad);
   }
-
-  // race: {path, prof, total, hw, startS}; others: alle Autos [{prog, lat, speed}]
-  update(dt, race, others, playerProg, started) {
-    const path = race.path;
-    if (!started) { this.place(path, race); return; }
-    if (this.done) {
-      // nach dem Ziel an den Rand ausrollen (abwechselnd links/rechts), damit Nachfolgende frei durchkommen
-      this.speed = Math.max(0, this.speed - 4 * dt);
-      this.latT = (this.name.length % 2 ? 1 : -1) * (race.hw - 1.3);
-      this.lat = damp(this.lat, this.latT, 2.5, dt);
-      this.s += this.speed * dt; this.prog += this.speed * dt;
-      // Sprint: die Straße endet kurz hinter dem Ziel → dort ausblenden statt am Ende zu stapeln
-      if (!path.closed && this.s >= path.length - 4) { this.model.visible = false; return; }
-      this.place(path, race);
-      return;
-    }
-    const i = path.idx(Math.round(path.wrapS(this.s) / path.ds));
-    let vT = race.prof[i] * this.skill;
-    // Gummiband: weit vorne etwas langsamer, weit hinten etwas schneller
+  // auf die Strecke setzen (Startaufstellung, Zurücksetzen): bei s mit Seitenversatz lat, Blick in Fahrtrichtung
+  place(path, race, speed = 0) {
+    if (!this.prof) this.setup(race);
+    const p = path.at(this.s, P), x = p.x - p.tz * this.lat, z = p.z + p.tx * this.lat;
+    this.veh.reset(x, z, Math.atan2(p.tx, p.tz));
+    this.veh.vel.set(p.tx * speed, 0, p.tz * speed);
+    this.sync(0);
+  }
+  // Steuer-Eingaben aus Strecke, Profil und Gegnern
+  drive(dt, race, others, playerProg) {
+    const path = race.path, v = this.veh, sp = Math.max(0, v.vf);
+    const at = d => this.prof[path.idx(Math.round(path.wrapS(this.s + d) / path.ds))];
+    // Zieltempo: Profil kurz voraus (Reaktion), × Können; weit vorne etwas Gas weg (nie schneller als das Auto kann)
+    let vT = Math.min(at(2 + sp * 0.2), at(6 + sp * 0.35)) * this.skill;
     const gap = this.prog - playerProg;
-    vT *= clamp(1 - gap * 0.00035, 0.9, 1.07);
-    // Windschatten / Hindernis vor mir
+    if (gap > 60) vT *= clamp(1 - (gap - 60) * 0.0003, 0.94, 1);
+    if (this.mistake > 0) vT *= 1.12; // Verbremser: zu schnell in die Kurve
+    // Ziellinie: Ideallinie (Kurveninnenseite) + eigene Spur; vor langsameren Autos zur Seite (überholen)
     let blocked = null;
     for (const o of others) {
       if (o === this) continue;
       const d = o.prog - this.prog;
-      if (d > 0 && d < 16 && Math.abs(o.lat - this.lat) < 2.3) { if (!blocked || d < blocked.d) blocked = { o, d }; }
+      if (d > 0 && d < 18 && Math.abs(o.lat - this.lat) < 2.4) { if (!blocked || d < blocked.d) blocked = { o, d }; }
     }
-    if (blocked) {
-      if (blocked.o.speed < vT - 1) {
-        // überholen: Seite mit mehr Platz
-        const lim = race.hw - 1.4;
-        const left = blocked.o.lat - 2.9, right = blocked.o.lat + 2.9;
-        this.latT = (Math.abs(left) < lim && (Math.abs(right) >= lim || Math.abs(left - this.lat) < Math.abs(right - this.lat))) ? left : right;
-        this.latT = clamp(this.latT, -lim, lim);
-        if (blocked.d < 8) vT = Math.min(vT, blocked.o.speed + 1);
-      }
-      vT *= 1.02; // Windschatten
+    const lim = race.hw - 1.4;
+    if (blocked && (blocked.o.speed || 0) < sp + 0.5) {
+      const left = blocked.o.lat - 3, right = blocked.o.lat + 3;
+      this.latT = (Math.abs(left) < lim && (Math.abs(right) >= lim || Math.abs(left - this.lat) < Math.abs(right - this.lat))) ? left : right;
+      if (blocked.d < 9 && Math.abs(this.lat - blocked.o.lat) < 2) vT = Math.min(vT, (blocked.o.speed || 0) + 0.5);
     } else {
       const ahead = path.at(this.s + 25, P);
-      const ideal = clamp(ahead.curv * 260, -1, 1) * (race.hw - 1.8);
-      this.latT = damp(this.latT, ideal + this.lane, 0.6, dt);
+      this.latT = damp(this.latT, clamp(ahead.curv * 260, -1, 1) * (race.hw - 1.8) + this.lane, 0.8, dt);
     }
-    // Nachbarn neben mir (knapp davor/daneben/dahinter): Seitenabstand halten, sonst fahren Karosserien ineinander
-    let push = 0, side = null;
+    // Nachbarn daneben: nicht hineinlenken
     for (const o of others) {
       if (o === this || o.done) continue;
-      const d = o.prog - this.prog;
-      if (Math.abs(d) > 6.5) continue;
-      const dl = this.lat - o.lat;
-      if (Math.abs(dl) < 2.5) {
-        push += (Math.sign(dl) || (this.lat <= 0 ? -1 : 1)) * (2.5 - Math.abs(dl));
-        if (d > 0 && (!side || d < side.d)) side = { o, d };
+      const d = o.prog - this.prog, dl = this.lat - o.lat;
+      if (Math.abs(d) < 6 && Math.abs(dl) < 2.6) this.latT += (Math.sign(dl) || 1) * (2.6 - Math.abs(dl)) * 0.6;
+    }
+    this.latT = clamp(this.latT, -lim, lim);
+    // Lenken: Punkt voraus auf der Ziellinie anpeilen, Gierrate dämpft; dazu etwas Unruhe je nach Können
+    const L = 7 + sp * 0.42, q = path.at(this.s + L, P);
+    const tx = q.x - q.tz * this.latT - v.pos.x, tz = q.z + q.tx * this.latT - v.pos.z;
+    let err = Math.atan2(tx, tz) - v.yaw; while (err > Math.PI) err -= 2 * Math.PI; while (err < -Math.PI) err += 2 * Math.PI;
+    const noise = Math.sin(race.t * 1.7 + this.noiseP) * this.noiseA * 0.05;
+    const steer = clamp(-(err + noise) * 2.4 + v.yawRate * 0.12, -1, 1);
+    // Gas/Bremse
+    let throttle = 0, brake = 0;
+    const e = vT - sp;
+    if (e > 0.6) throttle = clamp(e / 3, 0.4, 1);
+    else if (e < -0.8) brake = clamp(-e / 4.5, 0.25, 1);
+    else throttle = 0.3;
+    if (Math.abs(err) > 0.6 && sp > 12) { throttle *= 0.4; } // quer zur Strecke → Gas weg
+    return { throttle, brake, steer, handbrake: false, nitro: false, direct: true };
+  }
+  update(dt, race, others, playerProg, started) {
+    const path = race.path, v = this.veh;
+    if (!this.prof) this.setup(race);
+    if (!started) { v.vel.set(0, 0, 0); this.sync(dt); return; }
+    // Fehler: ab und zu (je schwächer, desto öfter) ein Verbremser für ~1,5 s
+    this.mistakeCool -= dt; this.mistake = Math.max(0, this.mistake - dt);
+    if (this.mistakeCool <= 0) { this.mistakeCool = 8 + Math.random() * 14; if (Math.random() < (1.05 - this.skill) * 3) this.mistake = 1.5; }
+    let inp;
+    if (this.done) {
+      // nach dem Ziel ausrollen und zur Seite
+      this.latT = (this.name.length % 2 ? 1 : -1) * (race.hw - 1.3);
+      inp = this.drive(dt, race, [], playerProg); inp.throttle = 0; inp.brake = 0.25;
+      if (!path.closed && this.s >= path.length - 6) { this.model.visible = false; return; }
+    } else inp = this.drive(dt, race, others, playerProg);
+    this.acc += dt;
+    let n = 0;
+    while (this.acc >= AI_H && n < 4) { v.step(AI_H, inp); this.acc -= AI_H; n++; }
+    if (n >= 4) this.acc = 0;
+    v.impacts.length = 0;
+    // Position auf der Strecke nachführen (Fortschritt wie beim Spieler)
+    const c = path.closest(v.pos.x, v.pos.z, this.s, 60);
+    let ds = c.s - this.s;
+    if (path.closed) { if (ds > path.length / 2) ds -= path.length; if (ds < -path.length / 2) ds += path.length; }
+    if (Math.abs(ds) < 60) { this.s = c.s; this.prog += ds; }
+    this.lat = c.lat;
+    // festgefahren oder weit abseits → zurück auf die Strecke (wie „Zurücksetzen“ beim Spieler)
+    if (!this.done) {
+      this.stuckT = v.vf < 1.5 ? this.stuckT + dt : 0;
+      this.offT = c.dist > race.hw + 14 || v.inWater > 0 ? this.offT + dt : 0;
+      if (this.stuckT > 2.5 || this.offT > 1.5) {
+        this.lat = clamp(this.lat, -(race.hw - 2), race.hw - 2); this.latT = this.lat;
+        this.place(path, race, 8); this.stuckT = 0; this.offT = 0;
       }
     }
-    const limL = race.hw - 1.2;
-    if (push) {
-      this.latT = clamp(this.latT + push, -limL, limL);
-      // am Rand eingeklemmt → hinter dem Nachbarn bleiben statt hindurchzufahren
-      if (side && Math.abs(this.latT) >= limL - 0.05) vT = Math.min(vT, (side.o.speed || 0) - 0.5);
-    }
-    this.pushing = !!push;
-    if (!this.done) {
-      const top = race.top * this.skill;
-      if (this.speed < vT) this.speed += race.accel * this.skill * Math.max(0.15, 1 - (this.speed / top) ** 2) * dt;
-      else this.speed = Math.max(vT, this.speed - 16 * dt);
-    }
-    if (this.bump > 0) { this.bump -= dt; }
-    this.speed = Math.max(0, this.speed);
-    this.s += this.speed * dt;
-    this.prog += this.speed * dt;
-    this.lat = damp(this.lat, this.latT, this.pushing ? 4 : 1.8, dt);
-    this.lat = clamp(this.lat, -race.hw + 1, race.hw - 1);
-    this.place(path, race);
+    this.sync(dt, inp);
   }
-
-  place(path, race) {
-    const p = path.at(this.s, P);
-    const ox = this.pos.x, oz = this.pos.z;
-    this.pos.x = p.x + -p.tz * this.lat;
-    this.pos.z = p.z + p.tx * this.lat;
-    this.pos.y = race.world.heightAt(this.pos.x, this.pos.z);
-    const yawT = Math.atan2(p.tx, p.tz);
-    this.slide = damp(this.slide, -p.curv * this.speed * 0.9 * (race.dirt ? 1.6 : 0.6), 3, 1 / 60);
-    this.yaw = yawT + clamp(this.slide, -0.35, 0.35);
-    this.vx = p.tx * this.speed; this.vz = p.tz * this.speed;
-    this.ground = race.world;
-    this.sync();
-  }
-
-  sync() {
-    const m = this.model;
-    m.position.copy(this.pos);
-    m.rotation.set(0, this.yaw, 0);
-    const W = this.ground;
-    if (W) {
-      const e = 1.6, gx = (W.heightAt(this.pos.x + e, this.pos.z) - W.heightAt(this.pos.x - e, this.pos.z)) / (2 * e);
-      const gz = (W.heightAt(this.pos.x, this.pos.z + e) - W.heightAt(this.pos.x, this.pos.z - e)) / (2 * e);
-      const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
-      const pitch = Math.atan(gx * sy + gz * cy), roll = Math.atan(-gx * cy + gz * sy);
-      m.userData.bodyG.rotation.set(-pitch, 0, roll * 0.8);
-    }
-    this.wheelRot += this.speed / 0.35 / 60;
-    for (const w of m.userData.wheels) { w.spin.rotation.x = this.wheelRot; if (w.front) w.pivot.rotation.y = clamp(this.slide * -1.5, -0.4, 0.4); }
+  // Modell an das Fahrzeug anpassen (Neigung am Boden, Wankbewegung, Räder)
+  sync(dt, inp) {
+    const v = this.veh, m = this.model, ud = m.userData;
+    m.position.copy(v.pos);
+    _f.set(Math.sin(v.yaw), 0, Math.cos(v.yaw));
+    _f.addScaledVector(v.up, -_f.dot(v.up)).normalize();
+    _x.crossVectors(v.up, _f).normalize();
+    _mm.makeBasis(_x, v.up, _f);
+    m.quaternion.setFromRotationMatrix(_mm);
+    this.roll = damp(this.roll || 0, clamp(v.yawRate * Math.abs(v.vf) * 0.006, -0.08, 0.08), 6, dt || 0.016);
+    ud.bodyG.rotation.set(0, 0, -this.roll);
+    for (const w of ud.wheels) { w.spin.rotation.x = v.wheelRot; if (w.front) w.pivot.rotation.y = -v.steer * 0.45; }
   }
 }
+const _f = new THREE.Vector3(), _x = new THREE.Vector3(), _mm = new THREE.Matrix4();
 
 // ---------------------------------------------------------------- Verkehr
 const TRAFFIC_STYLES = [

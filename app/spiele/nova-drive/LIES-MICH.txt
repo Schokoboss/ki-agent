@@ -26,6 +26,9 @@ Dann läuft das Spiel auch unter  http://localhost:8765/spiele/nova-drive/
 
 Steuerung Handy: ◀ ▶ lenken, ▲ Gas, ▼ Bremse, HB Handbremse (driften), N₂O Nitro, ⏪ halten = zurückspulen.
 Vor jedem Rennen gibt es eine Kamerafahrt (Gas oder „Überspringen“), nach dem Ziel eine Wiederholung.
+Bis zum Startsignal steht dein Auto fest auf dem Startplatz – Gas lässt nur den Motor aufheulen.
+Die Gegner fahren mit derselben Fahrphysik wie du: sie bremsen vor Kurven, machen Fehler, lassen sich
+anschieben und von der Linie drängen (und schieben zurück).
 
 Grafik: Einstellungen → Grafik. „Auto“ (empfohlen) wählt die Stufe passend zum Gerät und regelt beim Fahren selbst
 nach (erst Auflösung, dann Effekte). Ruckelt es dauerhaft, startet das Spiel beim nächsten Mal eine Stufe niedriger.

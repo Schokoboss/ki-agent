@@ -1,9 +1,10 @@
 // Events auf der Insel: Rennen, Blitzer, Driftzonen, Schanzen, Plakate – und die Skill-Kette.
 import * as THREE from '../lib/three.module.min.js';
-import { EVENTS, CARS, BARN_CARS, CHAMP_POINTS } from './data.js';
+import { EVENTS, CARS, BARN_CARS, CHAMP_POINTS, carStats, rating } from './data.js';
 import { INTRO } from './cine.js';
 import { clamp, fmtTime, fmtNum, mulberry32 } from './util.js';
 import { RaceAI, speedProfile } from './ai.js';
+import { carContact } from './physics.js';
 import { EVENT_COLORS } from './world.js';
 import { buildCar, disposeCar } from './carmodel.js';
 
@@ -420,12 +421,24 @@ export class Events {
     const n = nAI;
     const rnd = mulberry32(mp ? mp.seed : champ ? champ.seed : Date.now() & 0xffff);
     const names = [...AI_NAMES].sort(() => rnd() - 0.5);
-    const pool = champ && champ.pool.length ? champ.pool : CARS.filter(c => !ev.dirt || c.offroad > 0.2);
+    // Gegner-Autos: in der Meisterschaft aus der Klasse, im Mehrspieler fest (alle Geräte gleich), sonst die 9 Autos,
+    // deren Wertung deinem Auto am nächsten ist – sie fahren mit ihren eigenen Werten (echte Physik)
+    let pool = champ && champ.pool.length ? champ.pool : CARS.filter(c => !ev.dirt || c.offroad > 0.2);
+    if (!champ && !mp) {
+      const myR = rating(st);
+      pool = [...pool].sort((a, b) => Math.abs(rating(carStats(a, {})) - myR) - Math.abs(rating(carStats(b, {})) - myR)).slice(0, 9);
+    }
     for (let i = 0; i < n; i++) {
       const spec = pool[Math.floor(rnd() * pool.length)];
       const col = spec.colors[Math.floor(rnd() * spec.colors.length)];
       const skill = diff * (0.92 + (i / Math.max(1, n - 1)) * 0.1) * (0.985 + rnd() * 0.03);
-      const ai = new RaceAI(g.scene, spec, col, names[i], skill);
+      // schwächere Gegner-Autos bekommen Tuning, bis sie etwa so stark sind wie deins (nicht im Mehrspieler/Meisterschaft)
+      const up = {};
+      if (!champ && !mp) {
+        const want = rating(st) - 15, keys = ['motor', 'reifen', 'fahrwerk', 'nitro'];
+        for (let lv = 1; lv <= 3 && rating(carStats(spec, up)) < want; lv++) for (const k of keys) if (rating(carStats(spec, up)) < want) up[k] = lv;
+      }
+      const ai = new RaceAI(g.scene, spec, col, names[i], skill, W, { rnd, up });
       const pd = ai.model.userData.paintMat && ai.model.userData.paintMat.userData.dirt;
       if (pd && ev.dirt) pd.value = 0.35 + rnd() * 0.4;
       const row = Math.floor(i / 2), side = i % 2 ? 1 : -1;
@@ -442,6 +455,7 @@ export class Events {
     const pp = path.at(ps, P);
     const plat = pside * Math.min(2.8, ev.hw - 1.6);
     g.car.reset(pp.x - pp.tz * plat, pp.z + pp.tx * plat, Math.atan2(pp.tx, pp.tz));
+    race.grid = { x: g.car.pos.x, z: g.car.pos.z, yaw: g.car.yaw }; // bis zum Start hier festhalten
     race.prog = -10 - prow * 10; race.pS = ps;
     race.field = n + (mp ? Math.max(mp.ids.length, me + 1) : 1);
     // Geist (nicht im Mehrspieler – da fahren echte Gegner)
@@ -530,7 +544,7 @@ export class Events {
       ai.update(dt, r, others, r.prog, r.started);
       if (!ai.done && ai.prog >= r.total) { ai.done = true; ai.finish = r.t; }
     }
-    if (r.started) separateAIs(r);
+    if (r.started) collideAIs(r);
     // Geist
     if (r.started && !r.finished) {
       r.recT = (r.recT || 0) + dt;
@@ -619,21 +633,34 @@ export class Events {
   }
 }
 
-// ---------------------------------------------------------------- KI untereinander: nicht durcheinander fahren
-// Überlappen sich zwei Gegner, weicht der hintere sanft zur Seite aus (oder der vordere, wenn dort Platz ist);
-// ist die Straße zu schmal, bleibt der hintere dahinter. Längs-/Querabstand in Strecken-Koordinaten (prog/lat).
-const SEP_LEN = 4.4, SEP_LAT = 1.9; // Fahrzeuglänge/-breite
-function separateAIs(r) {
+// ---------------------------------------------------------------- KI untereinander: echte Zusammenstöße
+// Berühren sich zwei Gegner, werden beide auseinandergeschoben und tauschen Schwung aus (gleiche Masse),
+// mit etwas Drehung – wie zwischen Spieler und Gegner.
+function collideAIs(r) {
   const A = r.ais;
   for (let i = 0; i < A.length; i++) for (let j = i + 1; j < A.length; j++) {
     const a = A[i], b = A[j];
-    if (a.done || b.done) continue;
-    const ds = b.prog - a.prog;
-    if (Math.abs(ds) >= SEP_LEN || Math.abs(b.lat - a.lat) >= SEP_LAT) continue;
-    // Karosserien berühren sich trotz Ausweichen → der hintere reiht sich dahinter ein
-    const back = ds >= 0 ? a : b, front = ds >= 0 ? b : a, gap = SEP_LEN - Math.abs(ds);
-    back.prog -= gap; back.s -= gap; back.speed = Math.min(back.speed, front.speed);
-    back.place(r.path, r);
+    if (!a.model.visible || !b.model.visible) continue;
+    if (Math.abs(a.pos.x - b.pos.x) > 7 || Math.abs(a.pos.z - b.pos.z) > 7) continue;
+    const hit = carContact(a.circles(), b.circles(), a.rad, b.rad);
+    if (hit) pushPair(a.veh, b.veh, hit);
+  }
+}
+// hit.nx/nz zeigt von b nach a
+export function pushPair(va, vb, hit, shareA = 0.5) {
+  const pa = hit.pen * shareA, pb = hit.pen * (1 - shareA);
+  va.pos.x += hit.nx * pa; va.pos.z += hit.nz * pa;
+  vb.pos.x -= hit.nx * pb; vb.pos.z -= hit.nz * pb;
+  const vn = (va.vel.x - vb.vel.x) * hit.nx + (va.vel.z - vb.vel.z) * hit.nz;
+  if (vn < 0) {
+    const j = -vn * 0.6; // Stoß (leicht unelastisch), je zur Hälfte
+    va.vel.x += hit.nx * j; va.vel.z += hit.nz * j;
+    vb.vel.x -= hit.nx * j; vb.vel.z -= hit.nz * j;
+    // seitlicher Treffer bringt Drehung
+    const side = (sy, cy) => -hit.nx * cy + hit.nz * sy;
+    vb.yawRate += side(Math.sin(vb.yaw), Math.cos(vb.yaw)) * j * 0.25;
+    va.yawRate -= side(Math.sin(va.yaw), Math.cos(va.yaw)) * j * 0.25;
+    if (j > 2) { va.impacts.push({ force: j, x: va.pos.x, z: va.pos.z }); }
   }
 }
 
@@ -657,4 +684,4 @@ function placeGhost(gh, t, W) {
   gh.model.rotation.y = d[a][2] + dy * f;
   gh.model.visible = i < d.length + rate * 2;
 }
-export { separateAIs as __separateAIs }; // für Tests
+export { collideAIs as __separateAIs }; // für Tests

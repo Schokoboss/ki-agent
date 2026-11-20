@@ -2,6 +2,21 @@
 
 Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 
+## 20.11.2026 (2)
+- **Nova Drive: Gegner mit echter Fahrphysik** – die KI-Fahrer sitzen jetzt im selben Fahrzeugmodell wie du
+  (Motor, Gänge, Reifenhaftung, Gewicht, Tuning) statt auf einer unsichtbaren Schiene. Sie fahren nur so schnell,
+  wie ihr Auto kann, bremsen vor Kurven nach dem Kurvenprofil ihres Autos, lenken mit leichter Unruhe und verbremsen
+  sich gelegentlich. Rempler wirken auf beide Autos (Schwung wird geteilt, seitliche Treffer drehen das Auto);
+  Gegner schieben sich auch untereinander. Wer sich festfährt oder ins Wasser gerät, wird nach 1,5–2,5 s zurück auf
+  die Strecke gesetzt. Gegnerfeld passend zu deinem Auto (ähnliche Wertung, bei Bedarf mit Tuning).
+  Simuliert über alle 12 Rennen: alle Gegner kommen ins Ziel, 0 Zurücksetzungen, keine Überlappungen, 6–37
+  Überholmanöver je Rennen. Kostet ~0,07 ms pro Bild. Zurückspulen und Wiederholung nehmen die Gegner mit.
+- **Fehler behoben: Rückwärtsrollen vor dem Start** – wer während Kamerafahrt/Countdown bremste, legte bei Stillstand
+  den Rückwärtsgang ein und rollte vom Startplatz. Jetzt steht das Auto bis zum Startsignal fest (Gas = Motor aufheulen
+  lassen). Außerdem konnte im ersten Bild nach dem Rennstart ein Verkehrsauto den Spieler anschieben (Pass-Rennen,
+  1,3 m) – Verkehr kollidiert nicht mehr, sobald er für das Rennen abgeschaltet ist. Gemessen: 0,000 m Bewegung
+  vor dem Start in allen geprüften Rennen.
+
 ## 20.11.2026
 - **Nova Drive stabiler**: Speicherleck behoben – jede Auto-Vorschau in der Garage, jeder Autowechsel und jedes Rennen
   ließ Grafikspeicher zurück (konnte Handys nach längerem Spielen abstürzen lassen). Zusammengefasste Automodelle werden
