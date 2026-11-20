@@ -469,6 +469,17 @@ html.turned .screen, html.turned .screen * { touch-action: none; }
 #tut.done { border-color: #36e27a; } #tut.done #tut-step { color: #36e27a; }
 .new-badge { font-style: normal; font-size: 10px; font-weight: 800; background: #ff3d7f; color: #fff; border-radius: 6px; padding: 1px 5px; margin-left: 6px; vertical-align: 2px; }
 .new-badge[hidden] { display: none; }
+/* Erfolge */
+#ach-list { display: flex; flex-direction: column; gap: 5px; }
+.ac-sum { font-weight: 800; text-align: center; color: #ffd23f; }
+.ac-grp { font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; opacity: .7; margin-top: 6px; }
+.ac { display: grid; grid-template-columns: 28px 1fr auto; gap: 8px; align-items: center; background: rgba(255,255,255,.05); border: 1px solid var(--line); border-radius: 11px; padding: 6px 10px; }
+.ac.ok { border-color: rgba(255,210,63,.6); background: rgba(255,210,63,.09); }
+.ac-i { font-size: 18px; text-align: center; opacity: .8; }
+.ac-b { display: flex; flex-direction: column; gap: 2px; font-size: 12px; min-width: 0; }
+.ac-b b { font-size: 14px; }
+.ac-b .bar { height: 4px; } .ac.ok .ac-b .bar { display: none; }
+.ac-r { font-size: 12px; font-weight: 800; color: #36e27a; white-space: nowrap; }
 /* Meisterschaften */
 #ch-list { display: flex; flex-direction: column; gap: 8px; }
 .ch-card { display: grid; grid-template-columns: 56px 1fr auto; gap: 10px; align-items: center; background: rgba(255,255,255,.06); border: 1px solid var(--line); border-radius: 14px; padding: 10px; }

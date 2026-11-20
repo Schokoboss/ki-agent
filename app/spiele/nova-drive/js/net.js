@@ -78,6 +78,7 @@ export class Net {
   }
   attach(c, code, url, host) {
     this.client = c; this.room = code; this.host = host; this.broker = url; this.status = 'verbunden';
+    this.g.save.mpJoined = true;
     c.subscribe(PREFIX + code + '/#');
     c.on('message', (topic, msg) => this.onMessage(topic, String(msg)));
     c.on('reconnect', () => { this.status = 'verbinde'; this.emit('status'); });
