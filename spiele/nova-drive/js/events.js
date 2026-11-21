@@ -2,11 +2,12 @@
 import * as THREE from '../lib/three.module.min.js';
 import { EVENTS, CARS, BARN_CARS, CHAMP_POINTS, carStats, rating } from './data.js';
 import { INTRO } from './cine.js';
-import { clamp, fmtTime, fmtNum, mulberry32 } from './util.js';
+import { clamp, damp, fmtTime, fmtNum, mulberry32 } from './util.js';
 import { RaceAI, speedProfile } from './ai.js';
 import { carContact } from './physics.js';
 import { EVENT_COLORS } from './world.js';
 import { buildCar, disposeCar } from './carmodel.js';
+import { clock, Remote } from './net.js';
 
 const ICONS = { race: '🏁', trap: '📷', drift: '〰', jump: '⚠', speed: '⏱' };
 const P = {};
@@ -412,15 +413,27 @@ export class Events {
       ev, path, prof, total, hw: ev.hw, world: W, dirt: !!ev.dirt, top, accel: st.accel * 0.95,
       startS, t: -3.6 - INTRO, t0: -3.6 - INTRO, started: false, ais: [], cps: [], next: 0, prog: 0, pS: startS, lastPos: 0,
       ghostRec: [], ghost: null, ghostData: ghost, finished: false, finishT: 0, crashes: 0, laps: sprint ? 1 : ev.laps, missed: false,
-      mp, humans: new Map(), wall0: performance.now() / 1000, champ,
+      mp, humans: new Map(), champ,
     };
+    if (mp) {
+      // gemeinsame Rennuhr: Start = mp.at auf der Uhr des Startenden, umgerechnet mit dem Uhrenabgleich
+      // (ältere Spielversionen senden keinen Zeitpunkt → ab jetzt zählen, Gegner rechnet jedes Gerät selbst)
+      race.offRef = g.net.offOf(mp.from) ?? 0;
+      race.at = typeof mp.at === 'number' ? mp.at : clock() + race.offRef;
+      race.aiHost = mp.v >= 2 ? mp.from : g.net.id; race.aiGen = 0;
+      race.feedAt = 0; race.failed = new Set(); race.feedSeq = 0;
+    }
     for (let s = 160; s < total - 20; s += 170) race.cps.push(s);
     race.cps.push(total);
     // Gegner
     const diff = [0.88, 0.95, 1.0][mp ? 1 : g.settings.difficulty ?? 1]; // Mehrspieler: überall gleich stark
     const n = nAI;
     const rnd = mulberry32(mp ? mp.seed : champ ? champ.seed : Date.now() & 0xffff);
-    const names = [...AI_NAMES].sort(() => rnd() - 0.5);
+    const taken = mp && Array.isArray(mp.nm) ? mp.nm.map(s => String(s).toLowerCase()) : [];
+    // mischen nach Fisher-Yates (sort() mit Zufall mischt je nach Browser anders → Geräte hätten andere Gegner)
+    const names = AI_NAMES.filter(s => !taken.includes(s.toLowerCase()));
+    if (champ) names.sort(() => rnd() - 0.5); // wie bisher: laufende Meisterschaften behalten ihre Fahrer
+    else for (let i = names.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [names[i], names[j]] = [names[j], names[i]]; }
     // Gegner-Autos: in der Meisterschaft aus der Klasse, im Mehrspieler fest (alle Geräte gleich), sonst die 9 Autos,
     // deren Wertung deinem Auto am nächsten ist – sie fahren mit ihren eigenen Werten (echte Physik)
     let pool = champ && champ.pool.length ? champ.pool : CARS.filter(c => !ev.dirt || c.offroad > 0.2);
@@ -506,15 +519,20 @@ export class Events {
     }
   }
 
-  updateRace(dt) {
+  // bg: Mehrspieler-Rennen läuft im Hintergrund weiter (Pause/Menü) – ohne Anzeige und Töne
+  updateRace(dt, bg = false) {
     const g = this.g, r = this.race, car = g.car;
-    // Mehrspieler: Uhr läuft nach Wanduhr weiter (auch in der Pause) – alle Geräte zählen gleich
-    if (r.mp) r.t = r.t0 + (performance.now() / 1000 - r.wall0);
-    else r.t += dt;
-    if (!r.started && r.t >= 0) { r.started = true; g.audio.play('go'); g.hud.countdown('LOS!'); }
+    // Mehrspieler: gemeinsame Rennuhr (Uhr des Startenden, per Abgleich umgerechnet) – alle Geräte zählen gleich,
+    // auch in der Pause
+    if (r.mp) {
+      const o = g.net.offOf(r.mp.from);
+      if (o !== null) r.offRef = o;
+      r.t = r.t0 + (clock() + r.offRef - r.at) / 1000;
+    } else r.t += dt;
+    if (!r.started && r.t >= 0) { r.started = true; if (!bg) { g.audio.play('go'); g.hud.countdown('LOS!'); } }
     else if (!r.started) {
       const n = Math.ceil(-r.t);
-      if (n !== r.lastCount && n <= 3) { r.lastCount = n; g.audio.play('count'); g.hud.countdown(String(n)); }
+      if (n !== r.lastCount && n <= 3) { r.lastCount = n; if (!bg) { g.audio.play('count'); g.hud.countdown(String(n)); } }
     }
     // Fortschritt des Spielers
     const c = r.path.closest(car.pos.x, car.pos.z, r.pS, 70);
@@ -538,37 +556,42 @@ export class Events {
         this.updateGates();
       } else if (r.prog > cp + 25 && !r.missed) { r.missed = true; g.hud.toast('Checkpoint verpasst – zurück!', 'warn'); }
     }
-    // Gegner
-    const others = [{ prog: r.prog, lat: c.lat, speed: Math.abs(car.vf), self: true }, ...r.ais];
-    for (const ai of r.ais) {
-      ai.update(dt, r, others, r.prog, r.started);
-      if (!ai.done && ai.prog >= r.total) { ai.done = true; ai.finish = r.t; }
-    }
-    if (r.started) collideAIs(r);
+    // Mitspieler im selben Rennen (Fortschritt und Zielzeit melden sie selbst; vorausgerechnet auf „jetzt“)
+    if (r.mp) this.mpHumans(r, c);
+    // Gegner: im Mehrspieler rechnet nur der Rennleiter, die anderen zeigen seinen Stand
+    if (r.mp && r.ais.length) this.mpLeader(r);
+    if (!r.mp || r.aiHost === g.net.id) {
+      const humans = r.mp ? [...r.humans.values()].filter(h => !h.gone && h.p) : [];
+      const others = [{ prog: r.prog, lat: c.lat, speed: Math.abs(car.vf), self: true }, ...humans.map(h => ({ prog: h.prog, lat: h.lat || 0, speed: h.speed, human: true })), ...r.ais];
+      // Gummiband nur gegenüber dem vordersten Menschen
+      let lead = r.prog; for (const h of humans) lead = Math.max(lead, h.prog);
+      for (const ai of r.ais) {
+        ai.update(dt, r, others, lead, r.started);
+        // Zielzeit auf den Zeitpunkt der Ziellinie zurückgerechnet (nicht auf das Bild danach)
+        if (!ai.done && ai.prog >= r.total) { ai.done = true; ai.finish = Math.round((r.t - (ai.prog - r.total) / Math.max(5, ai.speed)) * 1000) / 1000; }
+      }
+      if (r.started) collideAIs(r, r.mp ? g.net.cars() : null);
+    } else this.mpPuppets(r, dt);
     // Geist
-    if (r.started && !r.finished) {
+    if (r.started && !r.finished && !bg) {
       r.recT = (r.recT || 0) + dt;
       if (r.recT >= 0.1) { r.recT -= 0.1; r.ghostRec.push([car.pos.x, car.pos.z, car.yaw]); }
     }
     if (r.ghost) placeGhost(r.ghost, Math.max(0, r.t), g.world);
-    // Mitspieler im selben Rennen (Fortschritt und Zielzeit melden sie selbst)
-    if (r.mp && g.net) for (const p of g.net.racers(r.ev.id)) {
-      const h = r.humans.get(p.id) || { id: p.id };
-      h.name = p.name; h.spec = p.spec; h.prog = p.race.prog; if (p.race.fin) h.fin = p.race.fin;
-      r.humans.set(p.id, h);
-    }
-    if (r.mp) r.field = Math.max(r.field, r.ais.length + 1 + r.humans.size);
-    // Platzierung
-    let rank = 1 + r.ais.filter(a => (a.done && (!r.finished || a.finish < r.finishT)) || (!a.done && !r.finished && a.prog > r.prog)).length;
-    for (const h of r.humans.values()) if ((h.fin && (!r.finished || h.fin < r.finishT)) || (!h.fin && !r.finished && h.prog > r.prog)) rank++;
-    if (r.lastRank && rank < r.lastRank && r.started && !r.finished) g.skills.add('Überholt', 220 * (r.lastRank - rank));
+    // Platzierung (gleiche Regel für Gegner und Mitspieler)
+    let rank = 1;
+    for (const a of r.ais) if (this.ahead(r, a.done ? a.finish : 0, a.prog, a.speed)) rank++;
+    for (const h of r.humans.values()) if (!h.gone && this.ahead(r, h.fin || 0, h.prog, h.speed)) rank++;
+    if (r.lastRank && rank < r.lastRank && r.started && !r.finished && !bg) g.skills.add('Überholt', 220 * (r.lastRank - rank));
     r.lastRank = rank; r.rank = rank;
+    if (r.mp && r.shown) this.mpRefreshResults(dt);
+    if (bg) return;
     // Abstand zum Fahrer davor/dahinter in Sekunden (bei aktuellem Tempo), 4× pro Sekunde
     r.gapT = (r.gapT || 0) - dt;
     if (r.gapT <= 0 && r.started && !r.finished) {
       r.gapT = 0.25;
       let ah = null, be = null;
-      const all = [...r.ais.filter(a => !a.done).map(a => ({ name: a.name, prog: a.prog })), ...[...r.humans.values()].filter(h => !h.fin).map(h => ({ name: h.name, prog: h.prog }))];
+      const all = [...r.ais.filter(a => !a.done).map(a => ({ name: a.name, prog: a.prog })), ...[...r.humans.values()].filter(h => !h.fin && !h.gone).map(h => ({ name: h.name, prog: h.prog }))];
       for (const o of all) {
         if (o.prog > r.prog && (!ah || o.prog < ah.prog)) ah = o;
         if (o.prog <= r.prog && (!be || o.prog > be.prog)) be = o;
@@ -586,23 +609,138 @@ export class Events {
 
   finish() {
     const g = this.g, r = this.race;
-    r.finished = true; r.finishT = r.t; r.after = 0;
+    // Zeit, zu der die Ziellinie genau überfahren wird (Erkennung kommt bis zu 3 m davor bzw. ein Bild danach)
+    // auf ms gerundet: so steht auf allen Geräten exakt dieselbe Zahl (übertragen wird sie ebenfalls in ms)
+    r.finishT = Math.round((r.t + clamp((r.total - r.prog) / Math.max(5, Math.abs(g.car.vf)), -0.25, 0.25)) * 1000) / 1000;
+    r.finished = true; r.after = 0;
+    r.rank = 1;
+    for (const a of r.ais) if (this.ahead(r, a.done ? a.finish : 0, a.prog, a.speed)) r.rank++;
+    for (const h of r.humans.values()) if (!h.gone && this.ahead(r, h.fin || 0, h.prog, h.speed)) r.rank++;
     g.audio.play('win');
     g.hud.countdown(r.rank === 1 ? 'SIEG!' : `${r.rank}. PLATZ`);
     g.confetti();
   }
 
+  // Steht ein anderer vor mir? fin = seine Zielzeit (0 = noch nicht im Ziel), prog/v = Fortschritt und Tempo jetzt.
+  // Bin ich schon im Ziel und er noch nicht gemeldet, entscheidet die Vorhersage, ob er die Linie früher überquert hat.
+  ahead(r, fin, prog, v) {
+    if (fin) return !r.finished || fin < r.finishT;
+    if (!r.finished) return prog > r.prog;
+    return prog >= r.total && r.t - (prog - r.total) / Math.max(5, v || 0) < r.finishT;
+  }
+
+  // ---------- Mehrspieler: Mitspieler, Rennleiter für die KI, Ergebnisliste
+  mpHumans(r) {
+    const net = this.g.net, now = clock(), seen = new Set();
+    for (const p of net.racers(r.mp.seed, r.ev.id)) {
+      const R = p.race, h = r.humans.get(p.id) || { id: p.id };
+      const age = clamp((now - R.tl) / 1000, 0, 0.6);
+      h.name = p.name; h.spec = p.spec; h.speed = Math.max(0, R.speed || 0);
+      if (R.fin) h.fin = R.fin;
+      h.prog = R.prog + (h.fin || !R.started ? 0 : h.speed * age);
+      h.p = p; h.gone = false; seen.add(p.id);
+      // Lage auf der Strecke – braucht nur der Rennleiter (Gegner weichen Menschen aus)
+      if (r.aiHost === net.id && p.pos) { const q = r.path.closest(p.pos.x, p.pos.z, h.s ?? r.path.wrapS(r.startS + h.prog), 60); h.s = q.s; h.lat = q.lat; }
+      r.humans.set(p.id, h);
+    }
+    // ausgestiegen (Rennen abgebrochen oder Raum verlassen) – wer schon im Ziel war, behält seine Zeit
+    for (const h of r.humans.values()) if (!seen.has(h.id)) { h.p = null; if (!h.fin) h.gone = true; }
+    r.field = Math.max(r.field, r.ais.length + 1 + r.humans.size);
+  }
+  // Rennleiter: rechnet die KI-Gegner für alle. Ist er weg (Rennen verlassen, keine Meldungen mehr), übernimmt der
+  // Mensch mit der kleinsten Kennung; jede Übernahme erhöht die Generation – die höhere gewinnt immer.
+  mpLeader(r) {
+    const net = this.g.net, f = net.aiFeed, now = clock();
+    if (f && f.ri === r.mp.seed && f.from !== r.aiHost && !r.failed.has(f.from) && (f.ag > r.aiGen || (f.ag === r.aiGen && f.from < r.aiHost))) { r.aiHost = f.from; r.aiGen = f.ag; }
+    if (r.aiHost === net.id) return;
+    // vor dem Startsignal stehen alle Gegner still – kein Wechsel (beim Laden der Modelle stockt jedes Gerät kurz)
+    if (!r.started) { r.feedAt = now; return; }
+    if (f && f.ri === r.mp.seed && f.from === r.aiHost) r.feedAt = Math.max(r.feedAt, f.rx);
+    // weg = Rennen verlassen, Raum verlassen, 4 s nichts mehr gehört; oder 5 s keine Gegner-Daten trotz Meldungen
+    const hp = net.peers.get(r.aiHost), t = performance.now() / 1000;
+    const left = !hp || hp.race.id !== r.mp.seed || t - hp.last > 4;
+    if (left || now - r.feedAt > 5000) {
+      r.lastElect = { t: r.t, host: r.aiHost, noPeer: !hp, race: hp ? hp.race.id : null, silent: hp ? +(t - hp.last).toFixed(2) : null, feed: Math.round(now - r.feedAt) };
+      r.failed.add(r.aiHost);
+      const ids = [net.id, ...net.racers(r.mp.seed, r.ev.id).filter(p => t - p.last < 3 && !r.failed.has(p.id)).map(p => p.id)].sort();
+      r.aiHost = ids[0]; r.aiGen++; r.feedAt = now;
+      if (r.aiHost === net.id) this.takeOverAIs(r);
+    }
+  }
+  // KI übernehmen: aus dem zuletzt gezeigten Stand mit echter Physik weiterfahren
+  takeOverAIs(r) {
+    for (const ai of r.ais) {
+      const v = ai.veh, vx = v.vel.x, vz = v.vel.z, w = v.yawRate;
+      v.reset(v.pos.x, v.pos.z, v.yaw); v.vel.set(vx, 0, vz); v.yawRate = w;
+      const c = r.path.closest(v.pos.x, v.pos.z, r.path.wrapS(r.startS + ai.prog), 80);
+      ai.s = c.s; ai.lat = ai.latT = c.lat; ai.acc = 0; ai.stuckT = 0; ai.offT = 0; ai.remote = null;
+      if (!ai.prof) ai.setup(r);
+    }
+  }
+  // Gegner auf den anderen Geräten: Stand des Rennleiters, vorausgerechnet und weich nachgeführt
+  mpPuppets(r, dt) {
+    const net = this.g.net, f = net.aiFeed, now = clock(), W = this.g.world;
+    if (f && f.ri === r.mp.seed && f.from === r.aiHost && f.seq !== r.feedSeq) {
+      r.feedSeq = f.seq;
+      f.list.forEach((d, i) => {
+        const ai = r.ais[i];
+        if (!ai || !Array.isArray(d) || d.length < 10) return;
+        (ai.remote ||= new Remote()).push({ tl: f.tl, x: d[0], y: d[1], z: d[2], vx: d[3], vz: d[4], r: d[5], w: d[6], s: 0 }, now);
+        ai.netProg = d[7];
+        if (d[8] >= 0 && !ai.done) { ai.done = true; ai.finish = d[8]; }
+        ai.model.visible = !!d[9];
+      });
+    }
+    for (const ai of r.ais) {
+      const R = ai.remote, v = ai.veh;
+      if (!R || !R.update(dt, now, W)) { v.vel.set(0, 0, 0); ai.sync(dt); continue; } // noch kein Stand: Startplatz
+      const s = R.s, vf = s.vx * Math.sin(R.yaw) + s.vz * Math.cos(R.yaw);
+      v.pos.set(R.x, R.y, R.z); v.yaw = R.yaw; v.vel.set(s.vx, 0, s.vz); v.yawRate = s.w; v.vf = vf;
+      v.wheelRot += vf / (ai.dims.wR || 0.34) * dt;
+      v.steer = damp(v.steer, clamp(s.w * 1.4, -1, 1), 8, dt);
+      const e = 1.6, gx = (W.heightAt(R.x + e, R.z) - W.heightAt(R.x - e, R.z)) / (2 * e), gz = (W.heightAt(R.x, R.z + e) - W.heightAt(R.x, R.z - e)) / (2 * e);
+      v.up.set(-gx, 1, -gz).normalize();
+      if (ai.netProg !== undefined) ai.prog = ai.netProg + (ai.done ? 0 : Math.max(0, vf) * R.age);
+      ai.sync(dt);
+    }
+  }
+  // Ergebnisliste im Mehrspieler: Zielzeiten auf der gemeinsamen Uhr (alle Geräte gleich); wer noch fährt, steht
+  // nach Fortschritt dahinter und rückt mit seiner Zeit ein, sobald er im Ziel ist; Ausgestiegene ganz unten
+  mpRows() {
+    const g = this.g, r = this.race;
+    const rows = [{ name: g.settings.name || 'Du', time: r.finishT, me: true, car: g.carSpec(), k: 0 }];
+    for (const ai of r.ais) rows.push(ai.done ? { name: ai.name, time: ai.finish, car: ai.spec, k: 0 } : { name: ai.name, live: true, prog: ai.prog, car: ai.spec, k: 1 });
+    for (const h of r.humans.values()) {
+      rows.push(h.fin ? { name: h.name, time: h.fin, human: true, car: h.spec, k: 0 } : h.gone ? { name: h.name, gone: true, human: true, car: h.spec, k: 2 } : { name: h.name, live: true, prog: h.prog, human: true, car: h.spec, k: 1 });
+    }
+    rows.sort((a, b) => a.k - b.k || (a.k === 0 ? a.time - b.time : a.k === 1 ? b.prog - a.prog : 0) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    return rows;
+  }
+  mpRefreshResults(dt) {
+    const g = this.g, r = this.race;
+    r.resT = (r.resT || 0) - dt;
+    if (r.resT > 0 || g.screen !== 'results') return;
+    r.resT = 0.4;
+    const rows = this.mpRows(), key = rows.map(x => x.name + (x.live ? '~' : x.gone ? '-' : x.time.toFixed(2))).join('|');
+    if (key === r.resKey) return;
+    r.resKey = key;
+    g.hud.resultRows(rows, rows.findIndex(x => x.me) + 1);
+  }
+
   results() {
     const g = this.g, r = this.race, ev = r.ev;
-    // Zeiten der Gegner schätzen
-    const rows = [{ name: g.settings.name || 'Du', time: r.finishT, me: true, car: g.carSpec() }];
-    for (const ai of r.ais) {
-      let t = ai.finish;
-      if (!isFinite(t)) t = r.t + Math.max(0, r.total - ai.prog) / Math.max(8, ai.speed * 0.95);
-      rows.push({ name: ai.name, time: t, car: ai.spec });
+    let rows;
+    if (r.mp) rows = this.mpRows();
+    else {
+      // Zeiten der Gegner schätzen
+      rows = [{ name: g.settings.name || 'Du', time: r.finishT, me: true, car: g.carSpec() }];
+      for (const ai of r.ais) {
+        let t = ai.finish;
+        if (!isFinite(t)) t = r.t + Math.max(0, r.total - ai.prog) / Math.max(8, ai.speed * 0.95);
+        rows.push({ name: ai.name, time: t, car: ai.spec });
+      }
+      rows.sort((a, b) => (a.time === b.time ? 0 : a.time - b.time));
     }
-    for (const h of r.humans.values()) rows.push({ name: h.name, time: h.fin || Infinity, live: !h.fin, human: true, car: h.spec });
-    rows.sort((a, b) => (a.time === b.time ? 0 : a.time - b.time));
     const pos = rows.findIndex(x => x.me) + 1;
     // Meisterschaft: Punkte nach Platz eintragen
     let champRes = null;
@@ -636,7 +774,9 @@ export class Events {
 // ---------------------------------------------------------------- KI untereinander: echte Zusammenstöße
 // Berühren sich zwei Gegner, werden beide auseinandergeschoben und tauschen Schwung aus (gleiche Masse),
 // mit etwas Drehung – wie zwischen Spieler und Gegner.
-function collideAIs(r) {
+// peers (nur beim Rennleiter): Mitspieler-Autos schieben Gegner weg (je zur Hälfte – die andere Hälfte schiebt sich
+// der Mitspieler auf seinem Gerät selbst weg)
+function collideAIs(r, peers) {
   const A = r.ais;
   for (let i = 0; i < A.length; i++) for (let j = i + 1; j < A.length; j++) {
     const a = A[i], b = A[j];
@@ -644,6 +784,11 @@ function collideAIs(r) {
     if (Math.abs(a.pos.x - b.pos.x) > 7 || Math.abs(a.pos.z - b.pos.z) > 7) continue;
     const hit = carContact(a.circles(), b.circles(), a.rad, b.rad);
     if (hit) pushPair(a.veh, b.veh, hit);
+  }
+  if (peers) for (const p of peers) for (const a of A) {
+    if (!a.model.visible || Math.abs(a.pos.x - p.pos.x) > 7 || Math.abs(a.pos.z - p.pos.z) > 7) continue;
+    const hit = carContact(a.circles(), p.circles(), a.rad, p.rad);
+    if (hit) pushPair(a.veh, { pos: { x: p.pos.x, z: p.pos.z }, vel: { x: p.vx || 0, z: p.vz || 0 }, yaw: p.yaw, yawRate: 0, impacts: [] }, hit, 0.5);
   }
 }
 // hit.nx/nz zeigt von b nach a

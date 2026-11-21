@@ -951,6 +951,7 @@ class Game {
       else if (kind === 'joined') this.hud.toast(`👥 ${data.name} ist dabei`, 'info');
       else if (kind === 'left') this.hud.toast(`👥 ${data.name} hat den Raum verlassen`, 'info');
       else if (kind === 'event' && data.type === 'race') this.joinRemoteRace(data);
+      else if (kind === 'version') this.hud.toast(`👥 ${data.name || 'Ein Mitspieler'} hat eine andere Spielversion – bitte bei beiden neu laden, sonst stimmen Plätze und Zeiten nicht`, 'warn');
     });
     click('mp-create', () => this.mpCreate());
     click('mp-join', () => this.mpJoin());
@@ -1985,6 +1986,8 @@ class Game {
     this.scenery.setTime(this.scenery.time + (this.settings.time === 'dyn' && this.state !== 'paused' ? dt / 40 : 0));
     if (this.state === 'free' || this.state === 'race') this.updateDrive(dt, inp);
     else if (this.state === 'title' || this.state === 'garage') this.updateShowroom(dt);
+    // Mehrspieler-Rennen läuft in Pause und Menüs weiter (Rennuhr, Gegner des Rennleiters, Mitspieler)
+    if (this.state !== 'free' && this.state !== 'race' && this.events.race && this.events.race.mp) this.events.updateRace(dt, true);
     else if (this.state === 'photo') this.updatePhotoCam();
     if (this.screen === 'garage' && this.state !== 'garage') this.state = 'garage';
     if (this.screen !== 'garage' && this.previewModel) this.closeGarage();
@@ -2139,7 +2142,8 @@ class Game {
     race.replayStart = true;
     this.raceLine.hide();
     const frames = this.tm.buf.slice(-REPLAY_FRAMES);
-    if (frames.length < 60 || this.quality < 1) { race.replayDone = true; return; }
+    // im Mehrspieler keine Wiederholung: das Rennen läuft für die anderen weiter (Gegner, Ergebnisliste)
+    if (frames.length < 60 || this.quality < 1 || race.mp) { race.replayDone = true; return; }
     this.replay = new Replay(this, frames);
     this.setCine('replay', race);
     this.audio.play('whoosh');

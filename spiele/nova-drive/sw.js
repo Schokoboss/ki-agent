@@ -23,7 +23,9 @@ self.addEventListener('fetch', e => {
       return hit || net;
     }));
   } else {
-    e.respondWith(fetch(req).then(r => {
+    // no-cache: beim Server nachfragen (kostet bei unveränderter Datei nur ein kurzes „304“), damit nach einem Update
+    // alle Geräte sofort dieselbe Version haben – wichtig für den Mehrspieler
+    e.respondWith(fetch(req, { cache: 'no-cache' }).then(r => {
       if (r.ok) { const copy = r.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
       return r;
     }).catch(() => caches.match(req).then(h => h || caches.match('index.html'))));

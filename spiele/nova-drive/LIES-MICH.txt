@@ -52,6 +52,10 @@ Mehrspieler (mit Freunden auf anderen Geräten)
   Freunde schicken; die öffnen Nova Drive, tippen auf „👥 Mehrspieler“ und geben den Code ein (der Link macht das
   von selbst). Jeder braucht Internet. Ihr seht euch auf der Insel und auf der Minikarte.
   Startet einer ein Rennen an einer Lichtsäule, fahren alle im Raum mit (KI-Gegner auf Wunsch dazu).
+  Alle Geräte gleichen ihre Uhren ab: Countdown, Rennzeit und Zielzeiten sind überall gleich, die Ergebnisliste
+  auch – wer noch fährt, rückt mit seiner Zeit ein, sobald er im Ziel ist. Die KI-Gegner rechnet ein Gerät für alle
+  (der Startende; steigt er aus, übernimmt automatisch ein anderes). Pause hält ein Mehrspieler-Rennen nicht an,
+  und es gibt dort keine Wiederholung. Alle sollten dieselbe (neueste) Spielversion haben – einmal neu laden.
   Übertragen werden nur Name, Auto, Farbe, Position und Rennstand über einen öffentlichen Vermittlungsdienst
   (HiveMQ) – wer den Code kennt, kann mitlesen. Also keine privaten Namen verwenden.
 
