@@ -1,0 +1,84 @@
+NOVA DRIVE
+==========
+
+Am einfachsten (Handy oder PC, ohne Installation):
+  https://schokoboss.github.io/ki-agent/spiele/nova-drive/
+  Einmal geöffnet, bleibt das Spiel gespeichert und läuft auch offline.
+  Am Handy auf dem Startbildschirm „📲 Als App installieren“ (oder Browser-Menü → „App installieren“)
+  → eigene App mit Symbol, startet immer quer im Vollbild.
+  Dreht sich der Bildschirm nicht (Drehsperre), legt sich das Spiel selbst quer: Handy einfach seitlich halten.
+
+Lokal spielen
+-------------
+
+1. Ordner entpacken (z. B. auf den Desktop).
+2. Doppelklick auf „Nova Drive starten.cmd“.
+   Ein schwarzes Fenster geht auf – offen lassen, solange du spielst.
+   Fragt Windows nach Netzwerkzugriff: „Zulassen“ (für das Handy nötig).
+3. Der Browser öffnet eine Startseite:
+   - „Am PC spielen“ – startet den PC-Modus (Tastatur, Maus, Gamepad). Vollbild mit Taste F.
+   - Am Handy: im selben WLAN den QR-Code scannen, quer halten, „Fahren“ tippen.
+
+Ohne Windows: im Ordner „python3 starten.py“ ausführen.
+
+Mit Nova (KI-Agent): Ordner nach  ki-agent\app\spiele\nova-drive  kopieren.
+Dann läuft das Spiel auch unter  http://localhost:8765/spiele/nova-drive/
+
+Steuerung Handy: ◀ ▶ lenken, ▲ Gas, ▼ Bremse, HB Handbremse (driften), N₂O Nitro, ⏪ halten = zurückspulen.
+Vor jedem Rennen gibt es eine Kamerafahrt (Gas oder „Überspringen“), nach dem Ziel eine Wiederholung.
+Bis zum Startsignal steht dein Auto fest auf dem Startplatz – Gas lässt nur den Motor aufheulen.
+Die Gegner fahren mit derselben Fahrphysik wie du: sie bremsen vor Kurven, machen Fehler, lassen sich
+anschieben und von der Linie drängen (und schieben zurück).
+
+Grafik: Einstellungen → Grafik. „Auto“ (empfohlen) wählt die Stufe passend zum Gerät und regelt beim Fahren selbst
+nach (erst Auflösung, dann Effekte). Ruckelt es dauerhaft, startet das Spiel beim nächsten Mal eine Stufe niedriger.
+„Hyper ✦“ ist die höchste Stufe (Spiegelungen, Schattierung, mehr Detail) – für starke Grafikkarten.
+„HD-Texturen“ (Auto/An/Aus) lädt schärfere 2K-Oberflächen – nur über den Starter bzw. die Webseite, nicht in der
+Einzeldatei. Einmal geladen, läuft das Spiel auch offline weiter.
+
+PC-Modus (automatisch am PC, sonst Einstellungen → Gerät → PC, oder Adresse mit ?pc):
+  Tastatur: W/↑ Gas, S/↓ Bremse, A D/← → lenken (baut sich weich auf), Leertaste Handbremse,
+            Shift Nitro, X Rückblick, C Kamera, Enter Event starten, M Karte, N Navi zum nächsten Rennen,
+            G Fotomodus, Q oder Rücktaste halten = zurückspulen, R zurücksetzen, T Radio, F Vollbild,
+            H Tastenhilfe, Esc Pause/zurück.
+  Maus:     im Bild ziehen = umsehen (federt zurück), Mausrad = Kamera-Abstand.
+  Gamepad:  RT Gas, LT Bremse, Stick lenken, A Handbremse, B/RB Nitro, LB Rückblick, Y Kamera,
+            X Event starten, Back Karte, Start Pause, Steuerkreuz ↓ halten = zurückspulen.
+            Im Menü: Steuerkreuz wählen, A bestätigen, B zurück.
+
+Mehrspieler (mit Freunden auf anderen Geräten)
+-----------------------------------------------
+  Titel oder Pause → „👥 Mehrspieler“ → „Raum erstellen“. Den 5-stelligen Code (oder „🔗 Einladen“-Link) an
+  Freunde schicken; die öffnen Nova Drive, tippen auf „👥 Mehrspieler“ und geben den Code ein (der Link macht das
+  von selbst). Jeder braucht Internet. Ihr seht euch auf der Insel und auf der Minikarte.
+  Startet einer ein Rennen an einer Lichtsäule, fahren alle im Raum mit (KI-Gegner auf Wunsch dazu).
+  Übertragen werden nur Name, Auto, Farbe, Position und Rennstand über einen öffentlichen Vermittlungsdienst
+  (HiveMQ) – wer den Code kennt, kann mitlesen. Also keine privaten Namen verwenden.
+
+Lenkrad
+-------
+  USB-Lenkrad (Logitech G29/G920/G923, Thrustmaster, Fanatec, Moza …) anstecken, einmal drehen,
+  dann Einstellungen → „USB-Lenkrad“ → „🎮 Einrichten“: Lenkrad ganz links/rechts drehen, Gas und Bremse
+  einmal durchtreten, Knöpfe für Nitro und Handbremse drücken. „Lenkrad-Weg“: wie viel Drehung vollen
+  Einschlag gibt (½ ist ein guter Start; bei 900°-Lenkrädern ⅓). Options-Knopf = Pause.
+  Force-Feedback gibt es im Browser leider nicht.
+  Am Handy: Einstellungen → Lenkung → „Lenkrad“ – Touch-Lenkrad unten links, am Kranz greifen und drehen.
+
+Neu: Tempozonen und Scheunenfunde
+---------------------------------
+  Tempozone (⏱ auf der Karte): an der Lichtsäule durchfahren, dann zählt der Schnitt bis zum Ziel.
+  Scheunenfunde: Auf der Insel stehen vor vier Scheunen vergessene Autos. In der Nähe kommt ein Gerücht im Radio –
+  langsam vors Scheunentor fahren, dann steht das Auto in deiner Garage (Karte zeigt „?“ und gefundene Orte).
+
+Meisterschaften, Lackiererei, Ideallinie
+----------------------------------------
+  🏆 Meisterschaften (Titel/Pause): drei Rennen am Stück, Punkte nach Platz, Klassen-Obergrenze für dein Auto.
+     Gesamtsieg = Preisgeld + neues Auto. Abbrechen geht – „Weiter ▶“ macht später beim nächsten Rennen weiter.
+  🎨 Lackiererei (Garage, eigenes Auto): Regenbogen-Feld = eigene Farbe; Design: Rennstreifen, Seitenband,
+     zweifarbig, Startnummer – mit Zweitfarbe und Nummer.
+  Ideallinie (Einstellungen): blau = Gas, gelb = Gas weg, rot = bremsen. „Nur Bremszonen“ zeigt nur gelb/rot.
+  Bremshilfe (Einstellungen): bremst im Rennen automatisch vor zu schnellen Kurven. „Auto“ = am Handy an, am PC aus.
+  👁 Aussichtspunkte: 8 Stück am Straßenrand der höchsten Stellen – kurz anhalten.
+  🗓 Wochen-Herausforderungen (bei den Tagesaufgaben): drei Aufgaben pro Woche, montags neu.
+  🏅 Erfolge (Titel/Pause): 33 Ziele mit Fortschritt und Belohnung.
+  FPS anzeigen (Einstellungen): zeigt die Bildrate oben – wenn es ruckelt, diese Zahl hilft bei der Fehlersuche.
