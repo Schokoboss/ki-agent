@@ -2,6 +2,28 @@
 
 Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 
+## 21.11.2026
+- **Nova Drive Mehrspieler: gleiche Plätze und Zeiten auf allen Geräten.** Vorher startete jedes Gerät seine
+  Rennuhr, wenn die Startnachricht ankam (je nach Netz Zehntel bis Sekunden versetzt), rechnete die KI-Gegner selbst
+  (mit echter Physik fuhren sie überall anders) und zeigte Mitspieler ~0,3 s zu spät – so konnten beide „SIEG!“
+  sehen und die Listen verschiedene Zeiten zeigen. Jetzt:
+  - **Gemeinsame Uhr**: jedes Gerät misst per Ping/Pong den Gangunterschied seiner Uhr zu jedem Mitspieler (wie
+    NTP); Countdown, Rennzeit und Zielzeiten laufen danach. Zielzeit = Moment auf der Ziellinie, auf ms gerundet.
+  - **Rennleiter** für die KI: der Startende rechnet die Gegner und sendet sie 10× pro Sekunde; die anderen zeigen
+    sie vorausgerechnet an. Mitspieler können Gegner wegschieben (auch beim Rennleiter). Steigt er aus oder ist 4 s
+    stumm, übernimmt automatisch der Nächste – die Gegner fahren mit echter Physik von dort weiter.
+  - **Mitspieler dort, wo sie jetzt sind**: Vorhersage aus Tempo, Drehrate und Alter der Meldung statt Puffer;
+    Sprünge werden weich ausgeglichen. Platz und Abstand im Rennen ebenfalls vorausgerechnet.
+  - **Ergebnisliste** aktualisiert sich: wer noch fährt, steht als „fährt noch“ dahinter und rückt mit Zeit ein;
+    Abbrecher stehen als „ausgestiegen“ unten.
+  - Pause hält ein Mehrspieler-Rennen nicht mehr an (Rennuhr und Gegner laufen für alle weiter); keine Wiederholung
+    im Mehrspieler (sie hätte Positionen aus der Vergangenheit gesendet).
+  - Gegner-Namen und -Autos waren je nach Browser verschieden (Zufalls-Sortierung mischt in Chrome und Safari
+    anders) – jetzt festes Mischverfahren; KI-Gegner heißen nie wie ein Mitspieler.
+  Getestet mit zwei Browsern, einer davon mit 3,7 s falsch gehender Uhr und 120–180 ms Verzögerung: „LOS“ innerhalb
+  von 15–47 ms, Zielzeit-Abstand auf 0,01–0,05 s genau wie in echt, Ergebnislisten identisch, 0 widersprüchliche
+  Plätze in 1.100 Proben, Gegner-Position im Mittel 1,1 m vom Rennleiter entfernt; Rennleiter steigt aus → Übernahme.
+
 ## 20.11.2026 (2)
 - **Nova Drive: Gegner mit echter Fahrphysik** – die KI-Fahrer sitzen jetzt im selben Fahrzeugmodell wie du
   (Motor, Gänge, Reifenhaftung, Gewicht, Tuning) statt auf einer unsichtbaren Schiene. Sie fahren nur so schnell,

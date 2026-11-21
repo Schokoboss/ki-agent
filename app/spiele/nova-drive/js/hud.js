@@ -280,18 +280,21 @@ export class HUD {
     $('r-ghost').textContent = gd ? (gd.name ? `vs. ${gd.name} ${fmtTime(gd.time)}` : `Geist ${fmtTime(gd.time)}`) : '';
   }
 
-  showResults(res) {
-    const el = $('results');
-    $('res-title').textContent = res.pos === 1 ? 'SIEG!' : `${res.pos}. Platz`;
-    $('res-event').textContent = res.ev.name;
+  // Tabelle der Ergebnisse (im Mehrspieler laufend aktualisiert, sobald weitere Fahrer ins Ziel kommen)
+  resultRows(rows, pos) {
+    if (pos) $('res-title').textContent = pos === 1 ? 'SIEG!' : `${pos}. Platz`;
     const tb = $('res-table'); tb.innerHTML = '';
-    res.rows.forEach((r, i) => {
-      const tr = document.createElement('div'); tr.className = 'row' + (r.me ? ' me' : '') + (r.human ? ' human' : '');
-      tr.innerHTML = `<span class="p">${i + 1}</span><span class="n"></span><span class="c"></span><span class="t">${r.live ? 'fährt noch' : fmtTime(r.time)}</span>`;
+    rows.forEach((r, i) => {
+      const tr = document.createElement('div'); tr.className = 'row' + (r.me ? ' me' : '') + (r.human ? ' human' : '') + (r.live || r.gone ? ' live' : '');
+      tr.innerHTML = `<span class="p">${r.gone ? '–' : i + 1}</span><span class="n"></span><span class="c"></span><span class="t">${r.live ? 'fährt noch' : r.gone ? 'ausgestiegen' : fmtTime(r.time)}</span>`;
       tr.querySelector('.n').textContent = (r.human ? '👤 ' : '') + r.name;
       tr.querySelector('.c').textContent = r.car ? `${r.car.maker} ${r.car.name}` : '';
       tb.appendChild(tr);
     });
+  }
+  showResults(res) {
+    $('res-event').textContent = res.ev.name;
+    this.resultRows(res.rows, res.pos);
     const bd = $('res-breakdown'); bd.innerHTML = '';
     for (const [k, v] of res.lines || []) {
       const d = document.createElement('div'); d.className = v < 0 ? 'neg' : '';

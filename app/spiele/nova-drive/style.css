@@ -461,6 +461,7 @@ html.turned .screen, html.turned .screen * { touch-action: none; }
 #mp-msg { text-align: center; min-height: 1em; }
 #mp-msg.warn { color: #ff8a8a; }
 #res-table .row.human { background: rgba(255,61,127,.14); }
+#res-table .row.live .t { opacity: .6; font-style: italic; }
 /* Einführung für neue Spieler */
 #tut { position: absolute; left: 50%; top: calc(64px + var(--st)); transform: translateX(-50%); pointer-events: auto; display: flex; align-items: center; gap: 10px;
   background: rgba(14,10,30,.78); border: 1px solid rgba(31,224,255,.55); border-radius: 14px; padding: 8px 10px 8px 12px; max-width: min(560px, 80%); box-shadow: 0 8px 26px rgba(0,0,0,.35); }
