@@ -72,6 +72,7 @@
     <button id="h-cam" class="hb" aria-label="Kamera">🎥</button>
     <button id="h-rewind" class="hb" aria-label="Zurückspulen (halten)">⏪</button>
     <button id="h-reset" class="hb" aria-label="Zurücksetzen">↺</button>
+    <button id="h-plane" class="hb" aria-label="Flugzeug (Admin)" hidden>✈</button>
     <button id="h-full" class="hb" aria-label="Vollbild"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     <button id="h-pause" class="hb" aria-label="Pause">❚❚</button>
   </div>
@@ -292,7 +293,7 @@
 <!-- Einstellungen -->
 <section id="settings" class="screen dim" hidden>
   <div class="panel wide">
-    <div class="g-top"><button class="btn back" data-back>‹ Zurück</button><h2>Einstellungen</h2></div>
+    <div class="g-top"><button class="btn back" data-back>‹ Zurück</button><h2 id="s-title">Einstellungen</h2></div>
     <div class="set">
       <label>Gerät</label>
       <div class="seg" id="s-device"><button data-v="auto">Automatisch</button><button data-v="phone">📱 Handy</button><button data-v="pc">🖥 PC</button></div>

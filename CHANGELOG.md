@@ -2,6 +2,16 @@
 
 Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 
+## 22.11.2026 (2)
+- **Nova Drive: Admin-Modus – mit dem Kunstflieger frei über die Insel fliegen.** Einschalten: Adresse mit `?admin`
+  öffnen (`?admin=0` schaltet aus) oder in den Einstellungen 7× schnell auf die Überschrift „Einstellungen“ tippen
+  (geht auch in der App vom Startbildschirm). Dann oben der ✈-Knopf (PC: Taste L) – außerhalb von Rennen. Steuerung
+  wie beim Fahren: ◀ ▶ Kurve mit Schräglage, ▲ hochziehen, ▼ sinken, N₂O Schub (~320 km/h), HB Luftbremse; über
+  Boden und Wasser fängt sich das Flugzeug selbst ab (kein Absturz), am Inselrand dreht es um. 🚗-Knopf/L = landen
+  auf der nächsten Straße. Tacho, Minikarte und Motorgeräusch laufen mit; Mitspieler sehen dich als Flugzeug mit
+  Namen. Im Flug zählen keine Events (Blitzer, Scheunen usw.).
+- Das Flugzeug wird beim Laden mit vorbereitet: kein Hänger mehr beim ersten Auftauchen (auch im Showcase).
+
 ## 22.11.2026
 - **Nova Drive: Balance – die besten Autos muss man sich erarbeiten** (Rückmeldung: Glücksrad, Levelaufstiege usw.
   waren zu großzügig, Top-Autos zu schnell zu haben):

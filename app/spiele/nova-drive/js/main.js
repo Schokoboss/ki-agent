@@ -4,7 +4,7 @@ import { World, FESTIVAL, HALF } from './terrain.js';
 import { Scenery } from './world.js';
 import { makeTextures, makeDetailTextures, loadPhotoTextures, loadTreeImpostors } from './textures.js';
 import { buildCar, styleDims, loadCarModels, setTailGlow, setCarDetail, disposeCar, applyLivery, LIVERIES, applyMods, RIMS, TINTS, WINGS } from './carmodel.js';
-import { loadWorldModels, modelUrl } from './models.js';
+import { loadWorldModels, modelUrl, clone as cloneModel } from './models.js';
 import { Vehicle, carContact } from './physics.js';
 import { Traffic } from './ai.js';
 import { Events, Skills, TYPE_NAMES, pushPair } from './events.js';
@@ -19,6 +19,7 @@ import { EVENT_COLORS } from './world.js';
 import { Economy, PRIZES, daysToMonday } from './economy.js';
 import { RoadGraph, NavRibbon, RaceLine, say, fmtDist, TURN_ICON, turnText } from './nav.js';
 import { Net } from './net.js';
+import { Flight } from './flight.js';
 import { Achievements } from './achievements.js';
 import { GTAOPass } from '../lib/postprocessing/GTAOPass.js';
 import { EffectComposer } from '../lib/postprocessing/EffectComposer.js';
@@ -45,6 +46,8 @@ class Game {
     const q = new URLSearchParams(location.search);
     if (q.has('pc')) this.settings.device = 'pc';
     if (q.has('handy')) this.settings.device = 'phone';
+    // Admin-Modus (Flugzeug fliegen): ?admin in der Adresse schaltet ihn dauerhaft ein, ?admin=0 aus
+    if (q.has('admin')) { this.settings.admin = q.get('admin') !== '0'; store.set(SET_KEY, this.settings); }
     const mobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && innerWidth < 1100);
     this.mobile = mobile;
     // Handy hochkant mit Drehsperre: Spiel selbst quer legen (nicht im PC-Modus)
@@ -156,6 +159,7 @@ class Game {
     this.events.init();
     this.net = new Net(this);
     this.ach = new Achievements(this);
+    this.flight = new Flight(this); // Admin: frei fliegen
     this.eco = new Economy(this);
     this.graph = new RoadGraph(this.world);
     this.ribbon = new NavRibbon(this.scene, this.world);
@@ -172,16 +176,21 @@ class Game {
     // Shader vorbereiten und die Welt einmal von mehreren Orten aus rendern → kein Ruckeln beim Losfahren
     prog(0.93, 'Shader vorbereiten');
     await breathe(0);
+    // Kunstflieger (Showcase/Admin-Flug) unsichtbar klein mit vorbereiten – sonst hängt das erste Bild, in dem er auftaucht
+    const planePre = cloneModel('plane');
+    if (planePre) { planePre.scale.setScalar(0.01); planePre.frustumCulled = false; planePre.traverse(o => { o.frustumCulled = false; }); this.scene.add(planePre); }
     try { if (R.compileAsync) await R.compileAsync(this.scene, this.camera); else R.compile(this.scene, this.camera); } catch { /* egal */ }
     const spots = [[FESTIVAL.x, FESTIVAL.z - 60], [-620, 40], [600, -100], [0, -700], [700, 400]];
     for (let i = 0; i < spots.length; i++) {
       prog(0.95 + 0.05 * i / spots.length, 'Welt vorab rendern');
       const [x, z] = spots[i], y = this.world.heightAt(x, z) + 8;
       this.camera.position.set(x, y, z); this.camera.lookAt(x + 40, y - 6, z + 40);
+      if (planePre) planePre.position.set(x + 20, y - 3, z + 20); // im Bild (winzig) → auch Schatten-Varianten fertig
       this.scenery.update(0.016, i, this.camera.position, 0, this.camera.position);
       this.draw();
       await frame();
     }
+    if (planePre) this.scene.remove(planePre);
     this.spawnAtFestival();
     prog(1, 'Bereit');
     this.last = performance.now();
@@ -525,6 +534,7 @@ class Game {
   fade() { const f = $('fade'); f.classList.remove('on'); void f.offsetWidth; f.classList.add('on'); }
 
   teleport(x, z, yaw) {
+    if (this.flight.on) this.flight.stop();
     this.car.reset(x, z, yaw);
     this.tm.clear();
     this.camYaw = yaw;
@@ -578,7 +588,7 @@ class Game {
     const hudOn = !name;
     $('hud').hidden = !hudOn;
     if (name === 'title') { this.state = 'title'; this.titleT = 0; }
-    if (name === 'garage') this.openGarage();
+    if (name === 'garage') { if (this.flight.on) this.flight.stop(); this.openGarage(); }
     if (name === 'map') this.openMap();
     if (name === 'settings') this.openSettings();
     if (name === 'daily') this.openDaily();
@@ -784,6 +794,17 @@ class Game {
     click('h-cam', () => this.cycleCam());
     click('h-radio', () => this.nextStation());
     click('h-reset', () => this.respawn());
+    click('h-plane', () => this.togglePlane());
+    // Admin-Modus ohne Adresszeile (z. B. App vom Startbildschirm): 7× schnell auf „Einstellungen“ tippen
+    let adminTaps = [];
+    $('s-title').addEventListener('click', () => {
+      const t = performance.now(); adminTaps = adminTaps.filter(x => t - x < 3000); adminTaps.push(t);
+      if (adminTaps.length >= 7) {
+        adminTaps = []; this.settings.admin = !this.settings.admin; this.saveSettings();
+        this.hud.toast(this.settings.admin ? '🛠 Admin-Modus an – ✈-Knopf oben (PC: Taste L) zum Fliegen' : '🛠 Admin-Modus aus', 'info');
+        if (!this.settings.admin && this.flight.on) this.flight.stop();
+      }
+    });
     click('h-full', () => this.toggleFull());
     click('cine-skip', () => { this.skipCine = true; });
     click('prompt-go', () => { const ev = this.events.byId($('prompt').dataset.id); if (ev) this.events.startRace(ev); });
@@ -927,6 +948,7 @@ class Game {
     this.startChampRace();
   }
   startChampRace() {
+    if (this.flight.on) this.flight.stop();
     const run = this.save.champRun, C = run && CHAMPS.find(c => c.id === run.id);
     if (!C) return;
     const ev = this.events.byId(C.events[run.round]);
@@ -1063,6 +1085,7 @@ class Game {
   }
   // ein Mitspieler hat ein Rennen gestartet → alle fahren mit, egal wo sie gerade sind
   joinRemoteRace(e) {
+    if (this.flight.on) this.flight.stop();
     const ev = this.events.byId(e.ev);
     if (!ev || this.state === 'loading') return;
     const who = this.net.peers.get(e.from), name = who ? who.name : 'Ein Mitspieler';
@@ -2012,7 +2035,8 @@ class Game {
     }
     if (this.input.took('KeyC')) this.cycleCam();
     if (this.input.took('KeyM') && this.state === 'free') { this.prevState = 'free'; this.state = 'paused'; this.backTo = 'game'; this.showScreen('map'); }
-    if (this.input.took('KeyR') && (this.state === 'free' || this.state === 'race')) this.respawn();
+    if (this.input.took('KeyR') && (this.state === 'free' || this.state === 'race') && !this.flight.on) this.respawn();
+    if (this.input.took('KeyL') && this.state === 'free') this.togglePlane();
     if (this.input.took('KeyT')) this.nextStation();
     if (this.input.took('KeyF')) this.toggleFull();
     this.pcKeys();
@@ -2039,8 +2063,37 @@ class Game {
     this.draw();
   }
 
+  // ---------------------------------------------------------------- Admin: Flugzeug
+  // Admin-Modus: Adresse mit ?admin öffnen oder in den Einstellungen 7× schnell auf „Einstellungen“ tippen
+  togglePlane() {
+    if (!this.settings.admin || this.events.race || this.state !== 'free') return;
+    this.audio.play('whoosh');
+    if (this.flight.on) { this.flight.stop(); this.hud.toast('🚗 Gelandet – weiter mit dem Auto', 'info'); return; }
+    this.events.near = null; this.hud.prompt(null); this.events.cancelSide();
+    if (this.flight.start()) this.hud.toast(this.pc ? '✈ Fliegen: W/S hoch/runter · A/D Kurve · Shift Schub · Leertaste bremsen · L landen' : '✈ Fliegen: ▲/▼ hoch/runter · ◀ ▶ Kurve · N₂O Schub · HB bremsen · ✈ landen', 'info');
+  }
+  updateFlight(dt, raw) {
+    const F = this.flight;
+    F.update(dt, raw);
+    F.camera(dt, this.camera);
+    this.traffic.update(dt, this.car);
+    this.hud.speedo(F.fake);
+    this.hud.minimap(dt, F.fake, { events: this.events.list, ais: null, waypoint: this.waypoint, peers: this.net.room ? this.net.mapPeers() : null });
+    this.audio.updateCar(F.fake, { throttle: 0.55 + Math.max(0, raw.throttle || 0) * 0.45 }, true, 'classic');
+    this.raceLine.hide();
+    // keine Events im Flug (Blitzer, Driftzonen, Scheunen, Aussichtspunkte zählen nur mit dem Auto)
+  }
+  adminUI() {
+    const show = !!this.settings.admin && !this.events.race && (this.state === 'free' || this.flight.on);
+    if (this._planeBtn !== show) { this._planeBtn = show; $('h-plane').hidden = !show; }
+    const lbl = this.flight.on ? '🚗' : '✈';
+    if (this._planeLbl !== lbl) { this._planeLbl = lbl; $('h-plane').textContent = lbl; }
+  }
+
   updateDrive(dt, raw) {
     const car = this.car, race = this.events.race;
+    this.adminUI();
+    if (this.flight.on) { this.updateFlight(dt, raw); return; }
     // Wiederholung nach dem Ziel
     if (this.replay) { this.tickReplay(dt); return; }
     if (race && race.finished && !race.replayDone && !race.replayStart && race.after > 1.2) this.startReplay(race);

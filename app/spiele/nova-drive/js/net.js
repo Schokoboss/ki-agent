@@ -10,6 +10,7 @@ import * as THREE from '../lib/three.module.min.js';
 import mqtt from '../lib/mqtt.esm.js';
 import { CARS } from './data.js';
 import { buildCar, styleDims, disposeCar, applyLivery } from './carmodel.js';
+import { clone as cloneModel } from './models.js';
 import { clamp } from './util.js';
 
 const BROKERS = ['wss://broker.hivemq.com:8884/mqtt', 'wss://broker.emqx.io:8084/mqtt'];
@@ -159,6 +160,8 @@ export class Net {
       re: r ? r.ev.id : null, ri: r && r.mp ? r.mp.seed : 0, rp: r ? +r.prog.toFixed(1) : 0, rf: r && r.finished ? +r.finishT.toFixed(3) : 0, rs: r && r.started ? 1 : 0,
       t: Math.round(clock()), gv: NET_VERSION,
     };
+    // Admin fliegt: Mitspieler zeigen das Flugzeug (mit Neigung und Schräglage) statt des Autos
+    if (g.flight && g.flight.on) { st.pl = 1; st.pp = +g.flight.pitch.toFixed(3); st.pr = +g.flight.roll.toFixed(3); }
     // Rennleiter: Stand aller KI-Gegner (die anderen Geräte zeigen sie nur an)
     if (r && r.mp && r.aiHost === this.id && r.ais.length) {
       st.ag = r.aiGen || 0;
@@ -208,7 +211,7 @@ export class Net {
     const now = performance.now() / 1000, nowC = clock();
     const nm = String(s.n || 'Spieler').slice(0, 16);
     if (p.label && nm !== p.name) updateSprite(p.label, nm);
-    p.last = now; p.name = nm; p.drive = !!s.d;
+    p.last = now; p.name = nm; p.drive = !!s.d; p.pl = !!s.pl; p.pp = s.pp || 0; p.prl = s.pr || 0;
     if ((s.gv || 1) !== NET_VERSION && !p.warned) { p.warned = true; this.emit('version', p); }
     // grobe Uhr-Schätzung aus den Meldungen selbst (bis der Ping-Abgleich da ist): kleinste Laufzeit gewinnt
     if (typeof s.t === 'number') { p.roughs.push(s.t - nowC); if (p.roughs.length > 30) p.roughs.shift(); p.rough = Math.max(...p.roughs); }
@@ -259,6 +262,7 @@ export class Net {
   }
   dropPeer(p) {
     if (p.model) disposeCar(p.model);
+    if (p.planeM) { this.g.scene.remove(p.planeM); p.planeM = null; }
     if (p.label) { this.g.scene.remove(p.label); p.label.material.map.dispose(); p.label.material.dispose(); }
     p.model = null; p.label = null;
   }
@@ -281,8 +285,17 @@ export class Net {
       p.pos.set(x, y, z); p.yaw = yaw;
       // nur sehen und berühren, wer im selben Rennen ist (oder wie du frei fährt)
       const vis = p.drive && (p.race.ev || null) === myEv && (!myRi || !p.race.id || p.race.id === myRi);
-      p.model.visible = vis; p.label.visible = vis;
+      p.model.visible = vis && !p.pl; p.label.visible = vis;
+      if (p.pl && vis && !p.planeM) { p.planeM = cloneModel('plane'); if (p.planeM) { this.g.scene.add(p.planeM); p.planeM.traverse(o => { if (o.name === 'prop') p.planeProp = o; }); } }
+      if (p.planeM) p.planeM.visible = vis && p.pl;
       if (!vis) continue;
+      if (p.pl && p.planeM) {
+        p.planeM.position.set(x, y, z); p.planeM.rotation.order = 'YXZ'; p.planeM.rotation.set(-p.pp, yaw, p.prl);
+        if (p.planeProp) p.planeProp.rotation.z += dt * 90;
+        const dd = this.g.camera.position.distanceTo(p.planeM.position), sc2 = clamp(dd / 22, 1, 6);
+        p.label.position.set(x, y + 3 + sc2 * 0.45, z); p.label.scale.set(4.2 * sc2, 1.05 * sc2, 1);
+        continue;
+      }
       p.model.position.set(x, y, z);
       p.model.rotation.set(0, yaw, 0);
       const W = this.g.world, e = 1.6, sy = Math.sin(yaw), cy = Math.cos(yaw);
