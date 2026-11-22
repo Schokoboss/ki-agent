@@ -1,0 +1,912 @@
+// Events auf der Insel: Rennen, Blitzer, Driftzonen, Schanzen, Plakate – und die Skill-Kette.
+import * as THREE from '../lib/three.module.min.js';
+import { EVENTS, CARS, BARN_CARS, CHAMP_POINTS, carStats, rating } from './data.js';
+import { INTRO } from './cine.js';
+import { clamp, damp, lerp, fmtTime, fmtNum, mulberry32 } from './util.js';
+import { RaceAI, speedProfile } from './ai.js';
+import { carContact } from './physics.js';
+import { EVENT_COLORS } from './world.js';
+import { buildCar, disposeCar } from './carmodel.js';
+import { clock, Remote } from './net.js';
+import { clone as cloneModel } from './models.js';
+
+const ICONS = { race: '🏁', trap: '📷', drift: '〰', jump: '⚠', speed: '⏱' };
+const P = {};
+const smooth01 = x => { const t = Math.min(1, Math.max(0, x)); return t * t * (3 - 2 * t); };
+export const TYPE_NAMES = { race: 'Rennen', trap: 'Blitzer', drift: 'Driftzone', jump: 'Sprungschanze', speed: 'Tempozone' };
+const AI_NAMES = ['Mila', 'Jonas', 'Aylin', 'Ben', 'Sofia', 'Luca', 'Emre', 'Lea', 'Noah', 'Hanna', 'Finn', 'Yara'];
+
+// ---------------------------------------------------------------- Skill-Kette
+export class Skills {
+  constructor(game) {
+    this.g = game; this.points = 0; this.count = 0; this.timer = 0;
+    this.drift = 0; this.driftT = 0; this.fast = 0; this.draftT = 0;
+    this.last = '';
+  }
+  get mult() { return Math.min(10, 1 + Math.floor(this.count / 3)); }
+  add(name, pts) {
+    pts = Math.round(pts);
+    this.points += pts; this.count++; this.timer = 4;
+    this.last = name;
+    this.g.hud.skill(name, pts, this.points, this.mult);
+    this.g.audio.play('skill');
+    if (/Drift/.test(name) && this.g.tutEvent) this.g.tutEvent('drift');
+    const car = this.g.car;
+    car.nitro = Math.min(car.stats.nitroCap, car.nitro + 0.12 + pts / 6000);
+    if (this.g.events.drift) this.g.events.drift.score += pts;
+  }
+  crash() {
+    if (this.drift > 300) this.drift = 0;
+    if (this.points > 0) { this.g.hud.skillLost(); this.g.audio.play('lost'); }
+    this.points = 0; this.count = 0; this.timer = 0; this.drift = 0; this.driftT = 0;
+  }
+  bank() {
+    const total = this.points * this.mult;
+    if (total > 0) {
+      this.g.hud.skillBank(total);
+      this.g.audio.play('bank');
+      this.g.reward(Math.round(total / 20), Math.round(total / 18), false);
+      this.g.eco.track('skill', total);
+    }
+    this.points = 0; this.count = 0;
+  }
+  update(dt, car) {
+    // Drift
+    const spd = Math.abs(car.vf);
+    const ang = Math.abs(car.slip);
+    if (car.grounded && ang > 0.24 && spd > 9) {
+      this.drift += dt * spd * Math.min(ang, 1.2) * 14;
+      this.driftT += dt;
+      this.timer = Math.max(this.timer, 1.5);
+      this.g.hud.skillLive('Drift', this.drift);
+      if (this.g.events.drift) this.g.events.drift.live = this.drift;
+    } else if (this.drift > 0) {
+      if (this.driftT > 0.5 && this.drift > 120) { this.add(this.drift > 2500 ? 'Riesen-Drift' : this.drift > 1000 ? 'Großer Drift' : 'Drift', this.drift); this.g.eco.track('drift', Math.round(this.drift)); }
+      else this.g.hud.skillLive(null);
+      this.drift = 0; this.driftT = 0;
+      if (this.g.events.drift) this.g.events.drift.live = 0;
+    }
+    // Sprung
+    if (car.lastAir > 0) {
+      const a = car.lastAir; car.lastAir = 0;
+      if (a > 0.55) this.add(a > 2.2 ? 'Riesensprung' : a > 1.2 ? 'Großer Sprung' : 'Luftsprung', a * 520);
+      if (a > 1) this.g.eco.track('air', 1);
+      if (car.landing > 16) this.g.hud.toast('Harte Landung!', 'warn');
+    }
+    // Tempo
+    if (car.speedKmh > 220) { this.fast += dt; if (this.fast > 2.5) { this.fast = 0; this.add(car.speedKmh > 300 ? 'Überschall' : 'Highspeed', car.speedKmh * 1.5); } }
+    else this.fast = Math.max(0, this.fast - dt);
+    if (this.timer > 0) { this.timer -= dt; if (this.timer <= 0) this.bank(); }
+  }
+}
+
+// ---------------------------------------------------------------- Events
+export class Events {
+  constructor(game) {
+    this.g = game;
+    this.list = [];
+    this.race = null; this.drift = null; this.jump = null; this.speedz = null; this.barns = [];
+    this.near = null;
+    this.trapCool = new Map();
+    this.nearMiss = new Map();
+  }
+
+  init() {
+    const W = this.g.world, S = this.g.scenery;
+    for (const def of EVENTS) {
+      const ev = { ...def };
+      if (def.road) {
+        const path = def.road === 'quer' ? W.cross : W.roadById[def.road].path;
+        ev.path = path;
+        ev.s = def.at * path.length;
+        const p = path.at(ev.s, P);
+        ev.x = p.x; ev.z = p.z; ev.yaw = Math.atan2(p.tx, p.tz);
+        ev.hw = def.road === 'quer' ? 9 : W.roadById[def.road].def.hw;
+      }
+      if (ev.type === 'jump') {
+        // Anfahrt 40 m vor der Rampe
+        ev.ax = ev.x - Math.sin(ev.yaw) * 45; ev.az = ev.z - Math.cos(ev.yaw) * 45;
+      }
+      if (ev.type !== 'trap') ev.beacon = S.addBeacon(ev.type === 'jump' ? ev.ax : ev.x, ev.type === 'jump' ? ev.az : ev.z, ev.show ? '#ffb020' : EVENT_COLORS[ev.type], ev.show ? '✈' : ICONS[ev.type]);
+      else ev.beacon = S.addBeacon(ev.x, ev.z, EVENT_COLORS.trap, ICONS.trap);
+      this.list.push(ev);
+    }
+    this.initBarns();
+    this.initViews();
+  }
+
+  // ---------- Aussichtspunkte: die höchsten Stellen an den Straßen (mind. 380 m auseinander, nicht an Events)
+  initViews() {
+    const W = this.g.world, S = this.g.scenery, cand = [];
+    const NAME = { kueste: 'Küstenblick', pass: 'Passhöhe', see: 'Seeblick', wald: 'Waldblick', waldweg: 'Waldblick', berg: 'Gipfelblick', stadt: 'Stadtblick', markt: 'Stadtblick', schnell: 'Weitblick', festival: 'Festivalblick' };
+    for (const r of W.roads) {
+      const p = r.path, step = 4;
+      for (let i = 0; i < p.n; i += step) {
+        let top = true;
+        for (let k = -48; k <= 48 && top; k += 4) { const j = p.idx(i + k); if (j !== i && p.y[j] > p.y[i]) top = false; }
+        if (top && p.y[i] > 12) cand.push({ x: p.x[i], z: p.z[i], y: p.y[i], tx: p.tx[i], tz: p.tz[i], road: r.id });
+      }
+    }
+    cand.sort((a, b) => b.y - a.y);
+    const picks = [];
+    for (const c of cand) {
+      if (picks.length >= 8) break;
+      if (picks.some(q => Math.hypot(q.x - c.x, q.z - c.z) < 380)) continue;
+      if (this.list.some(e => Math.hypot(e.x - c.x, e.z - c.z) < 90)) continue;
+      picks.push(c);
+    }
+    const found = this.g.save.views || [], used = {};
+    this.views = picks.map((c, i) => {
+      // neben die Fahrbahn (Seite mit freier Sicht = tiefer liegendes Gelände)
+      const nx = -c.tz, nz = c.tx, hw = (W.roadById[c.road] ? W.roadById[c.road].def.hw : 6) + 1.5; // am Fahrbahnrand (nicht im Hang)
+      const side = W.heightAt(c.x + nx * 30, c.z + nz * 30) < W.heightAt(c.x - nx * 30, c.z - nz * 30) ? 1 : -1;
+      const x = c.x + nx * hw * side, z = c.z + nz * hw * side;
+      // mehrfach vorkommende Namen bekommen die Himmelsrichtung (Karte: oben = Nord = −z)
+      const dir = Math.abs(x) > Math.abs(z) ? (x > 0 ? 'Ost' : 'West') : (z < 0 ? 'Nord' : 'Süd');
+      const base = NAME[c.road] || 'Aussicht', dup = picks.filter(q => (NAME[q.road] || 'Aussicht') === base).length > 1;
+      let name = dup ? `${base} ${dir}` : base;
+      used[name] = (used[name] || 0) + 1;
+      if (used[name] > 1) name += ' ' + ['', '', 'II', 'III', 'IV', 'V'][used[name]];
+      const v = { id: 'v_' + i, name, x, z, found: found.includes('v_' + i), marker: null };
+      v.marker = S.addMarker(x, z, '#e8f0ff', '🔭');
+      return v;
+    });
+  }
+  updateViews() {
+    const g = this.g, car = g.car;
+    for (const v of this.views || []) {
+      const d = Math.hypot(car.pos.x - v.x, car.pos.z - v.z), vis = !v.found && d < 500;
+      v.marker.ring.visible = v.marker.sp.visible = vis;
+      if (vis) v.marker.sp.position.y = v.marker.y + 6 + Math.sin(performance.now() / 500 + v.x) * 0.4;
+      if (!v.found && d < 12 && car.speedKmh < 35) {
+        v.found = true;
+        (g.save.views ||= []).push(v.id);
+        const n = g.save.views.length;
+        g.reward(1500, 300, true);
+        g.hud.banner('Aussichtspunkt', v.name, null, `${n} / ${this.views.length} entdeckt · +1.500 CR · Tipp: Pause → 📸 Fotomodus`);
+        g.audio.play('cp');
+        if (n === this.views.length) { g.reward(20000, 2000, true); g.hud.toast('Alle Aussichtspunkte entdeckt! +20.000 CR', 'info'); }
+        g.saveGame();
+      }
+    }
+  }
+
+  // ---------- Scheunenfunde: vier weit verteilte Scheunen, vor dem Tor steht ein verstaubtes Auto
+  initBarns() {
+    const W = this.g.world, all = W.buildings.filter(b => b.variant === 'barn');
+    if (!all.length) return;
+    const picks = [];
+    // erst die vom Festival am weitesten entfernte, dann jeweils die, die am weitesten von allen bisherigen liegt
+    const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+    picks.push(all.reduce((m, b) => (dist(b, { x: -200, z: 420 }) > dist(m, { x: -200, z: 420 }) ? b : m), all[0]));
+    while (picks.length < Math.min(BARN_CARS.length, all.length)) {
+      let best = null, bd = -1;
+      for (const b of all) { if (picks.includes(b)) continue; const d = Math.min(...picks.map(p => dist(p, b))); if (d > bd) { bd = d; best = b; } }
+      picks.push(best);
+    }
+    const found = this.g.save.barns || [];
+    picks.forEach((b, i) => {
+      const id = 'b_' + i, carId = BARN_CARS[i], spec = CARS.find(c => c.id === carId);
+      if (!spec) return;
+      const off = b.d / 2 + 4.5, x = b.x + Math.sin(b.yaw) * off, z = b.z + Math.cos(b.yaw) * off;
+      const f = { id, car: carId, spec, x, z, yaw: b.yaw, found: found.includes(id), hinted: false, model: null };
+      this.barns.push(f);
+    });
+  }
+  updateBarns() {
+    const g = this.g, car = g.car;
+    for (const f of this.barns) {
+      if (f.found) continue;
+      const d = Math.hypot(car.pos.x - f.x, car.pos.z - f.z);
+      // Modell erst in der Nähe bauen (spart Speicher), weit weg wieder weg
+      if (d < 220 && !f.model) {
+        f.model = buildCar(f.spec, f.spec.colors[0], { lod: 'ai' });
+        const pm = f.model.userData.paintMat;
+        if (pm && pm.userData.dirt) pm.userData.dirt.value = 1;
+        f.model.position.set(f.x, g.world.heightAt(f.x, f.z), f.z);
+        f.model.rotation.y = f.yaw;
+        f.model.traverse(o => { if (o.isMesh) o.castShadow = true; });
+        g.scene.add(f.model);
+      } else if (d > 260 && f.model) { disposeCar(f.model); f.model = null; }
+      if (d < 280 && !f.hinted) { f.hinted = true; g.hud.toast('📻 Gerücht: In einer Scheune hier in der Nähe soll ein vergessenes Auto stehen…', 'radio'); }
+      if (d < 8 && car.speedKmh < 45) this.findBarn(f);
+    }
+  }
+  findBarn(f) {
+    const g = this.g;
+    f.found = true;
+    (g.save.barns ||= []).push(f.id);
+    if (f.model) { disposeCar(f.model); f.model = null; }
+    const n = g.save.barns.length, total = this.barns.length;
+    if (!g.save.owned[f.car]) {
+      g.save.owned[f.car] = { up: {}, color: f.spec.colors[0] };
+      g.hud.banner('Scheunenfund!', `${f.spec.maker} ${f.spec.name}`, null, `Steht jetzt in deiner Garage · ${n}/${total}`);
+    } else {
+      const cr = Math.round(f.spec.price * 0.5);
+      g.reward(cr, 0, true);
+      g.hud.banner('Scheunenfund!', `${f.spec.maker} ${f.spec.name}`, null, `Schon in der Garage – verkauft für ${fmtNum(cr)} CR · ${n}/${total}`);
+    }
+    g.reward(0, 1500, true);
+    g.audio.play('win'); g.confetti && g.confetti();
+    g.saveGame();
+  }
+  byId(id) { return this.list.find(e => e.id === id); }
+
+  update(dt) {
+    const g = this.g, car = g.car;
+    if (this.race) { this.updateRace(dt); return; }
+    // nächstes Event für den Hinweis
+    let best = null, bd = 1e9;
+    for (const ev of this.list) {
+      if (ev.type !== 'race') continue;
+      const d = Math.hypot(car.pos.x - ev.x, car.pos.z - ev.z);
+      if (d < bd) { bd = d; best = ev; }
+    }
+    const near = bd < 22 && car.speedKmh < 70 ? best : null;
+    if (near !== this.near) { this.near = near; g.hud.prompt(near); }
+    this.updateTraps(dt);
+    this.updateDrift(dt);
+    this.updateSpeedZone(dt);
+    this.updateJump(dt);
+    this.updateBarns();
+    this.updateViews();
+  }
+
+  // ---------- Tempozone: Schnitt von Start bis Ziel
+  updateSpeedZone(dt) {
+    const car = this.g.car;
+    if (!this.speedz) {
+      if (this.drift) return;
+      for (const ev of this.list) {
+        if (ev.type !== 'speed') continue;
+        const d = Math.hypot(car.pos.x - ev.x, car.pos.z - ev.z);
+        if (d > ev.hw + 6) continue;
+        const fwd = Math.sin(car.yaw) * Math.sin(ev.yaw) + Math.cos(car.yaw) * Math.cos(ev.yaw);
+        if (fwd < 0.3 || car.speedKmh < 20) continue;
+        this.speedz = { ev, s: ev.s, end: ev.to * ev.path.length, t: 0 };
+        this.g.hud.zone(ev.name, 'So schnell wie möglich bis zum Ziel!');
+        this.g.audio.play('cp');
+        ev.beacon.hidden = true;
+        break;
+      }
+      return;
+    }
+    const z = this.speedz, ev = z.ev;
+    z.t += dt;
+    const c = ev.path.closest(car.pos.x, car.pos.z, z.s, 60);
+    if (c.s > z.s - 30) z.s = Math.max(z.s, c.s);
+    const done = z.s - ev.s, avg = z.t > 0.3 ? done / z.t * 3.6 : 0;
+    this.g.hud.zoneScore(Math.round(avg), ev.stars, ` km/h · noch ${Math.max(0, Math.round(z.end - z.s))} m`);
+    const finished = z.s >= z.end - 3, failed = c.dist > 40 || z.t > 150;
+    if (finished || failed) {
+      this.g.hud.zone(null);
+      ev.beacon.hidden = false;
+      this.speedz = null;
+      if (failed) { this.g.hud.toast('Tempozone verlassen – nochmal von vorn', 'warn'); return; }
+      const kmh = Math.round((z.end - ev.s) / z.t * 3.6);
+      const stars = ev.stars.filter(v => kmh >= v).length;
+      const rec = this.g.save.best[ev.id] || 0;
+      if (kmh > rec) this.g.save.best[ev.id] = kmh;
+      this.g.hud.banner(ev.name, `Schnitt ${kmh} km/h`, stars, kmh > rec && rec ? 'Neuer Rekord!' : '');
+      this.giveStars(ev, stars);
+    }
+  }
+
+  // ---------- Blitzer
+  updateTraps(dt) {
+    const car = this.g.car;
+    for (const ev of this.list) {
+      if (ev.type !== 'trap') continue;
+      const c = this.trapCool.get(ev.id) || 0;
+      if (c > 0) { this.trapCool.set(ev.id, c - dt); continue; }
+      const p = ev.path.at(ev.s, P);
+      const dx = car.pos.x - p.x, dz = car.pos.z - p.z;
+      const along = dx * p.tx + dz * p.tz, lat = Math.abs(-dx * p.tz + dz * p.tx);
+      const prev = ev._along ?? along;
+      ev._along = along;
+      if (lat < ev.hw + 8 && Math.abs(along) < 30 && Math.sign(prev) !== Math.sign(along) && prev !== along) {
+        this.trapCool.set(ev.id, 3);
+        this.g.eco.track('trap', 1);
+        const kmh = Math.round(this.g.car.speedKmh);
+        const stars = ev.stars.filter(s => kmh >= s).length;
+        this.g.audio.play('trap');
+        const rec = this.g.save.best[ev.id] || 0;
+        const isBest = kmh > rec;
+        if (isBest) this.g.save.best[ev.id] = kmh;
+        this.g.hud.banner(ev.name, `${kmh} km/h`, stars, isBest && rec ? 'Neuer Rekord!' : '');
+        this.giveStars(ev, stars);
+      }
+    }
+  }
+  giveStars(ev, stars) {
+    const had = this.g.save.stars[ev.id] || 0;
+    this.g.eco.weekly('stars', { ev: ev.id, stars });
+    if (stars > had) {
+      this.g.save.stars[ev.id] = stars;
+      const n = stars - had;
+      this.g.reward(n * 1500, n * 400, true);
+    }
+    this.g.saveGame();
+  }
+
+  // ---------- Driftzone
+  updateDrift(dt) {
+    const car = this.g.car;
+    if (!this.drift) {
+      for (const ev of this.list) {
+        if (ev.type !== 'drift') continue;
+        const d = Math.hypot(car.pos.x - ev.x, car.pos.z - ev.z);
+        if (d > ev.hw + 6) continue;
+        const fwd = Math.sin(car.yaw) * Math.sin(ev.yaw) + Math.cos(car.yaw) * Math.cos(ev.yaw);
+        if (fwd < 0.3 || car.speedKmh < 15) continue;
+        this.drift = { ev, s: ev.s, end: ev.to * ev.path.length, score: 0, live: 0, t: 0 };
+        this.g.hud.zone(ev.name, 'Drifte so viel du kannst!');
+        this.g.audio.play('cp');
+        ev.beacon.hidden = true;
+        break;
+      }
+      return;
+    }
+    const z = this.drift, ev = z.ev;
+    z.t += dt;
+    const c = ev.path.closest(car.pos.x, car.pos.z, z.s, 50);
+    if (c.s > z.s - 30) z.s = Math.max(z.s, c.s);
+    const total = z.score + z.live;
+    this.g.hud.zoneScore(total, ev.stars);
+    if (z.s >= z.end - 3 || c.dist > 45 || z.t > 90) {
+      const stars = ev.stars.filter(s => total >= s).length;
+      const rec = this.g.save.best[ev.id] || 0;
+      if (total > rec) this.g.save.best[ev.id] = Math.round(total);
+      this.g.hud.zone(null);
+      this.g.hud.banner(ev.name, `${fmtNum(total)} Punkte`, stars, total > rec && rec ? 'Neuer Rekord!' : '');
+      this.giveStars(ev, stars);
+      ev.beacon.hidden = false;
+      this.drift = null;
+    }
+  }
+
+  // ---------- Schanzen
+  updateJump(dt) {
+    const car = this.g.car;
+    if (!this.jump) {
+      if (car.grounded) return;
+      for (const ev of this.list) {
+        if (ev.type !== 'jump') continue;
+        const ex = ev.x + Math.sin(ev.yaw) * 8, ez = ev.z + Math.cos(ev.yaw) * 8;
+        if (Math.hypot(car.pos.x - ex, car.pos.z - ez) < 9) { this.jump = { ev, x: car.pos.x, z: car.pos.z, n: car.landCount || 0, t: 0 }; break; }
+      }
+      return;
+    }
+    const j = this.jump;
+    j.t += dt;
+    if ((car.landCount || 0) !== j.n) {
+      const ev = j.ev;
+      const d = Math.round(Math.hypot(car.pos.x - j.x, car.pos.z - j.z));
+      const stars = ev.stars.filter(s => d >= s).length;
+      const rec = this.g.save.best[ev.id] || 0;
+      if (d > rec) this.g.save.best[ev.id] = d;
+      this.g.hud.banner(ev.name, `${d} m`, stars, d > rec && rec ? 'Neuer Rekord!' : '');
+      this.giveStars(ev, stars);
+      this.jump = null;
+    } else if (j.t > 8) this.jump = null;
+  }
+
+  // ---------------------------------------------------------------- Rennen
+  // opts.mp: Mehrspieler-Start {ai, ids, seed} – vom Mitspieler empfangen oder hier erzeugt und an den Raum gesendet
+  startRace(ev, ghost = null, opts = {}) {
+    const g = this.g, W = g.world;
+    this.cancelSide();
+    let mp = opts.mp || null;
+    const champ = opts.champ || null; // Meisterschaft: feste Gegner (Name/Auto) über alle Rennen der Serie
+    if (!mp && !ghost && !champ && !ev.show && g.net && g.net.active) mp = g.net.sendRace(ev, !!g.settings.mpAI);
+    const path = ev.path, st = g.car.stats;
+    const sprint = !!ev.sprint;
+    // Startaufstellung (2 Autos pro Reihe, 10 m Abstand) muss auf der Straße stehen: beginnt ein Sprint am
+    // Straßenanfang, rückt die Startlinie nach vorn (vorher klemmten alle hinteren Reihen auf denselben Punkt)
+    const nAI = mp ? mp.ai : g.quality === 0 ? Math.min(ev.ai, 5) : ev.ai;
+    const gridLen = 10 + Math.ceil((nAI + (mp ? mp.ids.length : 1)) / 2) * 10 + 4;
+    const startS = !path.closed && ev.s < gridLen ? gridLen : ev.s;
+    const total = sprint ? (ev.to - ev.at) * path.length - 12 - (startS - ev.s) : ev.laps * path.length;
+    const wet = W.rain > 0.4 ? (W.rain - 0.4) / 0.6 : 0;
+    const latAcc = 9.81 * st.grip * 1.16 * (1 - 0.15 * wet);
+    const top = st.top / 3.6;
+    const prof = speedProfile(path, top * 0.99, latAcc, 12.5, W, st.offroad);
+    const race = {
+      ev, path, prof, total, hw: ev.hw, world: W, dirt: !!ev.dirt, top, accel: st.accel * 0.95,
+      startS, t: -3.6 - INTRO, t0: -3.6 - INTRO, started: false, ais: [], cps: [], next: 0, prog: 0, pS: startS, lastPos: 0,
+      ghostRec: [], ghost: null, ghostData: ghost, finished: false, finishT: 0, crashes: 0, laps: sprint ? 1 : ev.laps, missed: false,
+      mp, humans: new Map(), champ,
+    };
+    if (mp) {
+      // gemeinsame Rennuhr: Start = mp.at auf der Uhr des Startenden, umgerechnet mit dem Uhrenabgleich
+      // (ältere Spielversionen senden keinen Zeitpunkt → ab jetzt zählen, Gegner rechnet jedes Gerät selbst)
+      race.offRef = g.net.offOf(mp.from) ?? 0;
+      race.at = typeof mp.at === 'number' ? mp.at : clock() + race.offRef;
+      race.aiHost = mp.v >= 2 ? mp.from : g.net.id; race.aiGen = 0;
+      race.feedAt = 0; race.failed = new Set(); race.feedSeq = 0;
+    }
+    for (let s = 160; s < total - 20; s += 170) race.cps.push(s);
+    race.cps.push(total);
+    // Gegner
+    const diff = [0.88, 0.95, 1.0][mp ? 1 : g.settings.difficulty ?? 1]; // Mehrspieler: überall gleich stark
+    const n = nAI;
+    const rnd = mulberry32(mp ? mp.seed : champ ? champ.seed : Date.now() & 0xffff);
+    const taken = mp && Array.isArray(mp.nm) ? mp.nm.map(s => String(s).toLowerCase()) : [];
+    // mischen nach Fisher-Yates (sort() mit Zufall mischt je nach Browser anders → Geräte hätten andere Gegner)
+    const names = AI_NAMES.filter(s => !taken.includes(s.toLowerCase()));
+    if (champ) names.sort(() => rnd() - 0.5); // wie bisher: laufende Meisterschaften behalten ihre Fahrer
+    else for (let i = names.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [names[i], names[j]] = [names[j], names[i]]; }
+    // Gegner-Autos: in der Meisterschaft aus der Klasse, im Mehrspieler fest (alle Geräte gleich), sonst die 9 Autos,
+    // deren Wertung deinem Auto am nächsten ist – sie fahren mit ihren eigenen Werten (echte Physik)
+    let pool = champ && champ.pool.length ? champ.pool : CARS.filter(c => !ev.dirt || c.offroad > 0.2);
+    if (!champ && !mp) {
+      const myR = rating(st);
+      pool = [...pool].sort((a, b) => Math.abs(rating(carStats(a, {})) - myR) - Math.abs(rating(carStats(b, {})) - myR)).slice(0, 9);
+    }
+    for (let i = 0; i < n; i++) {
+      const spec = pool[Math.floor(rnd() * pool.length)];
+      const col = spec.colors[Math.floor(rnd() * spec.colors.length)];
+      const skill = diff * (0.92 + (i / Math.max(1, n - 1)) * 0.1) * (0.985 + rnd() * 0.03);
+      // schwächere Gegner-Autos bekommen Tuning, bis sie etwa so stark sind wie deins (nicht im Mehrspieler/Meisterschaft)
+      const up = {};
+      if (!champ && !mp) {
+        const want = rating(st) - 15, keys = ['motor', 'reifen', 'fahrwerk', 'nitro'];
+        for (let lv = 1; lv <= 3 && rating(carStats(spec, up)) < want; lv++) for (const k of keys) if (rating(carStats(spec, up)) < want) up[k] = lv;
+      }
+      const ai = new RaceAI(g.scene, spec, col, names[i], skill, W, { rnd, up });
+      const pd = ai.model.userData.paintMat && ai.model.userData.paintMat.userData.dirt;
+      if (pd && ev.dirt) pd.value = 0.35 + rnd() * 0.4;
+      const row = Math.floor(i / 2), side = i % 2 ? 1 : -1;
+      ai.s = startS - 10 - row * 10; ai.prog = -10 - row * 10;
+      ai.lat = ai.latT = side * Math.min(2.8, ev.hw - 1.6); ai.lane = side * 0.6;
+      ai.place(path, race);
+      race.ais.push(ai);
+    }
+    // Spieler hinten (im Mehrspieler: jeder Mensch auf seinem eigenen Startplatz hinter der KI)
+    const me = mp ? mp.ids.indexOf(g.net.id) : 0;
+    const slot = n + (me < 0 ? mp.ids.length : me);
+    const prow = Math.floor(slot / 2), pside = slot % 2 ? 1 : -1;
+    const ps = startS - 10 - prow * 10;
+    const pp = path.at(ps, P);
+    const plat = pside * Math.min(2.8, ev.hw - 1.6);
+    g.car.reset(pp.x - pp.tz * plat, pp.z + pp.tx * plat, Math.atan2(pp.tx, pp.tz));
+    race.grid = { x: g.car.pos.x, z: g.car.pos.z, yaw: g.car.yaw }; // bis zum Start hier festhalten
+    race.prog = -10 - prow * 10; race.pS = ps;
+    race.field = n + (mp ? Math.max(mp.ids.length, me + 1) : 1);
+    if (ev.show === 'plane') { this.makeRival(race); race.field += 1; }
+    // Geist (nicht im Mehrspieler – da fahren echte Gegner)
+    const gd = mp ? null : ghost || g.loadGhost(ev.id);
+    if (gd) {
+      race.ghost = { data: gd, model: makeGhostModel(gd.car, gd.color) };
+      g.scene.add(race.ghost.model);
+    }
+    for (const e of this.list) if (e.beacon) e.beacon.hidden = true;
+    g.traffic.active = false;
+    this.race = race;
+    g.tm.clear();
+    g.hud.prompt(null);
+    g.hud.raceStart(race);
+    g.setState('race');
+    if (g.tutEvent) g.tutEvent('race');
+    this.updateGates();
+  }
+
+  cancelSide() {
+    if (this.drift) { this.drift.ev.beacon.hidden = false; this.g.hud.zone(null); }
+    if (this.speedz) { this.speedz.ev.beacon.hidden = false; this.g.hud.zone(null); }
+    this.drift = null; this.jump = null; this.speedz = null;
+  }
+
+  endRace(aborted) {
+    const g = this.g, r = this.race;
+    if (!r) return;
+    for (const ai of r.ais) ai.dispose(g.scene);
+    if (r.rival && r.rival.model) g.scene.remove(r.rival.model); // Modell teilt Geometrie/Material mit der Vorlage
+    if (g.raceLine) g.raceLine.hide();
+    if (r.ghost) { g.scene.remove(r.ghost.model); r.ghost.model.traverse(o => { if (o.isMesh) o.material.dispose(); }); }
+    for (const e of this.list) if (e.beacon) e.beacon.hidden = false;
+    g.scenery.setGate(0, null); g.scenery.setGate(1, null);
+    g.traffic.active = true;
+    this.race = null;
+    g.tm.clear();
+    g.hud.raceEnd();
+    if (aborted) g.setState('free');
+  }
+
+  updateGates() {
+    const r = this.race, S = this.g.scenery;
+    for (let k = 0; k < 2; k++) {
+      const i = r.next + k;
+      if (i >= r.cps.length || r.finished) { S.setGate(k, null); continue; }
+      const p = r.path.at(r.startS + r.cps[i], P);
+      S.setGate(k, p.x, p.z, this.g.world.heightAt(p.x, p.z), p.tx, p.tz, r.hw * 2 + 3, i === r.cps.length - 1);
+    }
+  }
+
+  // bg: Mehrspieler-Rennen läuft im Hintergrund weiter (Pause/Menü) – ohne Anzeige und Töne
+  updateRace(dt, bg = false) {
+    const g = this.g, r = this.race, car = g.car;
+    // Mehrspieler: gemeinsame Rennuhr (Uhr des Startenden, per Abgleich umgerechnet) – alle Geräte zählen gleich,
+    // auch in der Pause
+    if (r.mp) {
+      const o = g.net.offOf(r.mp.from);
+      if (o !== null) r.offRef = o;
+      r.t = r.t0 + (clock() + r.offRef - r.at) / 1000;
+    } else r.t += dt;
+    if (!r.started && r.t >= 0) { r.started = true; if (!bg) { g.audio.play('go'); g.hud.countdown('LOS!'); } }
+    else if (!r.started) {
+      const n = Math.ceil(-r.t);
+      if (n !== r.lastCount && n <= 3) { r.lastCount = n; if (!bg) { g.audio.play('count'); g.hud.countdown(String(n)); } }
+    }
+    // Fortschritt des Spielers
+    const c = r.path.closest(car.pos.x, car.pos.z, r.pS, 70);
+    let ds = c.s - r.pS;
+    if (r.path.closed) { if (ds > r.path.length / 2) ds -= r.path.length; if (ds < -r.path.length / 2) ds += r.path.length; }
+    if (Math.abs(ds) < 60) { r.pS = c.s; r.prog += ds; }
+    const cp = r.cps[r.next];
+    if (!r.finished && r.prog >= cp - 3) {
+      if (c.dist < r.hw + 20 || r.ev.road === 'quer' && c.dist < 34) {
+        r.next++;
+        r.missed = false;
+        g.audio.play('cp');
+        if (r.next >= r.cps.length) this.finish();
+        else {
+          const lapLen = r.path.length;
+          if (!r.ev.sprint && Math.floor((cp + 1) / lapLen) > Math.floor((r.cps[r.next - 2] || 0) / lapLen)) {
+            const lap = Math.floor(cp / lapLen) + 1;
+            if (lap < r.laps + 1 && lap >= 1 && Math.abs(cp - lap * lapLen) < 200) g.hud.toast(lap === r.laps - 1 ? 'Letzte Runde!' : `Runde ${lap + 1}/${r.laps}`, 'info');
+          }
+        }
+        this.updateGates();
+      } else if (r.prog > cp + 25 && !r.missed) { r.missed = true; g.hud.toast('Checkpoint verpasst – zurück!', 'warn'); }
+    }
+    // Mitspieler im selben Rennen (Fortschritt und Zielzeit melden sie selbst; vorausgerechnet auf „jetzt“)
+    if (r.mp) this.mpHumans(r, c);
+    // Gegner: im Mehrspieler rechnet nur der Rennleiter, die anderen zeigen seinen Stand
+    if (r.mp && r.ais.length) this.mpLeader(r);
+    if (!r.mp || r.aiHost === g.net.id) {
+      const humans = r.mp ? [...r.humans.values()].filter(h => !h.gone && h.p) : [];
+      const others = [{ prog: r.prog, lat: c.lat, speed: Math.abs(car.vf), self: true }, ...humans.map(h => ({ prog: h.prog, lat: h.lat || 0, speed: h.speed, human: true })), ...r.ais];
+      // Gummiband nur gegenüber dem vordersten Menschen
+      let lead = r.prog; for (const h of humans) lead = Math.max(lead, h.prog);
+      for (const ai of r.ais) {
+        ai.update(dt, r, others, lead, r.started);
+        // Zielzeit auf den Zeitpunkt der Ziellinie zurückgerechnet (nicht auf das Bild danach)
+        if (!ai.done && ai.prog >= r.total) { ai.done = true; ai.finish = Math.round((r.t - (ai.prog - r.total) / Math.max(5, ai.speed)) * 1000) / 1000; }
+      }
+      if (r.started) collideAIs(r, r.mp ? g.net.cars() : null);
+    } else this.mpPuppets(r, dt);
+    if (r.rival) this.updateRival(r, dt, bg);
+    // Geist
+    if (r.started && !r.finished && !bg) {
+      r.recT = (r.recT || 0) + dt;
+      if (r.recT >= 0.1) { r.recT -= 0.1; r.ghostRec.push([car.pos.x, car.pos.z, car.yaw]); }
+    }
+    if (r.ghost) placeGhost(r.ghost, Math.max(0, r.t), g.world);
+    // Platzierung (gleiche Regel für Gegner und Mitspieler)
+    let rank = 1;
+    for (const a of r.ais) if (this.ahead(r, a.done ? a.finish : 0, a.prog, a.speed)) rank++;
+    for (const h of r.humans.values()) if (!h.gone && this.ahead(r, h.fin || 0, h.prog, h.speed)) rank++;
+    if (r.rival && this.ahead(r, r.rival.done ? r.rival.finish : 0, r.rival.prog, r.rival.speed)) rank++;
+    if (r.lastRank && rank < r.lastRank && r.started && !r.finished && !bg) g.skills.add('Überholt', 220 * (r.lastRank - rank));
+    r.lastRank = rank; r.rank = rank;
+    if (r.mp && r.shown) this.mpRefreshResults(dt);
+    if (bg) return;
+    // Abstand zum Fahrer davor/dahinter in Sekunden (bei aktuellem Tempo), 4× pro Sekunde
+    r.gapT = (r.gapT || 0) - dt;
+    if (r.gapT <= 0 && r.started && !r.finished) {
+      r.gapT = 0.25;
+      let ah = null, be = null;
+      const all = [...r.ais.filter(a => !a.done).map(a => ({ name: a.name, prog: a.prog })), ...[...r.humans.values()].filter(h => !h.fin && !h.gone).map(h => ({ name: h.name, prog: h.prog }))];
+      if (r.rival && !r.rival.done) all.push({ name: '✈ Kunstflieger', prog: r.rival.prog });
+      for (const o of all) {
+        if (o.prog > r.prog && (!ah || o.prog < ah.prog)) ah = o;
+        if (o.prog <= r.prog && (!be || o.prog > be.prog)) be = o;
+      }
+      const v = Math.max(12, Math.abs(car.vf)), f = d => (d / v).toFixed(1).replace('.', ',') + ' s';
+      g.hud.raceGap((ah ? `▲ ${ah.name} ${f(ah.prog - r.prog)}` : '') + (ah && be ? ' · ' : '') + (be ? `▼ ${be.name} ${f(r.prog - be.prog)}` : ''));
+    } else if (r.finished && r.gapT > -1) { r.gapT = -9; g.hud.raceGap(''); }
+    const lap = r.ev.sprint ? 1 : clamp(Math.floor(Math.max(0, r.prog) / r.path.length) + 1, 1, r.laps);
+    g.hud.raceInfo(r, rank, lap);
+    if (r.finished) {
+      r.after += dt;
+      if (r.after > 3.5 && !r.shown && (r.replayDone || r.after > 40)) { r.shown = true; this.results(); }
+    }
+  }
+
+  finish() {
+    const g = this.g, r = this.race;
+    // Zeit, zu der die Ziellinie genau überfahren wird (Erkennung kommt bis zu 3 m davor bzw. ein Bild danach)
+    // auf ms gerundet: so steht auf allen Geräten exakt dieselbe Zahl (übertragen wird sie ebenfalls in ms)
+    r.finishT = Math.round((r.t + clamp((r.total - r.prog) / Math.max(5, Math.abs(g.car.vf)), -0.25, 0.25)) * 1000) / 1000;
+    r.finished = true; r.after = 0;
+    r.rank = 1;
+    for (const a of r.ais) if (this.ahead(r, a.done ? a.finish : 0, a.prog, a.speed)) r.rank++;
+    for (const h of r.humans.values()) if (!h.gone && this.ahead(r, h.fin || 0, h.prog, h.speed)) r.rank++;
+    if (r.rival && this.ahead(r, r.rival.done ? r.rival.finish : 0, r.rival.prog, r.rival.speed)) r.rank++;
+    g.audio.play('win');
+    g.hud.countdown(r.rank === 1 ? 'SIEG!' : `${r.rank}. PLATZ`);
+    g.confetti();
+  }
+
+  // ---------- Showcase: Kunstflieger über der Strecke
+  // Fliegt der Straße in ~20 m Höhe nach. Tempo = Kurvenprofil DEINES Autos × Schwierigkeit (passt sich also an
+  // jedes Auto an), dazu ein weiches Gummiband – auf den letzten 400 m nicht mehr: da zählt nur, wer schneller ist.
+  // Startet hinter dem Feld und donnert kurz nach dem Start über dich hinweg; zeigt auf Geraden Rollen.
+  makeRival(race) {
+    const m = cloneModel('plane');
+    const R = race.rival = {
+      name: '✈ Kunstflieger', spec: { maker: 'Festival', name: 'Kunstflieger „Nova Wing“' },
+      prog: -240 + race.t0 * 55, speed: 55, done: false, finish: Infinity, model: m, prop: null,
+      pos: new THREE.Vector3(), roll: 0, trick: 0, trickCool: 9, yaw: 0, pitch: 0, side: 0,
+    };
+    if (m) {
+      m.traverse(o => { if (o.name === 'prop') R.prop = o; });
+      this.g.scene.add(m);
+    }
+    this.placeRival(race, 0);
+  }
+  updateRival(r, dt, bg) {
+    const R = r.rival, path = r.path, g = this.g;
+    if (!r.started) { R.prog = -240 + r.t * 55; R.speed = 55; } // Anflug von hinten, gleichmäßig
+    else {
+      const at = s => r.prof[path.idx(Math.round(path.wrapS(r.startS + s) / path.ds))];
+      // Leicht/Normal/Schwer: Anteil des Kurvenprofils deines Autos (ein sehr guter Fahrer schafft ~93 %)
+      let k = [0.82, 0.875, 0.925][g.settings.difficulty ?? 1];
+      const gap = R.prog - r.prog, left = r.total - R.prog;
+      // Start: mit Schwung von hinten heran, tief über dich hinweg und vorbei – dann musst du ihn jagen
+      if (r.t < 14 && gap < 60) k *= 1.3;
+      else if (!R.done && left > 400) {
+        if (gap > 110) k *= clamp(1 - (gap - 110) * 0.0016, 0.84, 1);
+        else if (gap < -90) k *= clamp(1 + (-gap - 90) * 0.0022, 1, 1.18);
+      }
+      let v = 1e9; for (let d = 0; d <= 60; d += 15) v = Math.min(v, at(Math.max(0, R.prog) + d));
+      R.speed = damp(R.speed, clamp(v * k, 26, 82), 1.4, dt);
+      const before = R.prog;
+      R.prog += R.speed * dt;
+      if (!R.done && R.prog >= r.total) { R.done = true; R.finish = Math.round((r.t - (R.prog - r.total) / R.speed) * 1000) / 1000; }
+      // Überflug: kurzes Rauschen, wenn er über dich hinwegzieht
+      if (!bg && Math.sign(before - r.prog) !== Math.sign(R.prog - r.prog) && Math.abs(R.prog - r.prog) < 30) g.audio.play('whoosh');
+    }
+    // Kunststück: auf Geraden ab und zu eine Rolle
+    R.trickCool -= dt;
+    const curvHere = Math.abs(path.at(path.wrapS(r.startS + R.prog + 40), P).curv);
+    if (R.trick <= 0 && R.trickCool <= 0 && curvHere < 0.004) { R.trick = 1; R.trickCool = 10 + Math.random() * 8; }
+    if (R.trick > 0) R.trick = Math.max(0, R.trick - dt / 2.2);
+    if (R.prop) R.prop.rotation.z += dt * 55;
+    this.placeRival(r, dt);
+  }
+  placeRival(r, dt) {
+    const R = r.rival, path = r.path, W = this.g.world;
+    if (!R || !R.model) return;
+    const s = path.wrapS(r.startS + R.prog), p = path.at(s, P);
+    // tief beim Überflug am Start (spektakulär), danach in Reiseflughöhe
+    const lift = lerp(9, 20, smooth01((r.t - 6) / 8)) + 3 * Math.sin(r.t * 0.35);
+    const y = Math.max(p.y, W.heightAt(p.x, p.z)) + lift;
+    R.pos.set(p.x, y, p.z);
+    const yaw = Math.atan2(p.tx, p.tz);
+    // Schräglage aus Kurve und Tempo, weich nachgeführt; dazu die Rolle als ganze Umdrehung
+    // curv > 0 = Rechtskurve (Innenseite rechts); positive Drehung um die Längsachse hebt die linke Fläche
+    const bank = clamp(p.curv * R.speed * R.speed / 9.81 * 0.7, -1.0, 1.0);
+    R.roll = dt ? damp(R.roll, bank, 2.5, dt) : bank;
+    const trick = R.trick > 0 ? (1 - R.trick) * Math.PI * 2 * (R.trick < 1 ? 1 : 0) : 0;
+    R.model.position.copy(R.pos);
+    R.model.rotation.set(0, 0, 0);
+    R.model.rotation.order = 'YXZ';
+    R.model.rotation.set(-0.04, yaw, R.roll + trick);
+    R.model.visible = Math.abs(R.prog - r.prog) < 1400;
+  }
+
+  // Steht ein anderer vor mir? fin = seine Zielzeit (0 = noch nicht im Ziel), prog/v = Fortschritt und Tempo jetzt.
+  // Bin ich schon im Ziel und er noch nicht gemeldet, entscheidet die Vorhersage, ob er die Linie früher überquert hat.
+  ahead(r, fin, prog, v) {
+    if (fin) return !r.finished || fin < r.finishT;
+    if (!r.finished) return prog > r.prog;
+    return prog >= r.total && r.t - (prog - r.total) / Math.max(5, v || 0) < r.finishT;
+  }
+
+  // ---------- Mehrspieler: Mitspieler, Rennleiter für die KI, Ergebnisliste
+  mpHumans(r) {
+    const net = this.g.net, now = clock(), seen = new Set();
+    for (const p of net.racers(r.mp.seed, r.ev.id)) {
+      const R = p.race, h = r.humans.get(p.id) || { id: p.id };
+      const age = clamp((now - R.tl) / 1000, 0, 0.6);
+      h.name = p.name; h.spec = p.spec; h.speed = Math.max(0, R.speed || 0);
+      if (R.fin) h.fin = R.fin;
+      h.prog = R.prog + (h.fin || !R.started ? 0 : h.speed * age);
+      h.p = p; h.gone = false; seen.add(p.id);
+      // Lage auf der Strecke – braucht nur der Rennleiter (Gegner weichen Menschen aus)
+      if (r.aiHost === net.id && p.pos) { const q = r.path.closest(p.pos.x, p.pos.z, h.s ?? r.path.wrapS(r.startS + h.prog), 60); h.s = q.s; h.lat = q.lat; }
+      r.humans.set(p.id, h);
+    }
+    // ausgestiegen (Rennen abgebrochen oder Raum verlassen) – wer schon im Ziel war, behält seine Zeit
+    for (const h of r.humans.values()) if (!seen.has(h.id)) { h.p = null; if (!h.fin) h.gone = true; }
+    r.field = Math.max(r.field, r.ais.length + 1 + r.humans.size);
+  }
+  // Rennleiter: rechnet die KI-Gegner für alle. Ist er weg (Rennen verlassen, keine Meldungen mehr), übernimmt der
+  // Mensch mit der kleinsten Kennung; jede Übernahme erhöht die Generation – die höhere gewinnt immer.
+  mpLeader(r) {
+    const net = this.g.net, f = net.aiFeed, now = clock();
+    if (f && f.ri === r.mp.seed && f.from !== r.aiHost && !r.failed.has(f.from) && (f.ag > r.aiGen || (f.ag === r.aiGen && f.from < r.aiHost))) { r.aiHost = f.from; r.aiGen = f.ag; }
+    if (r.aiHost === net.id) return;
+    // vor dem Startsignal stehen alle Gegner still – kein Wechsel (beim Laden der Modelle stockt jedes Gerät kurz)
+    if (!r.started) { r.feedAt = now; return; }
+    if (f && f.ri === r.mp.seed && f.from === r.aiHost) r.feedAt = Math.max(r.feedAt, f.rx);
+    // weg = Rennen verlassen, Raum verlassen, 4 s nichts mehr gehört; oder 5 s keine Gegner-Daten trotz Meldungen
+    const hp = net.peers.get(r.aiHost), t = performance.now() / 1000;
+    const left = !hp || hp.race.id !== r.mp.seed || t - hp.last > 4;
+    if (left || now - r.feedAt > 5000) {
+      r.lastElect = { t: r.t, host: r.aiHost, noPeer: !hp, race: hp ? hp.race.id : null, silent: hp ? +(t - hp.last).toFixed(2) : null, feed: Math.round(now - r.feedAt) };
+      r.failed.add(r.aiHost);
+      const ids = [net.id, ...net.racers(r.mp.seed, r.ev.id).filter(p => t - p.last < 3 && !r.failed.has(p.id)).map(p => p.id)].sort();
+      r.aiHost = ids[0]; r.aiGen++; r.feedAt = now;
+      if (r.aiHost === net.id) this.takeOverAIs(r);
+    }
+  }
+  // KI übernehmen: aus dem zuletzt gezeigten Stand mit echter Physik weiterfahren
+  takeOverAIs(r) {
+    for (const ai of r.ais) {
+      const v = ai.veh, vx = v.vel.x, vz = v.vel.z, w = v.yawRate;
+      v.reset(v.pos.x, v.pos.z, v.yaw); v.vel.set(vx, 0, vz); v.yawRate = w;
+      const c = r.path.closest(v.pos.x, v.pos.z, r.path.wrapS(r.startS + ai.prog), 80);
+      ai.s = c.s; ai.lat = ai.latT = c.lat; ai.acc = 0; ai.stuckT = 0; ai.offT = 0; ai.remote = null;
+      if (!ai.prof) ai.setup(r);
+    }
+  }
+  // Gegner auf den anderen Geräten: Stand des Rennleiters, vorausgerechnet und weich nachgeführt
+  mpPuppets(r, dt) {
+    const net = this.g.net, f = net.aiFeed, now = clock(), W = this.g.world;
+    if (f && f.ri === r.mp.seed && f.from === r.aiHost && f.seq !== r.feedSeq) {
+      r.feedSeq = f.seq;
+      f.list.forEach((d, i) => {
+        const ai = r.ais[i];
+        if (!ai || !Array.isArray(d) || d.length < 10) return;
+        (ai.remote ||= new Remote()).push({ tl: f.tl, x: d[0], y: d[1], z: d[2], vx: d[3], vz: d[4], r: d[5], w: d[6], s: 0 }, now);
+        ai.netProg = d[7];
+        if (d[8] >= 0 && !ai.done) { ai.done = true; ai.finish = d[8]; }
+        ai.model.visible = !!d[9];
+      });
+    }
+    for (const ai of r.ais) {
+      const R = ai.remote, v = ai.veh;
+      if (!R || !R.update(dt, now, W)) { v.vel.set(0, 0, 0); ai.sync(dt); continue; } // noch kein Stand: Startplatz
+      const s = R.s, vf = s.vx * Math.sin(R.yaw) + s.vz * Math.cos(R.yaw);
+      v.pos.set(R.x, R.y, R.z); v.yaw = R.yaw; v.vel.set(s.vx, 0, s.vz); v.yawRate = s.w; v.vf = vf;
+      v.wheelRot += vf / (ai.dims.wR || 0.34) * dt;
+      v.steer = damp(v.steer, clamp(s.w * 1.4, -1, 1), 8, dt);
+      const e = 1.6, gx = (W.heightAt(R.x + e, R.z) - W.heightAt(R.x - e, R.z)) / (2 * e), gz = (W.heightAt(R.x, R.z + e) - W.heightAt(R.x, R.z - e)) / (2 * e);
+      v.up.set(-gx, 1, -gz).normalize();
+      if (ai.netProg !== undefined) ai.prog = ai.netProg + (ai.done ? 0 : Math.max(0, vf) * R.age);
+      ai.sync(dt);
+    }
+  }
+  // Ergebnisliste im Mehrspieler: Zielzeiten auf der gemeinsamen Uhr (alle Geräte gleich); wer noch fährt, steht
+  // nach Fortschritt dahinter und rückt mit seiner Zeit ein, sobald er im Ziel ist; Ausgestiegene ganz unten
+  mpRows() {
+    const g = this.g, r = this.race;
+    const rows = [{ name: g.settings.name || 'Du', time: r.finishT, me: true, car: g.carSpec(), k: 0 }];
+    for (const ai of r.ais) rows.push(ai.done ? { name: ai.name, time: ai.finish, car: ai.spec, k: 0 } : { name: ai.name, live: true, prog: ai.prog, car: ai.spec, k: 1 });
+    for (const h of r.humans.values()) {
+      rows.push(h.fin ? { name: h.name, time: h.fin, human: true, car: h.spec, k: 0 } : h.gone ? { name: h.name, gone: true, human: true, car: h.spec, k: 2 } : { name: h.name, live: true, prog: h.prog, human: true, car: h.spec, k: 1 });
+    }
+    rows.sort((a, b) => a.k - b.k || (a.k === 0 ? a.time - b.time : a.k === 1 ? b.prog - a.prog : 0) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    return rows;
+  }
+  mpRefreshResults(dt) {
+    const g = this.g, r = this.race;
+    r.resT = (r.resT || 0) - dt;
+    if (r.resT > 0 || g.screen !== 'results') return;
+    r.resT = 0.4;
+    const rows = this.mpRows(), key = rows.map(x => x.name + (x.live ? '~' : x.gone ? '-' : x.time.toFixed(2))).join('|');
+    if (key === r.resKey) return;
+    r.resKey = key;
+    g.hud.resultRows(rows, rows.findIndex(x => x.me) + 1);
+  }
+
+  results() {
+    const g = this.g, r = this.race, ev = r.ev;
+    let rows;
+    if (r.mp) rows = this.mpRows();
+    else {
+      // Zeiten der Gegner schätzen
+      rows = [{ name: g.settings.name || 'Du', time: r.finishT, me: true, car: g.carSpec() }];
+      for (const ai of r.ais) {
+        let t = ai.finish;
+        if (!isFinite(t)) t = r.t + Math.max(0, r.total - ai.prog) / Math.max(8, ai.speed * 0.95);
+        rows.push({ name: ai.name, time: t, car: ai.spec });
+      }
+      if (r.rival) {
+        const R = r.rival;
+        rows.push({ name: R.name, time: R.done ? R.finish : r.t + Math.max(0, r.total - R.prog) / Math.max(20, R.speed), car: R.spec });
+      }
+      rows.sort((a, b) => (a.time === b.time ? 0 : a.time - b.time));
+    }
+    const pos = rows.findIndex(x => x.me) + 1;
+    // Meisterschaft: Punkte nach Platz eintragen
+    let champRes = null;
+    if (r.champ && !r.champ.counted) {
+      r.champ.counted = true;
+      champRes = g.champAfterRace(rows.map((x, i) => ({ name: x.me ? null : x.name, me: !!x.me, pts: CHAMP_POINTS[i] || 0 })));
+    }
+    const pay = g.eco.racePayout(ev, pos, r.crashes, g.settings.difficulty);
+    const cr = pay.total, fans = pay.fans;
+    const best = g.save.best[ev.id];
+    const isBest = !best || r.finishT < best;
+    if (isBest) { g.save.best[ev.id] = r.finishT; g.saveGhost(ev.id, r.ghostRec, r.finishT); }
+    const stars = pos === 1 ? 3 : pos <= 3 && !ev.show ? 2 : 1; // Showcase: nur Sieg zählt
+    g.save.stats.races++;
+    g.eco.weekly('race', { ev: ev.id, pos, cls: g.carClassOf(), champ: !!r.champ });
+    if (g.tutEvent) g.tutEvent('finish');
+    if (pos === 1) g.save.stats.wins++;
+    const had = g.save.stars[ev.id] || 0;
+    if (stars > had) g.save.stars[ev.id] = stars;
+    if (stars === 3 && had < 3) g.eco.addSpin('3 Sterne: ' + ev.name);
+    g.reward(cr, fans, false);
+    g.eco.track('race', 1);
+    if (pos === 1) g.eco.track('win', 1);
+    g.saveGame();
+    let challenge = null;
+    if (r.ghostData && r.ghostData.name) challenge = { name: r.ghostData.name, time: r.ghostData.time, won: r.finishT < r.ghostData.time };
+    g.hud.showResults({ ev, rows, pos, cr, fans, time: r.finishT, isBest, best, challenge, ghost: r.ghostRec, lines: pay.lines, champ: champRes });
+  }
+}
+
+// ---------------------------------------------------------------- KI untereinander: echte Zusammenstöße
+// Berühren sich zwei Gegner, werden beide auseinandergeschoben und tauschen Schwung aus (gleiche Masse),
+// mit etwas Drehung – wie zwischen Spieler und Gegner.
+// peers (nur beim Rennleiter): Mitspieler-Autos schieben Gegner weg (je zur Hälfte – die andere Hälfte schiebt sich
+// der Mitspieler auf seinem Gerät selbst weg)
+function collideAIs(r, peers) {
+  const A = r.ais;
+  for (let i = 0; i < A.length; i++) for (let j = i + 1; j < A.length; j++) {
+    const a = A[i], b = A[j];
+    if (!a.model.visible || !b.model.visible) continue;
+    if (Math.abs(a.pos.x - b.pos.x) > 7 || Math.abs(a.pos.z - b.pos.z) > 7) continue;
+    const hit = carContact(a.circles(), b.circles(), a.rad, b.rad);
+    if (hit) pushPair(a.veh, b.veh, hit);
+  }
+  if (peers) for (const p of peers) for (const a of A) {
+    if (!a.model.visible || Math.abs(a.pos.x - p.pos.x) > 7 || Math.abs(a.pos.z - p.pos.z) > 7) continue;
+    const hit = carContact(a.circles(), p.circles(), a.rad, p.rad);
+    if (hit) pushPair(a.veh, { pos: { x: p.pos.x, z: p.pos.z }, vel: { x: p.vx || 0, z: p.vz || 0 }, yaw: p.yaw, yawRate: 0, impacts: [] }, hit, 0.5);
+  }
+}
+// hit.nx/nz zeigt von b nach a
+export function pushPair(va, vb, hit, shareA = 0.5) {
+  const pa = hit.pen * shareA, pb = hit.pen * (1 - shareA);
+  va.pos.x += hit.nx * pa; va.pos.z += hit.nz * pa;
+  vb.pos.x -= hit.nx * pb; vb.pos.z -= hit.nz * pb;
+  const vn = (va.vel.x - vb.vel.x) * hit.nx + (va.vel.z - vb.vel.z) * hit.nz;
+  if (vn < 0) {
+    const j = -vn * 0.6; // Stoß (leicht unelastisch), je zur Hälfte
+    va.vel.x += hit.nx * j; va.vel.z += hit.nz * j;
+    vb.vel.x -= hit.nx * j; vb.vel.z -= hit.nz * j;
+    // seitlicher Treffer bringt Drehung
+    const side = (sy, cy) => -hit.nx * cy + hit.nz * sy;
+    vb.yawRate += side(Math.sin(vb.yaw), Math.cos(vb.yaw)) * j * 0.25;
+    va.yawRate -= side(Math.sin(va.yaw), Math.cos(va.yaw)) * j * 0.25;
+    if (j > 2) { va.impacts.push({ force: j, x: va.pos.x, z: va.pos.z }); }
+  }
+}
+
+// ---------------------------------------------------------------- Geist
+function makeGhostModel(carId, color) {
+  const spec = CARS.find(c => c.id === carId) || CARS[0];
+  const m = buildCar(spec, color || '#8af', { lod: true });
+  if (m.userData.paintMat) m.userData.paintMat.dispose(); // wird unten durch durchsichtige Kopien ersetzt
+  m.traverse(o => {
+    if (o.isMesh) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.38; o.material.depthWrite = false; o.castShadow = false; }
+  });
+  return m;
+}
+function placeGhost(gh, t, W) {
+  const rate = gh.data.rate || 10, d = gh.data.pts, i = t * rate;
+  const a = Math.min(d.length - 1, Math.floor(i)), b = Math.min(d.length - 1, a + 1), f = i - Math.floor(i);
+  if (!d.length) return;
+  const x = d[a][0] + (d[b][0] - d[a][0]) * f, z = d[a][1] + (d[b][1] - d[a][1]) * f;
+  let dy = d[b][2] - d[a][2]; if (dy > Math.PI) dy -= Math.PI * 2; if (dy < -Math.PI) dy += Math.PI * 2;
+  gh.model.position.set(x, W.heightAt(x, z), z);
+  gh.model.rotation.y = d[a][2] + dy * f;
+  gh.model.visible = i < d.length + rate * 2;
+}
+export { collideAIs as __separateAIs }; // für Tests

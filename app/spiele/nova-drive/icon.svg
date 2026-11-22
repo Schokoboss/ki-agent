@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a1c6e"/><stop offset=".55" stop-color="#ff3d7f"/><stop offset="1" stop-color="#ff8a00"/></linearGradient>
+    <linearGradient id="road" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1b1830"/><stop offset="1" stop-color="#0b0a18"/></linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <circle cx="256" cy="250" r="92" fill="#ffd23f" opacity=".95"/>
+  <rect x="0" y="290" width="512" height="222" fill="url(#road)"/>
+  <path d="M206 512 L248 290 L264 290 L306 512 Z" fill="#3b3c48"/>
+  <path d="M252 512 L255 290 L257 290 L260 512 Z" fill="#ffd23f"/>
+  <path d="M256 70 l18 42 46 4 -35 30 11 45 -40 -24 -40 24 11 -45 -35 -30 46 -4 z" fill="#fff" opacity=".9"/>
+  <text x="256" y="430" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-style="italic" font-size="92" text-anchor="middle" fill="#fff">NOVA</text>
+</svg>
