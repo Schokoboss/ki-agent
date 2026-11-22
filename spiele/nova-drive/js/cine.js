@@ -19,6 +19,7 @@ export class TimeMachine {
       c: [c.pos.x, c.pos.y, c.pos.z, c.vel.x, c.vel.y, c.vel.z, c.yaw, c.yawRate, c.steer, c.gear, c.rpm, c.nitro,
         c.up.x, c.up.y, c.up.z, c.vf, c.grounded ? 1 : 0, c.wheelRot],
       r: r ? [r.t, r.prog, r.pS, r.next, r.missed ? 1 : 0, r.started ? 1 : 0, r.lastCount || 0, r.lastRank || 0] : null,
+      rv: r && r.rival ? [r.rival.prog, r.rival.speed, r.rival.done ? 1 : 0, r.rival.finish, r.rival.trick] : null,
       a: r ? r.ais.map(a => { const v = a.veh; return [v.pos.x, v.pos.y, v.pos.z, v.vel.x, v.vel.y, v.vel.z, v.yaw, v.yawRate, v.steer, v.wheelRot, v.up.x, v.up.y, v.up.z, a.s, a.prog, a.lat, a.latT, a.done ? 1 : 0, a.finish, v.grounded ? 1 : 0]; }) : null,
     };
   }
@@ -42,6 +43,7 @@ export class TimeMachine {
       r.missed = !!s.r[4]; r.started = !!s.r[5]; r.lastCount = s.r[6]; r.lastRank = s.r[7];
       if (r.ghostRec) { r.ghostRec.length = Math.max(0, Math.min(r.ghostRec.length, Math.floor(Math.max(0, r.t) * 10))); r.recT = 0; }
     }
+    if (r && r.rival && s.rv) { const R = r.rival; [R.prog, R.speed] = s.rv; R.done = !!s.rv[2]; R.finish = s.rv[3]; R.trick = s.rv[4] || 0; g.events.placeRival(r, 0); }
     if (r && s.a) s.a.forEach((a, i) => {
       const ai = r.ais[i];
       if (!ai) return;
@@ -122,7 +124,7 @@ export class Replay {
     const i = Math.floor(this.f), k = this.f - i;
     const a = this.frames[i], b = this.frames[Math.min(i + 1, this.frames.length - 1)];
     // weich zwischen Schnappschüssen mischen (nur Darstellung)
-    const s = { c: a.c.map((v, j) => (j === 6 ? a.c[6] + wrap(b.c[6] - a.c[6]) * k : j === 9 ? v : lerp(v, b.c[j], k))), r: a.r, a: a.a && a.a.map((x, n) => x.map((v, j) => (b.a && b.a[n] ? lerp(v, b.a[n][j], k) : v))) };
+    const s = { c: a.c.map((v, j) => (j === 6 ? a.c[6] + wrap(b.c[6] - a.c[6]) * k : j === 9 ? v : lerp(v, b.c[j], k))), r: a.r, rv: a.rv && b.rv ? a.rv.map((v, j) => (j < 2 ? lerp(v, b.rv[j], k) : v)) : a.rv, a: a.a && a.a.map((x, n) => x.map((v, j) => (b.a && b.a[n] ? lerp(v, b.a[n][j], k) : v))) };
     g.tm.apply(g, s);
     const c = s.c;
     this.camT += dt;

@@ -13,8 +13,8 @@ import { Audio, isTurbo } from './audio.js';
 import { TimeMachine, introCam, INTRO, Replay, REPLAY_FRAMES } from './cine.js';
 import { Input, isWheelId } from './input.js';
 import { Particles, Smoke, Skids, Rain } from './effects.js';
-import { CARS, UPGRADES, carStats, rating, carClass, CLASS_COLORS, EVENTS, RADIO, TIPS, CHAMPS, CLASS_ORDER } from './data.js';
-import { clamp, lerp, damp, fmtNum, fmtTime, wrapAngle, breathe, view, updateView, logicalPoint, localPoint } from './util.js';
+import { CARS, UPGRADES, carStats, rating, carClass, CLASS_COLORS, EVENTS, RADIO, TIPS, CHAMPS, CLASS_ORDER, carLevel, upgradeCost } from './data.js';
+import { clamp, lerp, damp, fmtNum, fmtTime, wrapAngle, breathe, view, updateView, logicalPoint, localPoint, mulberry32 } from './util.js';
 import { EVENT_COLORS } from './world.js';
 import { Economy, PRIZES, daysToMonday } from './economy.js';
 import { RoadGraph, NavRibbon, RaceLine, say, fmtDist, TURN_ICON, turnText } from './nav.js';
@@ -209,13 +209,20 @@ class Game {
   }
 
   // Spiegel-Umgebung (Lack, Glas, nasse Straße) aus dem aktuellen Himmel – wird laufend nachgeführt
+  // Gemalte Rundum-Ansicht (Himmel, Wolken, dunkle Baum-/Hügelkante am Horizont, Boden): die scharfe Horizontlinie
+  // und die Wolken sind es, die Lack und Scheiben „glänzen“ lassen – ein glatter Farbverlauf wirkt im Spiegel matt.
   makeEnv() {
     this.pmrem = new THREE.PMREMGenerator(this.renderer);
     const s = this.envScene = new THREE.Scene();
-    const geo = new THREE.SphereGeometry(10, 32, 16);
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(geo.attributes.position.count * 3), 3));
-    this.envSky = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide }));
+    const cv = this.envCanvas = document.createElement('canvas'); cv.width = 512; cv.height = 256;
+    const tex = this.envTex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+    this.envSky = new THREE.Mesh(new THREE.SphereGeometry(10, 48, 24), new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide }));
     s.add(this.envSky);
+    // Baumkante und Wolken fest (aus Summen von Sinuswellen bzw. festem Zufall)
+    const rnd = mulberry32(99);
+    this.envRidge = Array.from({ length: 512 }, (_, i) => { const a = i / 512 * Math.PI * 2;
+      return 4 + 3.2 * Math.sin(a * 3 + 1) + 1.8 * Math.sin(a * 7 + 2) + 1.1 * Math.sin(a * 19) + 0.9 * Math.abs(Math.sin(a * 53)) + 0.6 * Math.abs(Math.sin(a * 131)); });
+    this.envClouds = Array.from({ length: 16 }, () => ({ x: rnd(), el: 6 + rnd() * 34, w: 0.05 + rnd() * 0.09, h: 3 + rnd() * 5 }));
     this.envSun = new THREE.Mesh(new THREE.SphereGeometry(1.1, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
     s.add(this.envSun);
     this.updateEnv(true);
@@ -226,14 +233,37 @@ class Game {
     if (!force && key === this.envKey) return;
     this.envKey = key;
     const top = u.zenith.value.clone(), hor = u.horizon.value.clone();
-    const bot = new THREE.Color(0.16, 0.19, 0.11).multiplyScalar((1 - S.night * 0.85) * (1 - (S.rain || 0) * 0.3));
-    const geo = this.envSky.geometry, pos = geo.attributes.position, col = geo.attributes.color, c = new THREE.Color();
-    for (let i = 0; i < pos.count; i++) {
-      const y = pos.getY(i) / 10;
-      if (y > 0) c.copy(hor).lerp(top, Math.pow(y, 0.6)); else c.copy(hor).lerp(bot, Math.min(1, -y * 3));
-      col.setXYZ(i, c.r, c.g, c.b);
+    const day = 1 - S.night * 0.85, wet = S.rain || 0;
+    const bot = new THREE.Color(0.11, 0.13, 0.08).multiplyScalar(day * (1 - wet * 0.3));
+    const ridge = new THREE.Color(0.035, 0.055, 0.03).multiplyScalar(day).lerp(hor.clone().multiplyScalar(0.35), 0.35 + wet * 0.3);
+    // Himmel kann heller als 1 sein: auf 0..1 malen, die Helligkeit trägt die Materialfarbe
+    const k = Math.max(1, top.r, top.g, top.b, hor.r, hor.g, hor.b);
+    const st = c => c.clone().multiplyScalar(1 / k).getStyle();
+    const cv = this.envCanvas, g = cv.getContext('2d'), W = cv.width, H = cv.height, hy = H / 2;
+    const elY = el => hy - el / 90 * hy; // Höhenwinkel (Grad) → Zeile
+    let gr = g.createLinearGradient(0, 0, 0, hy);
+    gr.addColorStop(0, st(top)); gr.addColorStop(0.55, st(top.clone().lerp(hor, 0.45))); gr.addColorStop(1, st(hor));
+    g.fillStyle = gr; g.fillRect(0, 0, W, hy + 1);
+    // Wolken: weich, oben hell, von unten von der Sonnenfarbe angestrahlt
+    const cl = hor.clone().lerp(new THREE.Color(1, 1, 1), 0.6).multiplyScalar(1 - S.night * 0.8).lerp(new THREE.Color(0.5, 0.52, 0.55), wet * 0.5);
+    g.globalAlpha = 0.55 * (1 - S.night * 0.5);
+    for (const c of this.envClouds) for (const dx of [0, -W]) {
+      const cx = c.x * W + dx, cy = elY(c.el), rw = c.w * W, rh = c.h / 90 * hy;
+      const rg = g.createRadialGradient(cx, cy, 0, cx, cy, rw);
+      rg.addColorStop(0, st(cl)); rg.addColorStop(1, 'rgba(0,0,0,0)');
+      g.save(); g.translate(cx, cy); g.scale(1, rh / rw); g.translate(-cx, -cy); g.fillStyle = rg; g.fillRect(cx - rw, cy - rw, rw * 2, rw * 2); g.restore();
     }
-    col.needsUpdate = true;
+    g.globalAlpha = 1;
+    // Boden unter dem Horizont
+    gr = g.createLinearGradient(0, hy, 0, H);
+    gr.addColorStop(0, st(bot.clone().lerp(hor, 0.25))); gr.addColorStop(0.15, st(bot)); gr.addColorStop(1, st(bot.clone().multiplyScalar(0.6)));
+    g.fillStyle = gr; g.fillRect(0, hy, W, H - hy);
+    // Baum- und Hügelkante (dunkel, leicht dunstig)
+    g.fillStyle = st(ridge); g.beginPath(); g.moveTo(0, hy + 2);
+    for (let i = 0; i <= W; i++) g.lineTo(i, elY(this.envRidge[i % W]));
+    g.lineTo(W, hy + 2); g.closePath(); g.fill();
+    this.envTex.needsUpdate = true;
+    this.envSky.material.color.setScalar(k);
     const up = S.sunDir.y > -0.05;
     this.envSun.visible = up;
     this.envSun.position.copy(S.sunDir).multiplyScalar(8);
@@ -390,9 +420,9 @@ class Game {
     const garage = this.state === 'garage' && this.previewModel;
     const tgt = garage ? this.previewModel : this.carModel;
     if (!tgt || !tgt.visible) return;
-    const R = this.renderer, au = R.shadowMap.autoUpdate, grass = this.scenery.grass && this.scenery.grass.im;
+    const R = this.renderer, au = R.shadowMap.autoUpdate, grass = this.scenery.grass && this.scenery.grass.im, flowers = this.scenery.grass && this.scenery.grass.fim;
     const gv = grass ? grass.visible : false;
-    tgt.visible = false; if (grass) grass.visible = false; R.shadowMap.autoUpdate = false;
+    tgt.visible = false; if (grass) grass.visible = false; if (flowers) flowers.visible = false; R.shadowMap.autoUpdate = false;
     if (!this.reflEnv) {
       // erstes Mal: alle sechs Seiten auf einmal
       this.cubeCam.position.set(tgt.position.x, tgt.position.y + 0.9, tgt.position.z);
@@ -411,7 +441,7 @@ class Game {
       R.setRenderTarget(prev);
       if (face === 5) this.reflEnv = this.reflGen.fromCubemap(tex, this.reflEnv);
     }
-    tgt.visible = true; if (grass) grass.visible = gv; R.shadowMap.autoUpdate = au;
+    tgt.visible = true; if (grass) grass.visible = gv; if (flowers) flowers.visible = gv; R.shadowMap.autoUpdate = au;
     if (this.reflModel !== tgt) this.applyReflections(tgt);
   }
 
@@ -503,10 +533,11 @@ class Game {
   }
 
   // ---------------------------------------------------------------- Belohnung & Level
+  // Fans je Level steigen schneller als früher (1.200 + 450 × Level), damit Level etwas wert sind
   level() {
     let f = this.save.fans, L = 1;
-    while (f >= 1000 + 260 * L) { f -= 1000 + 260 * L; L++; }
-    return { level: L, frac: f / (1000 + 260 * L) };
+    while (f >= 1200 + 450 * L) { f -= 1200 + 450 * L; L++; }
+    return { level: L, frac: f / (1200 + 450 * L) };
   }
   reward(cr, fans, toast) {
     const before = this.level().level;
@@ -515,11 +546,13 @@ class Game {
     const after = this.level().level;
     this.hud.money(cr, fans);
     if (after > before) {
-      const bonus = after * 1500;
+      // bescheidener Bonus; Glücksrad-Dreh nur alle 5 Level; neue Autos zum Kaufen freigeschaltet?
+      const bonus = 1000 + after * 250, spin = after % 5 === 0;
+      const unlocked = CARS.filter(c => carLevel(c) > before && carLevel(c) <= after).map(c => `${c.maker} ${c.name}`);
       this.save.credits += bonus;
-      this.hud.banner('Festival-Level ' + after, `+${fmtNum(bonus)} CR`, 3, 'Die Menge jubelt! + Glücksrad-Dreh');
+      this.hud.banner('Festival-Level ' + after, `+${fmtNum(bonus)} CR`, 3, unlocked.length ? `Jetzt kaufbar: ${unlocked.join(', ')}` : spin ? 'Die Menge jubelt! + Glücksrad-Dreh' : 'Die Menge jubelt!');
       this.audio.play('win');
-      if (this.eco) this.eco.addSpin('Festival-Level ' + after);
+      if (spin && this.eco) this.eco.addSpin('Festival-Level ' + after);
       this.hud.money();
     }
     this.saveGame();
@@ -928,7 +961,7 @@ class Game {
         const prize = this.carSpec(C.car);
         let extra = '';
         if (prize && !this.save.owned[prize.id]) { this.save.owned[prize.id] = { up: {}, color: prize.colors[0] }; extra = ` + ${prize.maker} ${prize.name} (in der Garage)`; }
-        else if (prize) { const cr = Math.round(prize.price * 0.5); this.save.credits += cr; extra = ` + ${fmtNum(cr)} CR (Auto schon vorhanden)`; }
+        else if (prize) { const cr = Math.round(Math.min(prize.price * 0.2, 60000) / 500) * 500; this.save.credits += cr; extra = ` + ${fmtNum(cr)} CR (Auto schon vorhanden)`; }
         this.reward(C.reward, C.fans, true);
         text = `🏆 Meister! +${fmtNum(C.reward)} CR${extra}`;
         this.eco.addSpin && this.eco.addSpin('Meisterschaft: ' + C.name);
@@ -1235,7 +1268,8 @@ class Game {
       b.className = 'g-card' + (c.id === sel ? ' sel' : '') + (o ? ' owned' : '');
       b.innerHTML = `<span class="cls" style="background:${CLASS_COLORS[cl]}">${cl} ${r}</span><span class="mk"></span><span class="nm"></span><span class="pr"></span>`;
       b.querySelector('.mk').textContent = c.maker; b.querySelector('.nm').textContent = c.name;
-      b.querySelector('.pr').textContent = o ? (c.id === this.save.current ? '✓ Aktiv' : 'Im Besitz') : fmtNum(c.price) + ' CR';
+      const lockLv = !o && carLevel(c) > this.level().level ? carLevel(c) : 0;
+      b.querySelector('.pr').textContent = o ? (c.id === this.save.current ? '✓ Aktiv' : 'Im Besitz') : lockLv ? `🔒 ab Level ${lockLv}` : fmtNum(c.price) + ' CR';
       b.addEventListener('click', () => { this.audio.play('ui'); this.garageSel = c.id; this.previewCar(c.id); this.renderGarage(); });
       list.appendChild(b);
       if (c.id === sel) requestAnimationFrame(() => b.scrollIntoView({ block: 'nearest', inline: 'center' }));
@@ -1254,7 +1288,7 @@ class Game {
         const lv = own.up[u.key] || 0;
         const b = document.createElement('button');
         b.className = 'g-upg';
-        const cost = u.cost[lv];
+        const cost = lv >= 3 ? 0 : upgradeCost(spec, u, lv);
         b.innerHTML = `<span class="un">${u.name}</span><span class="dots">${[0, 1, 2].map(i => `<i class="${i < lv ? 'on' : ''}"></i>`).join('')}</span><span class="uc">${lv >= 3 ? 'MAX' : fmtNum(cost) + ' CR'}</span>`;
         b.disabled = lv >= 3 || this.save.credits < cost;
         b.title = u.desc;
@@ -1321,10 +1355,11 @@ class Game {
     }
     const act = $('g-action');
     if (!own) {
-      act.textContent = `Kaufen · ${fmtNum(spec.price)} CR`;
-      act.disabled = this.save.credits < spec.price;
+      const need = carLevel(spec), lv = this.level().level;
+      act.textContent = need > lv ? `🔒 Ab Festival-Level ${need} · ${fmtNum(spec.price)} CR (du: Level ${lv})` : `Kaufen · ${fmtNum(spec.price)} CR`;
+      act.disabled = need > lv || this.save.credits < spec.price;
       act.onclick = () => {
-        if (this.save.credits < spec.price) return;
+        if (need > this.level().level || this.save.credits < spec.price) return;
         this.save.credits -= spec.price;
         this.save.owned[sel] = { up: {}, color: this.previewColor || spec.colors[0] };
         this.audio.play('buy'); this.saveGame(); this.hud.money();
@@ -2089,7 +2124,7 @@ class Game {
     this.audio.updateCar(car, raw, true, this.carStyle);
     // HUD
     this.hud.speedo(car);
-    const extra = { events: race ? null : this.events.list, ais: race ? race.ais : null, waypoint: race ? null : this.waypoint, peers: this.net.room ? this.net.mapPeers() : null };
+    const extra = { events: race ? null : this.events.list, ais: race ? (race.rival ? [...race.ais, race.rival] : race.ais) : null, waypoint: race ? null : this.waypoint, peers: this.net.room ? this.net.mapPeers() : null };
     if (!race && this.nav) extra.navPts = this.nav.r.pts.slice(this.nav.idx, this.nav.idx + 500);
     if (race) {
       extra.route = { path: race.path, from: race.pS, len: Math.min(900, race.startS + race.total - race.pS + (race.path.closed ? 0 : 0)) };

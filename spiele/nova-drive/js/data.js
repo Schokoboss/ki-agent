@@ -60,17 +60,17 @@ export const CARS = [
   { id: 'tundra', maker: 'Tundra', name: 'Rover 4x4', drive: 'AWD', top: 186, accel: 8.6, grip: 0.97, handling: 0.95, offroad: 1.0,
     price: 22000, style: 'truck', colors: ['#3d6b3a', '#d9a441', '#f2f2f2', '#22232a', '#c0392b', '#2e86c1'] },
   { id: 'velora', maker: 'Velora', name: 'Spyder', drive: 'RWD', top: 226, accel: 9.6, grip: 1.12, handling: 1.25, offroad: 0.1,
-    price: 32000, style: 'roadster', colors: ['#d7263d', '#ffe066', '#1b98e0', '#f4f4f4', '#13293d', '#ff7a1a'] },
+    price: 38000, style: 'roadster', colors: ['#d7263d', '#ffe066', '#1b98e0', '#f4f4f4', '#13293d', '#ff7a1a'] },
   { id: 'ostwind', maker: 'Ostwind', name: 'Rallye R', drive: 'AWD', top: 221, accel: 10.4, grip: 1.08, handling: 1.15, offroad: 0.85,
-    price: 45000, style: 'rally', colors: ['#1f4e9c', '#f2f2f2', '#e63946', '#ffb703', '#2a9d8f', '#111111'] },
+    price: 60000, style: 'rally', colors: ['#1f4e9c', '#f2f2f2', '#e63946', '#ffb703', '#2a9d8f', '#111111'] },
   { id: 'brenner', maker: 'Brenner', name: 'Bolt V8', drive: 'RWD', top: 252, accel: 11.2, grip: 0.96, handling: 0.96, offroad: 0.15,
-    price: 52000, style: 'muscle', colors: ['#ff6b00', '#111111', '#2b59c3', '#e8e8e8', '#9b1d20', '#2ec4b6'] },
-  { id: 'aurum', maker: 'Aurum', name: 'GT-S', drive: 'RWD', top: 292, accel: 13.2, grip: 1.2, handling: 1.15, offroad: 0.1,
-    price: 125000, style: 'gt', colors: ['#c9a227', '#b3001b', '#0d1b2a', '#e5e5e5', '#2d6a4f', '#5a189a'] },
-  { id: 'volt', maker: 'Volt', name: 'Arrow E', drive: 'AWD', top: 300, accel: 16, grip: 1.22, handling: 1.1, offroad: 0.15,
-    price: 210000, style: 'ev', colors: ['#f1f1f1', '#00b4d8', '#7209b7', '#111111', '#80ed99', '#ff006e'] },
-  { id: 'phantom', maker: 'Nova', name: 'Phantom', drive: 'RWD', top: 346, accel: 16.6, grip: 1.32, handling: 1.2, offroad: 0.05,
-    price: 350000, style: 'hyper', colors: ['#6d5dfc', '#0a0a0a', '#ff3d00', '#e0e0e0', '#00e5ff', '#ffd400'] },
+    price: 70000, style: 'muscle', colors: ['#ff6b00', '#111111', '#2b59c3', '#e8e8e8', '#9b1d20', '#2ec4b6'] },
+  { id: 'aurum', maker: 'Aurum', name: 'GT-S', drive: 'RWD', top: 278, accel: 13.2, grip: 1.2, handling: 1.15, offroad: 0.1,
+    price: 240000, style: 'gt', colors: ['#c9a227', '#b3001b', '#0d1b2a', '#e5e5e5', '#2d6a4f', '#5a189a'] },
+  { id: 'volt', maker: 'Volt', name: 'Arrow E', drive: 'AWD', top: 285, accel: 16, grip: 1.22, handling: 1.1, offroad: 0.15,
+    price: 450000, style: 'ev', colors: ['#f1f1f1', '#00b4d8', '#7209b7', '#111111', '#80ed99', '#ff006e'] },
+  { id: 'phantom', maker: 'Nova', name: 'Phantom', drive: 'RWD', top: 325, accel: 16.6, grip: 1.32, handling: 1.2, offroad: 0.05,
+    price: 750000, style: 'hyper', colors: ['#6d5dfc', '#0a0a0a', '#ff3d00', '#e0e0e0', '#00e5ff', '#ffd400'] },
   // neue Blender-Autos (hinten angehängt, damit Herausforderungs-Links gültig bleiben)
   { id: 'sundog', maker: 'Sundog', name: 'Camper 2.0', drive: 'RWD', top: 158, accel: 6.6, grip: 0.9, handling: 0.86, offroad: 0.4,
     price: 9000, style: 'van', colors: ['#e8432e', '#f2c14e', '#5fa8d3', '#7bc47f', '#2a9d8f', '#ff8fab'] },
@@ -79,26 +79,26 @@ export const CARS = [
   { id: 'dune', maker: 'Dune', name: 'Sandfloh', drive: 'RWD', top: 175, accel: 10.2, grip: 0.95, handling: 1.18, offroad: 1.0,
     price: 28000, style: 'buggy', colors: ['#c9a227', '#ff6b00', '#2ec4b6', '#e63946', '#f2f2f2', '#3d6b3a'] },
   { id: 'atlas', maker: 'Atlas', name: 'Terra 4x4', drive: 'AWD', top: 205, accel: 9.4, grip: 1.0, handling: 0.98, offroad: 0.9,
-    price: 34000, style: 'suv', colors: ['#3d6b3a', '#22232a', '#f2f2f2', '#8d99ae', '#b5651d', '#1d3557'] },
+    price: 40000, style: 'suv', colors: ['#3d6b3a', '#22232a', '#f2f2f2', '#8d99ae', '#b5651d', '#1d3557'] },
   { id: 'vira', maker: 'Vira', name: 'Classica 64', drive: 'RWD', top: 205, accel: 8.8, grip: 0.98, handling: 1.0, offroad: 0.1,
-    price: 38000, style: 'classic', colors: ['#2d6a4f', '#9b1d20', '#f1e3c8', '#1b3a5c', '#c9a227', '#111111'] },
+    price: 45000, style: 'classic', colors: ['#2d6a4f', '#9b1d20', '#f1e3c8', '#1b3a5c', '#c9a227', '#111111'] },
   { id: 'nordwind', maker: 'Nordwind', name: 'Kombi R', drive: 'AWD', top: 248, accel: 11.8, grip: 1.1, handling: 1.08, offroad: 0.4,
-    price: 68000, style: 'wagon', colors: ['#1f4e9c', '#3d405b', '#f2f2f2', '#81b29a', '#e07a5f', '#111111'] },
+    price: 95000, style: 'wagon', colors: ['#1f4e9c', '#3d405b', '#f2f2f2', '#81b29a', '#e07a5f', '#111111'] },
   { id: 'gruppo', maker: 'Gruppo', name: 'Rallye 86', drive: 'AWD', top: 232, accel: 12.4, grip: 1.12, handling: 1.18, offroad: 0.9,
-    price: 95000, style: 'rally80', colors: ['#f2f2f2', '#6d5dfc', '#e63946', '#1f4e9c', '#ffb703', '#111111'] },
-  { id: 'strato', maker: 'Strato', name: 'Keil V12', drive: 'RWD', top: 305, accel: 14.2, grip: 1.22, handling: 1.12, offroad: 0.05,
-    price: 180000, style: 'wedge', colors: ['#f1f1f1', '#ff3d00', '#111111', '#ffd400', '#00b4d8', '#d7263d'] },
+    price: 140000, style: 'rally80', colors: ['#f2f2f2', '#6d5dfc', '#e63946', '#1f4e9c', '#ffb703', '#111111'] },
+  { id: 'strato', maker: 'Strato', name: 'Keil V12', drive: 'RWD', top: 290, accel: 14.2, grip: 1.22, handling: 1.12, offroad: 0.05,
+    price: 380000, style: 'wedge', colors: ['#f1f1f1', '#ff3d00', '#111111', '#ffd400', '#00b4d8', '#d7263d'] },
   // dritte Runde (hinten angehängt – Herausforderungs-Links bleiben gültig)
   { id: 'kubo', maker: 'Kubo', name: 'Würfel 660', drive: 'FWD', top: 152, accel: 6.4, grip: 0.96, handling: 1.26, offroad: 0.3,
     price: 7000, style: 'kei', colors: ['#f2c14e', '#7bc47f', '#5fa8d3', '#f2f2f2', '#ff8fab', '#e8432e'] },
   { id: 'regent', maker: 'Regent', name: 'Limousine V6', drive: 'AWD', top: 238, accel: 10.4, grip: 1.04, handling: 1.0, offroad: 0.25,
-    price: 42000, style: 'sedan', colors: ['#22232a', '#8d99ae', '#f2f2f2', '#1d3557', '#7a1f2b', '#3d6b3a'] },
+    price: 55000, style: 'sedan', colors: ['#22232a', '#8d99ae', '#f2f2f2', '#1d3557', '#7a1f2b', '#3d6b3a'] },
   { id: 'lumen', maker: 'Lumen', name: 'Coupé 2.0T', drive: 'RWD', top: 246, accel: 11.2, grip: 1.1, handling: 1.22, offroad: 0.1,
-    price: 56000, style: 'coupe', colors: ['#ff3d7f', '#1b98e0', '#f2f2f2', '#111111', '#ffd400', '#2ec4b6'] },
+    price: 75000, style: 'coupe', colors: ['#ff3d7f', '#1b98e0', '#f2f2f2', '#111111', '#ffd400', '#2ec4b6'] },
   { id: 'zephyra', maker: 'Zephyra', name: 'Cabrio 3.0', drive: 'RWD', top: 255, accel: 11.6, grip: 1.08, handling: 1.1, offroad: 0.05,
-    price: 82000, style: 'cabrio', colors: ['#c9a227', '#9b1d20', '#f1e3c8', '#1b3a5c', '#e5e5e5', '#2d6a4f'] },
-  { id: 'vortex', maker: 'Vortex', name: 'LMP Prototyp', drive: 'RWD', top: 338, accel: 16.2, grip: 1.42, handling: 1.3, offroad: 0.02,
-    price: 420000, style: 'proto', colors: ['#00e5ff', '#111111', '#ff3d00', '#f2f2f2', '#6d5dfc', '#36e27a'] },
+    price: 110000, style: 'cabrio', colors: ['#c9a227', '#9b1d20', '#f1e3c8', '#1b3a5c', '#e5e5e5', '#2d6a4f'] },
+  { id: 'vortex', maker: 'Vortex', name: 'LMP Prototyp', drive: 'RWD', top: 318, accel: 16.2, grip: 1.42, handling: 1.3, offroad: 0.02,
+    price: 900000, style: 'proto', colors: ['#00e5ff', '#111111', '#ff3d00', '#f2f2f2', '#6d5dfc', '#36e27a'] },
 ];
 
 export const UPGRADES = [
@@ -108,11 +108,21 @@ export const UPGRADES = [
   { key: 'nitro', name: 'Nitro', desc: '+ mehr Nitro, schneller voll', cost: [3000, 7000, 15000] },
 ];
 
+// Festival-Level, ab dem ein Auto gekauft werden kann (Supersportler muss man sich erarbeiten)
+export function carLevel(spec) {
+  const p = spec.price;
+  return p >= 600000 ? 25 : p >= 350000 ? 18 : p >= 200000 ? 12 : p >= 100000 ? 7 : 1;
+}
+// Tuning kostet bei teuren Autos mehr (Kubo ≈ Grundpreis, Phantom ≈ 4×)
+export function upgradeCost(spec, u, lv) {
+  return Math.round(u.cost[lv] * (1 + spec.price / 250000) / 500) * 500;
+}
+
 export function carStats(spec, up = {}) {
   const m = up.motor || 0, r = up.reifen || 0, f = up.fahrwerk || 0, n = up.nitro || 0;
   return {
-    top: spec.top * (1 + 0.045 * m),
-    accel: spec.accel * (1 + 0.09 * m),
+    top: spec.top * (1 + 0.03 * m),
+    accel: spec.accel * (1 + 0.07 * m),
     grip: spec.grip * (1 + 0.055 * r),
     handling: spec.handling * (1 + 0.05 * f),
     offroad: spec.offroad,
@@ -166,6 +176,8 @@ export const EVENTS = [
   { id: 'r_kueste_s', type: 'race', name: 'Küstensprint', road: 'kueste', sprint: true, at: 0.3, to: 0.7, reward: 14000, fans: 1400, ai: 7 },
   { id: 'r_festival_x', type: 'race', name: 'Festival-Ausdauer', road: 'festival', laps: 6, at: 0.5, reward: 21000, fans: 2100, ai: 7 },
   { id: 'r_wald_x', type: 'race', name: 'Waldmarathon', road: 'wald', laps: 5, at: 0.5, reward: 19000, fans: 1900, ai: 5, dirt: true },
+  // Showcase: Duell gegen ein Kunstflugzeug, das über der Küstenstraße fliegt (kein KI-Feld)
+  { id: 'x_flieger', type: 'race', show: 'plane', name: 'Showcase: Kunstflieger', road: 'kueste', sprint: true, at: 0.08, to: 0.5, reward: 26000, fans: 2600, ai: 0 },
   { id: 't_markt', type: 'trap', name: 'Blitzer Marktstraße', road: 'markt', at: 0.55, stars: [100, 130, 160] },
   { id: 't_stadt', type: 'trap', name: 'Blitzer Altstadt', road: 'stadt', at: 0.62, stars: [110, 140, 170] },
   { id: 't_berg', type: 'trap', name: 'Blitzer Bergpfad', road: 'berg', at: 0.72, stars: [90, 120, 150] },
@@ -186,13 +198,13 @@ export const CHAMPS = [
   { id: 'c_d', name: 'Einsteiger-Pokal', cls: 'D', events: ['r_festival', 'r_see', 'r_stadt'], reward: 25000, fans: 2500, car: 'dune' },
   { id: 'c_dirt', name: 'Schotter-Meisterschaft', cls: 'C', dirt: true, events: ['r_berg', 'r_quer', 'r_wald'], reward: 40000, fans: 4000, car: 'atlas' },
   { id: 'c_c', name: 'Küsten-Serie', cls: 'C', events: ['r_schnell', 'r_pass', 'r_kueste_s'], reward: 45000, fans: 4500, car: 'regent' },
-  { id: 'c_b', name: 'B-Klasse Grand Prix', cls: 'B', events: ['r_stadt', 'r_kueste', 'r_festival_x'], reward: 80000, fans: 8000, car: 'gruppo' },
-  { id: 'c_s', name: 'Supersport-Trophäe', cls: 'S2', events: ['r_schnell', 'r_kueste_s', 'r_pass'], reward: 180000, fans: 15000, car: 'strato' },
-  { id: 'c_x', name: 'Festival-Legenden', cls: 'X', events: ['r_kueste', 'r_festival_x', 'r_wald_x'], reward: 400000, fans: 30000, car: 'phantom' },
+  { id: 'c_b', name: 'B-Klasse Grand Prix', cls: 'B', events: ['r_stadt', 'r_kueste', 'r_festival_x'], reward: 60000, fans: 8000, car: 'gruppo' },
+  { id: 'c_s', name: 'Supersport-Trophäe', cls: 'S2', events: ['r_schnell', 'r_kueste_s', 'r_pass'], reward: 100000, fans: 15000, car: 'strato' },
+  { id: 'c_x', name: 'Festival-Legenden', cls: 'X', events: ['r_kueste', 'r_festival_x', 'r_wald_x'], reward: 200000, fans: 30000, car: 'phantom' },
 ];
 
 // Scheunenfunde: seltene Autos, versteckt vor Scheunen auf der Insel (Reihenfolge = Fundorte von außen nach innen)
-export const BARN_CARS = ['vira', 'gruppo', 'strato', 'zephyra'];
+export const BARN_CARS = ['vira', 'gruppo', 'nordwind', 'zephyra']; // Scheunen: Klassiker bis Mittelklasse (keine Supersportler geschenkt)
 
 // Gebäude-Modelle (Maße wie in werkstatt/welt.py: w = Breite der Vorderseite, d = Tiefe, Vorderseite = +z)
 export const HOUSES = {
