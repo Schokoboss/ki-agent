@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bpy  # noqa: E402
 import bmesh  # noqa: E402
 import autos  # noqa: E402
-from autos import B, active, place, finish, box, cyl  # noqa: E402
+from autos import B, active, place, finish, box, cyl, ball  # noqa: E402
 
 OUT = sys.argv[sys.argv.index('--') + 1] if '--' in sys.argv else os.path.join(os.path.dirname(__file__), '..', 'models', 'welt')
 ONLY = sys.argv[sys.argv.index('--') + 2:] if '--' in sys.argv else []
@@ -718,6 +718,70 @@ def turbine():
     export([base, rot], 'turbine')
 
 
+def plane():
+    """Kunstflugzeug fürs Showcase-Rennen (eigenes Design): Tiefdecker mit Sternmotor-Haube, Festival-Lackierung.
+    Nase = +z. Der Propeller ist ein eigenes Objekt 'prop' (dreht sich im Spiel um die z-Achse)."""
+    reset()
+    paint = M('pbody', (0.95, 0.93, 0.9), 0.15, 0.35)
+    pink = M('ppink', (1.0, 0.18, 0.5), 0.1, 0.4)
+    violet = M('pviolet', (0.42, 0.33, 1.0), 0.1, 0.4)
+    dark = M('pdark', (0.08, 0.08, 0.1), 0.4, 0.4)
+    metal = M('pmetal', (0.75, 0.76, 0.78), 0.9, 0.25)
+    glass = M('pglass', (0.08, 0.14, 0.2), 0.6, 0.05)
+    # Rumpf: Querschnitte (z, Breite, Höhe unten, Höhe oben) – rund vorn, schlank zum Heck
+    secs = [(3.2, 0.62, -0.55, 0.55), (2.6, 0.7, -0.62, 0.62), (1.6, 0.68, -0.6, 0.66), (0.4, 0.62, -0.55, 0.7),
+            (-0.8, 0.52, -0.46, 0.62), (-2.2, 0.36, -0.3, 0.46), (-3.6, 0.2, -0.12, 0.34), (-4.6, 0.1, 0.02, 0.28)]
+    ring = 10
+    vs, fs = [], []
+    for z, w, lo, hi in secs:
+        for k in range(ring):
+            a = k / ring * math.pi * 2
+            y = (hi if math.sin(a) > 0 else -lo) * math.sin(a)
+            vs.append((math.cos(a) * w, 1.6 + y, z))
+    n = len(secs)
+    for i in range(n - 1):
+        for k in range(ring):
+            a, b = i * ring + k, i * ring + (k + 1) % ring
+            fs.append((a, b, b + ring, a + ring))
+    fs.append(tuple(range(ring)))
+    fs.append(tuple((n - 1) * ring + k for k in range(ring - 1, -1, -1)))
+    parts = [mesh('fuselage', vs, fs, paint, True)]
+    # Motorhaube und Spinner
+    parts.append(cyl((0, 1.6, 3.3), 0.64, 0.5, pink, (math.pi / 2, 0, 0), 20))
+    parts.append(cone((0, 1.6, 3.75), 0.2, 0.02, 0.5, metal, 12, (-math.pi / 2, 0, 0)))
+    # Tragflächen (leicht V-förmig, abgerundete Spitzen) mit Streifen
+    def wing(side):
+        s = side
+        v = [(s * 0.5, 1.15, 1.4), (s * 4.6, 1.42, 0.85), (s * 4.9, 1.44, 0.3), (s * 4.6, 1.42, -0.2), (s * 0.5, 1.15, -0.4)]
+        top = [(x, y + 0.07, z) for x, y, z in v]
+        verts = v + top
+        f = [(0, 1, 2, 3, 4)[::(-1 if s > 0 else 1)], (5, 6, 7, 8, 9)[::(1 if s > 0 else -1)]]
+        for k in range(5):
+            a, b = k, (k + 1) % 5
+            f.append((a, b, b + 5, a + 5) if s < 0 else (b, a, a + 5, b + 5))
+        w_ = mesh('wing', verts, f, paint)
+        stripe = mesh('wstripe', [(s * 3.6, 1.52, 0.98), (s * 4.3, 1.56, 0.86), (s * 4.3, 1.56, -0.15), (s * 3.6, 1.52, -0.25)],
+                      [(0, 1, 2, 3) if s < 0 else (3, 2, 1, 0)], pink)
+        return [w_, stripe]
+    parts += wing(1) + wing(-1)
+    # Leitwerk
+    parts.append(mesh('hstab', [(-1.7, 1.78, -3.7), (1.7, 1.78, -3.7), (1.5, 1.78, -4.35), (-1.5, 1.78, -4.35)], [(0, 1, 2, 3), (3, 2, 1, 0)], paint))
+    parts.append(mesh('fin', [(0, 1.85, -3.4), (0, 3.15, -4.15), (0, 3.15, -4.55), (0, 1.85, -4.7)], [(0, 1, 2, 3), (3, 2, 1, 0)], violet))
+    parts.append(mesh('finstripe', [(0.01, 2.6, -3.85), (0.01, 3.0, -4.08), (0.01, 3.0, -4.3), (0.01, 2.6, -4.3)], [(0, 1, 2, 3), (3, 2, 1, 0)], pink))
+    # Kanzel, Rumpfstreifen, Fahrwerk
+    parts.append(ball((0, 2.25, 0.2), (0.85, 0.7, 1.8), glass))
+    parts.append(box((0, 1.6, -1.2), (1.08, 0.12, 4.2), violet, bevel=0.0))
+    for s in (1, -1):
+        parts.append(box((s * 1.1, 0.75, 1.0), (0.12, 1.1, 0.3), dark, (0, 0, s * 0.25), bevel=0.02))
+        parts.append(cyl((s * 1.3, 0.3, 1.0), 0.3, 0.18, dark, (0, 0, math.pi / 2), 14))
+    body = join(parts, 'plane')
+    # Propeller: zwei Blätter
+    # zwei Blätter = ein durchgehender Balken durch die Nabe (Mitte = Drehachse)
+    prop = join([box((0, 0, 0), (0.22, 3.8, 0.05), dark, (0, 0, 0), bevel=0.0)], 'prop')
+    prop.location = B(0, 1.6, 3.95)
+    export([body, prop], 'plane')
+
+
 JOBS = {
     'pine_a': lambda: pine('pine_a', 5, 9.5, 2.3, 1),
     'pine_b': lambda: pine('pine_b', 7, 12.5, 2.0, 2),
@@ -738,7 +802,7 @@ JOBS = {
     'lamp': lamp, 'fence': fence, 'cone': cone_model, 'hay': hay, 'poster': poster, 'ramp': ramp,
     'stage': stage, 'tent': tent, 'ferris': ferris, 'arch': arch, 'tower': tower,
     'person_a': lambda: person('person_a', False), 'person_b': lambda: person('person_b', True),
-    'boat': boat, 'turbine': turbine,
+    'boat': boat, 'turbine': turbine, 'plane': plane,
 }
 
 if __name__ == '__main__':

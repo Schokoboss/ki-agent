@@ -2,15 +2,17 @@
 import * as THREE from '../lib/three.module.min.js';
 import { EVENTS, CARS, BARN_CARS, CHAMP_POINTS, carStats, rating } from './data.js';
 import { INTRO } from './cine.js';
-import { clamp, damp, fmtTime, fmtNum, mulberry32 } from './util.js';
+import { clamp, damp, lerp, fmtTime, fmtNum, mulberry32 } from './util.js';
 import { RaceAI, speedProfile } from './ai.js';
 import { carContact } from './physics.js';
 import { EVENT_COLORS } from './world.js';
 import { buildCar, disposeCar } from './carmodel.js';
 import { clock, Remote } from './net.js';
+import { clone as cloneModel } from './models.js';
 
 const ICONS = { race: '🏁', trap: '📷', drift: '〰', jump: '⚠', speed: '⏱' };
 const P = {};
+const smooth01 = x => { const t = Math.min(1, Math.max(0, x)); return t * t * (3 - 2 * t); };
 export const TYPE_NAMES = { race: 'Rennen', trap: 'Blitzer', drift: 'Driftzone', jump: 'Sprungschanze', speed: 'Tempozone' };
 const AI_NAMES = ['Mila', 'Jonas', 'Aylin', 'Ben', 'Sofia', 'Luca', 'Emre', 'Lea', 'Noah', 'Hanna', 'Finn', 'Yara'];
 
@@ -43,7 +45,7 @@ export class Skills {
     if (total > 0) {
       this.g.hud.skillBank(total);
       this.g.audio.play('bank');
-      this.g.reward(Math.round(total / 12), Math.round(total / 6), false);
+      this.g.reward(Math.round(total / 20), Math.round(total / 18), false);
       this.g.eco.track('skill', total);
     }
     this.points = 0; this.count = 0;
@@ -105,7 +107,7 @@ export class Events {
         // Anfahrt 40 m vor der Rampe
         ev.ax = ev.x - Math.sin(ev.yaw) * 45; ev.az = ev.z - Math.cos(ev.yaw) * 45;
       }
-      if (ev.type !== 'trap') ev.beacon = S.addBeacon(ev.type === 'jump' ? ev.ax : ev.x, ev.type === 'jump' ? ev.az : ev.z, EVENT_COLORS[ev.type], ICONS[ev.type]);
+      if (ev.type !== 'trap') ev.beacon = S.addBeacon(ev.type === 'jump' ? ev.ax : ev.x, ev.type === 'jump' ? ev.az : ev.z, ev.show ? '#ffb020' : EVENT_COLORS[ev.type], ev.show ? '✈' : ICONS[ev.type]);
       else ev.beacon = S.addBeacon(ev.x, ev.z, EVENT_COLORS.trap, ICONS.trap);
       this.list.push(ev);
     }
@@ -396,7 +398,7 @@ export class Events {
     this.cancelSide();
     let mp = opts.mp || null;
     const champ = opts.champ || null; // Meisterschaft: feste Gegner (Name/Auto) über alle Rennen der Serie
-    if (!mp && !ghost && !champ && g.net && g.net.active) mp = g.net.sendRace(ev, !!g.settings.mpAI);
+    if (!mp && !ghost && !champ && !ev.show && g.net && g.net.active) mp = g.net.sendRace(ev, !!g.settings.mpAI);
     const path = ev.path, st = g.car.stats;
     const sprint = !!ev.sprint;
     // Startaufstellung (2 Autos pro Reihe, 10 m Abstand) muss auf der Straße stehen: beginnt ein Sprint am
@@ -471,6 +473,7 @@ export class Events {
     race.grid = { x: g.car.pos.x, z: g.car.pos.z, yaw: g.car.yaw }; // bis zum Start hier festhalten
     race.prog = -10 - prow * 10; race.pS = ps;
     race.field = n + (mp ? Math.max(mp.ids.length, me + 1) : 1);
+    if (ev.show === 'plane') { this.makeRival(race); race.field += 1; }
     // Geist (nicht im Mehrspieler – da fahren echte Gegner)
     const gd = mp ? null : ghost || g.loadGhost(ev.id);
     if (gd) {
@@ -498,6 +501,7 @@ export class Events {
     const g = this.g, r = this.race;
     if (!r) return;
     for (const ai of r.ais) ai.dispose(g.scene);
+    if (r.rival && r.rival.model) g.scene.remove(r.rival.model); // Modell teilt Geometrie/Material mit der Vorlage
     if (g.raceLine) g.raceLine.hide();
     if (r.ghost) { g.scene.remove(r.ghost.model); r.ghost.model.traverse(o => { if (o.isMesh) o.material.dispose(); }); }
     for (const e of this.list) if (e.beacon) e.beacon.hidden = false;
@@ -572,6 +576,7 @@ export class Events {
       }
       if (r.started) collideAIs(r, r.mp ? g.net.cars() : null);
     } else this.mpPuppets(r, dt);
+    if (r.rival) this.updateRival(r, dt, bg);
     // Geist
     if (r.started && !r.finished && !bg) {
       r.recT = (r.recT || 0) + dt;
@@ -582,6 +587,7 @@ export class Events {
     let rank = 1;
     for (const a of r.ais) if (this.ahead(r, a.done ? a.finish : 0, a.prog, a.speed)) rank++;
     for (const h of r.humans.values()) if (!h.gone && this.ahead(r, h.fin || 0, h.prog, h.speed)) rank++;
+    if (r.rival && this.ahead(r, r.rival.done ? r.rival.finish : 0, r.rival.prog, r.rival.speed)) rank++;
     if (r.lastRank && rank < r.lastRank && r.started && !r.finished && !bg) g.skills.add('Überholt', 220 * (r.lastRank - rank));
     r.lastRank = rank; r.rank = rank;
     if (r.mp && r.shown) this.mpRefreshResults(dt);
@@ -592,6 +598,7 @@ export class Events {
       r.gapT = 0.25;
       let ah = null, be = null;
       const all = [...r.ais.filter(a => !a.done).map(a => ({ name: a.name, prog: a.prog })), ...[...r.humans.values()].filter(h => !h.fin && !h.gone).map(h => ({ name: h.name, prog: h.prog }))];
+      if (r.rival && !r.rival.done) all.push({ name: '✈ Kunstflieger', prog: r.rival.prog });
       for (const o of all) {
         if (o.prog > r.prog && (!ah || o.prog < ah.prog)) ah = o;
         if (o.prog <= r.prog && (!be || o.prog > be.prog)) be = o;
@@ -616,9 +623,78 @@ export class Events {
     r.rank = 1;
     for (const a of r.ais) if (this.ahead(r, a.done ? a.finish : 0, a.prog, a.speed)) r.rank++;
     for (const h of r.humans.values()) if (!h.gone && this.ahead(r, h.fin || 0, h.prog, h.speed)) r.rank++;
+    if (r.rival && this.ahead(r, r.rival.done ? r.rival.finish : 0, r.rival.prog, r.rival.speed)) r.rank++;
     g.audio.play('win');
     g.hud.countdown(r.rank === 1 ? 'SIEG!' : `${r.rank}. PLATZ`);
     g.confetti();
+  }
+
+  // ---------- Showcase: Kunstflieger über der Strecke
+  // Fliegt der Straße in ~20 m Höhe nach. Tempo = Kurvenprofil DEINES Autos × Schwierigkeit (passt sich also an
+  // jedes Auto an), dazu ein weiches Gummiband – auf den letzten 400 m nicht mehr: da zählt nur, wer schneller ist.
+  // Startet hinter dem Feld und donnert kurz nach dem Start über dich hinweg; zeigt auf Geraden Rollen.
+  makeRival(race) {
+    const m = cloneModel('plane');
+    const R = race.rival = {
+      name: '✈ Kunstflieger', spec: { maker: 'Festival', name: 'Kunstflieger „Nova Wing“' },
+      prog: -240 + race.t0 * 55, speed: 55, done: false, finish: Infinity, model: m, prop: null,
+      pos: new THREE.Vector3(), roll: 0, trick: 0, trickCool: 9, yaw: 0, pitch: 0, side: 0,
+    };
+    if (m) {
+      m.traverse(o => { if (o.name === 'prop') R.prop = o; });
+      this.g.scene.add(m);
+    }
+    this.placeRival(race, 0);
+  }
+  updateRival(r, dt, bg) {
+    const R = r.rival, path = r.path, g = this.g;
+    if (!r.started) { R.prog = -240 + r.t * 55; R.speed = 55; } // Anflug von hinten, gleichmäßig
+    else {
+      const at = s => r.prof[path.idx(Math.round(path.wrapS(r.startS + s) / path.ds))];
+      // Leicht/Normal/Schwer: Anteil des Kurvenprofils deines Autos (ein sehr guter Fahrer schafft ~93 %)
+      let k = [0.82, 0.875, 0.925][g.settings.difficulty ?? 1];
+      const gap = R.prog - r.prog, left = r.total - R.prog;
+      // Start: mit Schwung von hinten heran, tief über dich hinweg und vorbei – dann musst du ihn jagen
+      if (r.t < 14 && gap < 60) k *= 1.3;
+      else if (!R.done && left > 400) {
+        if (gap > 110) k *= clamp(1 - (gap - 110) * 0.0016, 0.84, 1);
+        else if (gap < -90) k *= clamp(1 + (-gap - 90) * 0.0022, 1, 1.18);
+      }
+      let v = 1e9; for (let d = 0; d <= 60; d += 15) v = Math.min(v, at(Math.max(0, R.prog) + d));
+      R.speed = damp(R.speed, clamp(v * k, 26, 82), 1.4, dt);
+      const before = R.prog;
+      R.prog += R.speed * dt;
+      if (!R.done && R.prog >= r.total) { R.done = true; R.finish = Math.round((r.t - (R.prog - r.total) / R.speed) * 1000) / 1000; }
+      // Überflug: kurzes Rauschen, wenn er über dich hinwegzieht
+      if (!bg && Math.sign(before - r.prog) !== Math.sign(R.prog - r.prog) && Math.abs(R.prog - r.prog) < 30) g.audio.play('whoosh');
+    }
+    // Kunststück: auf Geraden ab und zu eine Rolle
+    R.trickCool -= dt;
+    const curvHere = Math.abs(path.at(path.wrapS(r.startS + R.prog + 40), P).curv);
+    if (R.trick <= 0 && R.trickCool <= 0 && curvHere < 0.004) { R.trick = 1; R.trickCool = 10 + Math.random() * 8; }
+    if (R.trick > 0) R.trick = Math.max(0, R.trick - dt / 2.2);
+    if (R.prop) R.prop.rotation.z += dt * 55;
+    this.placeRival(r, dt);
+  }
+  placeRival(r, dt) {
+    const R = r.rival, path = r.path, W = this.g.world;
+    if (!R || !R.model) return;
+    const s = path.wrapS(r.startS + R.prog), p = path.at(s, P);
+    // tief beim Überflug am Start (spektakulär), danach in Reiseflughöhe
+    const lift = lerp(9, 20, smooth01((r.t - 6) / 8)) + 3 * Math.sin(r.t * 0.35);
+    const y = Math.max(p.y, W.heightAt(p.x, p.z)) + lift;
+    R.pos.set(p.x, y, p.z);
+    const yaw = Math.atan2(p.tx, p.tz);
+    // Schräglage aus Kurve und Tempo, weich nachgeführt; dazu die Rolle als ganze Umdrehung
+    // curv > 0 = Rechtskurve (Innenseite rechts); positive Drehung um die Längsachse hebt die linke Fläche
+    const bank = clamp(p.curv * R.speed * R.speed / 9.81 * 0.7, -1.0, 1.0);
+    R.roll = dt ? damp(R.roll, bank, 2.5, dt) : bank;
+    const trick = R.trick > 0 ? (1 - R.trick) * Math.PI * 2 * (R.trick < 1 ? 1 : 0) : 0;
+    R.model.position.copy(R.pos);
+    R.model.rotation.set(0, 0, 0);
+    R.model.rotation.order = 'YXZ';
+    R.model.rotation.set(-0.04, yaw, R.roll + trick);
+    R.model.visible = Math.abs(R.prog - r.prog) < 1400;
   }
 
   // Steht ein anderer vor mir? fin = seine Zielzeit (0 = noch nicht im Ziel), prog/v = Fortschritt und Tempo jetzt.
@@ -739,6 +815,10 @@ export class Events {
         if (!isFinite(t)) t = r.t + Math.max(0, r.total - ai.prog) / Math.max(8, ai.speed * 0.95);
         rows.push({ name: ai.name, time: t, car: ai.spec });
       }
+      if (r.rival) {
+        const R = r.rival;
+        rows.push({ name: R.name, time: R.done ? R.finish : r.t + Math.max(0, r.total - R.prog) / Math.max(20, R.speed), car: R.spec });
+      }
       rows.sort((a, b) => (a.time === b.time ? 0 : a.time - b.time));
     }
     const pos = rows.findIndex(x => x.me) + 1;
@@ -753,7 +833,7 @@ export class Events {
     const best = g.save.best[ev.id];
     const isBest = !best || r.finishT < best;
     if (isBest) { g.save.best[ev.id] = r.finishT; g.saveGhost(ev.id, r.ghostRec, r.finishT); }
-    const stars = pos === 1 ? 3 : pos <= 3 ? 2 : 1;
+    const stars = pos === 1 ? 3 : pos <= 3 && !ev.show ? 2 : 1; // Showcase: nur Sieg zählt
     g.save.stats.races++;
     g.eco.weekly('race', { ev: ev.id, pos, cls: g.carClassOf(), champ: !!r.champ });
     if (g.tutEvent) g.tutEvent('finish');

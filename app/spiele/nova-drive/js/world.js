@@ -9,6 +9,8 @@ import { has, merged, clone, nodeGeometry, meshOf, scene as modelScene } from '.
 const lin = v => Math.pow(v, 2.2);
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
 const _c = new THREE.Color();
+// Wildblumen: Weiß, Gelb, Violett, Mohnrot, Himmelblau, Rosa
+const FLOWER_COLS = [0xf4f1e8, 0xf6d23c, 0x9c6ad6, 0xd8342c, 0x6fa8f0, 0xf08cc0, 0xf6d23c, 0xf4f1e8];
 // GLSL-Baustein gegen sichtbare Textur-Kacheln (Gelände & Straßen)
 const AT_GLSL = `
 // Gegen sichtbare Kacheln: zwei versetzte Lesungen, gemischt über eine weiche Rauschkarte (wechselt alle paar Meter)
@@ -268,6 +270,7 @@ export class Scenery {
     if (this.facadeMat) this.facadeMat.emissiveIntensity = this.night * 1.4;
     if (this.winLitMat) this.winLitMat.emissiveIntensity = this.night * 1.3;
     if (this.lampHeadMat) { this.lampHeadMat.color.set(this.night > 0.3 ? 0xfff0c0 : 0x9a9a9a); if (this.q >= 3 && this.night > 0.3) this.lampHeadMat.color.multiplyScalar(2.4); }
+    if (this.poolMat) { const on = smoothstep(0.25, 0.6, this.night); this.poolMat.uniforms.uOn.value = on; this.lampPools.visible = on > 0.01; }
     if (this.ledMat && this.q >= 3) this.ledMat.color.setScalar(1.25 + this.night * 0.9);
     // ShaderMaterial liest nur seine Uniforms (material.opacity wirkte hier nie → Lichthöfe leuchteten auch tagsüber)
     if (this.glowMat) this.glowMat.uniforms.opacity.value = this.night * (this.q >= 3 ? 0.5 : 0.9);
@@ -468,6 +471,11 @@ export class Scenery {
           vec2 uG1 = vTW.xz * ${S.g1}, uG2 = vTW.xz * ${S.g2}, uF1 = vTW.xz * 0.3;
           vec3 g1 = atTex(tGrass, uG1), g2 = atTex(tGrass, uG2);
           vec3 grass = mix(mix(g1, g2, 0.35), g2, far);
+          // große Flecken: saftig-dunkel ↔ trocken-gelblich (gleiches Muster wie die Grasbüschel darauf)
+          float patchM = sin(vTW.x * 0.021 + sin(vTW.z * 0.013) * 2.0) * cos(vTW.z * 0.017 - vTW.x * 0.006);
+          float nzM = uAT > 0.5 ? texture2D(tNoiseAT, vTW.xz * 0.0045).x - 0.5 : 0.0;
+          float dryK = clamp(patchM * 0.5 + nzM * 0.7, -0.6, 0.7);
+          grass *= dryK > 0.0 ? mix(vec3(1.0), vec3(1.16, 1.05, 0.72), dryK) : mix(vec3(1.0), vec3(0.8, 0.95, 0.82), -dryK);
           // Waldboden (Laub, Nadeln, Moos) unter den Bäumen – Dichte aus den Baumstandorten
           float dens = texture2D(tDens, (vTW.xz + uIsl) / (2.0 * uIsl)).r;
           vec3 forest = mix(atTex(tForest, uF1), texture2D(tForest, vTW.xz * 0.045).rgb, far * 0.8) * vec3(1.22, 0.98, 0.8);
@@ -807,18 +815,20 @@ export class Scenery {
     this.lampHeadMat = new THREE.MeshBasicMaterial({ color: 0x9a9a9a });
     const ih = new THREE.InstancedMesh(head, this.lampHeadMat, L.length);
     L.forEach((l, i) => {
-      _q.setFromEuler(_e.set(0, l.yaw, 0));
+      const yaw = l.yaw + Math.PI; // Arm zur Straße
+      _q.setFromEuler(_e.set(0, yaw, 0));
       _m.compose(_p.set(l.x, l.y, l.z), _q, _s.set(1, 1, 1));
       im.setMatrixAt(i, _m);
-      const hx = l.x + Math.sin(l.yaw) * 1.7, hz = l.z + Math.cos(l.yaw) * 1.7;
+      const hx = l.x + Math.sin(yaw) * 1.7, hz = l.z + Math.cos(yaw) * 1.7;
       _m.compose(_p.set(hx, l.y + 7.3, hz), _q, _s.set(1, 1, 1));
       ih.setMatrixAt(i, _m);
-      this.glowPts.push([hx, l.y + 7.1, hz, 1.0, 0.85, 0.55, 9]);
+      this.glowPts.push([hx, l.y + 7.1, hz, 1.0, 0.85, 0.55, 6]);
     });
     im.computeBoundingSphere(); ih.computeBoundingSphere();
     im.castShadow = this.q >= 2;
     im.userData.chunk = ih.userData.chunk = 500;
     this.scene.add(im, ih);
+    this.buildLampPools(L);
   }
 
   // ---------------------------------------------------------------- Festival
@@ -1427,12 +1437,50 @@ export class Scenery {
     L.forEach((l, i) => {
       _m.compose(_p.set(l.x, l.y, l.z), _q.setFromEuler(_e.set(0, l.yaw + Math.PI, 0)), _s.set(1, 1, 1));
       im.setMatrixAt(i, _m); ih.setMatrixAt(i, _m);
-      this.glowPts.push([l.x + Math.sin(l.yaw) * 1.9, l.y + 8.35, l.z + Math.cos(l.yaw) * 1.9, 1.0, 0.85, 0.55, 10]);
+      // Arm zeigt zur Straße (Modell um 180° gedreht, yaw zeigt von der Straße weg)
+      this.glowPts.push([l.x - Math.sin(l.yaw) * 1.9, l.y + 8.35, l.z - Math.cos(l.yaw) * 1.9, 1.0, 0.85, 0.55, 6.5]);
     });
     im.computeBoundingSphere(); ih.computeBoundingSphere();
     im.castShadow = this.q >= 1;
     im.userData.chunk = ih.userData.chunk = 500; im.userData.chunkCell = ih.userData.chunkCell = 400;
     this.scene.add(im, ih);
+    this.buildLampPools(L);
+  }
+
+  // Lichtkegel der Laternen auf Straße und Boden (nachts): je Laterne ein kleines, dem Gelände folgendes Netz unter
+  // dem Leuchtkopf mit weichem, warmem Licht – addiert, ohne Tiefe zu schreiben
+  buildLampPools(L) {
+    const W = this.world, R = 9.5, n = 8, pos = [], uv = [], idx = [];
+    for (const l of L) {
+      const cx = l.x - Math.sin(l.yaw) * 3.2, cz = l.z - Math.cos(l.yaw) * 3.2, base = pos.length / 3; // unter dem Leuchtkopf, zur Straße
+      for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) {
+        const u = i / n, v = j / n, x = cx + (u - 0.5) * 2 * R, z = cz + (v - 0.5) * 2 * R;
+        pos.push(x, W.heightAt(x, z) + 0.07, z); uv.push(u, v);
+      }
+      for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+        const a = base + j * (n + 1) + i, b = a + 1, c = a + n + 1, d = c + 1;
+        idx.push(a, c, b, b, c, d);
+      }
+    }
+    if (!pos.length) return;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    g.computeBoundingSphere();
+    this.poolMat = new THREE.ShaderMaterial({
+      uniforms: { uOn: { value: 0 }, uCol: { value: new THREE.Color(1.0, 0.78, 0.46) } },
+      vertexShader: 'varying vec2 vUv; varying float vD; void main(){ vUv = uv; vec4 mv = modelViewMatrix * vec4(position, 1.0); vD = -mv.z; gl_Position = projectionMatrix * mv; }',
+      fragmentShader: `uniform float uOn; uniform vec3 uCol; varying vec2 vUv; varying float vD;
+        void main(){ float d = length(vUv - 0.5) * 2.0; float a = pow(max(0.0, 1.0 - d), 1.8);
+          a *= uOn * (1.0 - smoothstep(180.0, 420.0, vD));
+          gl_FragColor = vec4(uCol * a * 0.42, 1.0); }`,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
+    });
+    const m = this.lampPools = new THREE.Mesh(g, this.poolMat);
+    const on = smoothstep(0.25, 0.6, this.night || 0);
+    this.poolMat.uniforms.uOn.value = on; m.visible = on > 0.01; m.renderOrder = 2; m.userData.noAO = true;
+    this.scene.add(m);
   }
 
   buildFestivalM() {
@@ -1574,38 +1622,84 @@ export class Scenery {
   }
 
   // ---------- Gras rund um die Kamera (Hoch/Ultra)
+  // Büschel aus feinen, gebogenen Halmen (je 3 Dreiecke: unten breit, Mitte schmaler, Spitze), unten dunkel (Schatten
+  // im Büschel), oben hell; einzelne Halme strohig. Dazu Wildblumen (Stängel + Blüte, Blütenfarbe je Pflanze).
   buildGrass() {
     if (this.q < 2) return;
     const max = this.q >= 4 ? 19000 : this.q >= 3 ? 11000 : 5000;
+    const rnd = mulberry32(4242);
     const pos = [], col = [];
-    const base = new THREE.Color(0.16, 0.32, 0.07), tip = new THREE.Color(0.5, 0.68, 0.22);
-    for (let k = 0; k < 7; k++) {
-      const a = k / 7 * Math.PI * 2 + Math.random() * 0.4, r = 0.12 + Math.random() * 0.2;
-      const bx = Math.cos(a) * r, bz = Math.sin(a) * r, h = 0.35 + Math.random() * 0.35, w = 0.05;
-      const lx = Math.cos(a + 1.57) * w, lz = Math.sin(a + 1.57) * w, lean = 0.12 + Math.random() * 0.1;
-      pos.push(bx - lx, 0, bz - lz, bx + lx, 0, bz + lz, bx + Math.cos(a) * lean, h, bz + Math.sin(a) * lean);
-      col.push(base.r, base.g, base.b, base.r, base.g, base.b, tip.r, tip.g, tip.b);
+    const nBl = this.q >= 4 ? 16 : this.q >= 3 ? 11 : 8; // Halme je Büschel (je 3 Dreiecke) – Handy-tauglich
+    const C = (r, g, b) => [r, g, b];
+    for (let k = 0; k < nBl; k++) {
+      const a = rnd() * Math.PI * 2, r = Math.sqrt(rnd()) * 0.26;
+      const bx = Math.cos(a) * r, bz = Math.sin(a) * r;
+      const h = 0.22 + rnd() * 0.42, w = 0.018 + rnd() * 0.016;
+      const face = rnd() * Math.PI, fx = Math.cos(face) * w, fz = Math.sin(face) * w;
+      // nach außen geneigt und gebogen (Mitte wenig, Spitze viel)
+      const lean = (0.08 + rnd() * 0.16) * (0.6 + r * 2), lx = Math.cos(a) * lean, lz = Math.sin(a) * lean;
+      const dry = rnd() < 0.12;
+      const cb = dry ? C(0.2, 0.2, 0.08) : C(0.07, 0.15, 0.03), cm = dry ? C(0.52, 0.48, 0.24) : C(0.22, 0.4, 0.09), ct = dry ? C(0.78, 0.7, 0.4) : C(0.5, 0.68, 0.22);
+      const m = 0.5, mx = bx + lx * 0.3, mz = bz + lz * 0.3;
+      const B0 = [bx - fx, 0, bz - fz], B1 = [bx + fx, 0, bz + fz], M0 = [mx - fx * 0.7, h * m, mz - fz * 0.7], M1 = [mx + fx * 0.7, h * m, mz + fz * 0.7], T = [bx + lx, h, bz + lz];
+      pos.push(...B0, ...B1, ...M1, ...B0, ...M1, ...M0, ...M0, ...M1, ...T);
+      col.push(...cb, ...cb, ...cm, ...cb, ...cm, ...cm, ...cm, ...cm, ...ct);
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    g.computeVertexNormals();
-    for (let i = 0; i < g.attributes.normal.count; i++) g.attributes.normal.setXYZ(i, 0, 1, 0);
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(new Float32Array(pos.length).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
     const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
     this.grassU = { uTime: { value: 0 } };
-    mat.onBeforeCompile = sh => {
+    const wind = sh => {
       sh.uniforms.uTime = this.grassU.uTime;
       sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
         #ifdef USE_INSTANCING
         float ph = instanceMatrix[3].x * 0.21 + instanceMatrix[3].z * 0.17;
-        transformed.x += sin(uTime * 2.1 + ph) * 0.09 * position.y;
-        transformed.z += cos(uTime * 1.7 + ph) * 0.07 * position.y;
+        // Böen wandern übers Feld (lange Welle) + kleines Zittern; biegt mit dem Quadrat der Höhe (Spitzen am meisten)
+        float gust = 0.6 + 0.4 * sin(uTime * 0.7 + instanceMatrix[3].x * 0.05 + instanceMatrix[3].z * 0.03);
+        float bend = position.y * position.y * 2.2;
+        transformed.x += (sin(uTime * 2.1 + ph) * 0.05 + 0.06 * gust) * bend;
+        transformed.z += cos(uTime * 1.7 + ph) * 0.05 * bend;
         #endif`);
+      // beidseitig gleich hell (sonst wird die Rückseite eines Halms mit nach unten gedrehter Normale dunkel)
+      sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n normal = normalize(vNormal);');
     };
+    mat.onBeforeCompile = wind;
+    mat.customProgramCacheKey = () => 'nova-grass';
     const im = new THREE.InstancedMesh(g, mat, max);
     im.count = 0; im.frustumCulled = false; im.receiveShadow = true;
+    im.userData.noAO = true;
     this.scene.add(im);
-    this.grass = { im, max, cx: 1e9, cz: 1e9, R: this.q >= 4 ? 100 : this.q >= 3 ? 78 : 55, step: this.q >= 4 ? 1.2 : this.q >= 3 ? 1.35 : 1.6 };
+    // Wildblumen: 3–4 Stängel mit kleinen Blüten (über Kreuz, von oben sichtbar); nur die Blüten nehmen die Farbe an
+    const fp = [], fc = [], fpet = [];
+    for (let k = 0; k < 4; k++) {
+      const a = rnd() * 6.28, r = rnd() * 0.16, x = Math.cos(a) * r, z = Math.sin(a) * r, h = 0.3 + rnd() * 0.25, s = 0.055 + rnd() * 0.03;
+      const st = [[x - 0.006, 0, z], [x + 0.006, 0, z], [x, h, z]];
+      for (const v of st) { fp.push(...v); fc.push(0.15, 0.32, 0.08); fpet.push(0); }
+      const quad = (ax, az) => { const P = [[x - ax, h, z - az], [x + ax, h, z + az], [x + az, h + 0.01, z - ax], [x - ax, h, z - az], [x - az, h + 0.01, z + ax], [x + ax, h, z + az]];
+        for (const v of P) { fp.push(...v); fc.push(1, 1, 1); fpet.push(1); } };
+      quad(s, 0); quad(s * 0.7, s * 0.7);
+    }
+    const fg = new THREE.BufferGeometry();
+    fg.setAttribute('position', new THREE.Float32BufferAttribute(fp, 3));
+    fg.setAttribute('color', new THREE.Float32BufferAttribute(fc, 3));
+    fg.setAttribute('aPetal', new THREE.Float32BufferAttribute(fpet, 1));
+    fg.setAttribute('normal', new THREE.Float32BufferAttribute(new Float32Array(fp.length).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
+    const fm = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+    fm.onBeforeCompile = sh => {
+      wind(sh);
+      sh.vertexShader = 'attribute float aPetal;\n' + sh.vertexShader.replace('#include <color_vertex>', `vColor = vec3(1.0); vColor *= color;
+        #ifdef USE_INSTANCING_COLOR
+        vColor.xyz *= mix(vec3(1.0), instanceColor.xyz, aPetal);
+        #endif`);
+    };
+    fm.customProgramCacheKey = () => 'nova-flower';
+    const fmax = Math.round(max * 0.09);
+    const fim = new THREE.InstancedMesh(fg, fm, fmax);
+    fim.count = 0; fim.frustumCulled = false; fim.receiveShadow = true; fim.userData.noAO = true;
+    this.scene.add(fim);
+    this.grass = { im, max, fim, fmax, cx: 1e9, cz: 1e9, R: this.q >= 4 ? 100 : this.q >= 3 ? 78 : 55, step: this.q >= 4 ? 1.2 : this.q >= 3 ? 1.35 : 1.6 };
   }
   // Gras um die Kamera neu verteilen – in Häppchen von max. ~2 ms pro Bild (vorher ein Stück, das bei Tempo ruckelte)
   updateGrass(cam, t) {
@@ -1615,7 +1709,7 @@ export class Scenery {
     const W = this.world, R = G.R, st = G.step, im = G.im;
     if (!G.job && Math.hypot(cam.x - G.cx, cam.z - G.cz) >= 14) {
       G.cx = cam.x; G.cz = cam.z;
-      G.job = { x: cam.x, z: cam.z, i0: Math.floor((cam.x - R) / st), i1: Math.ceil((cam.x + R) / st), j: Math.floor((cam.z - R) / st), j1: Math.ceil((cam.z + R) / st), n: 0 };
+      G.job = { x: cam.x, z: cam.z, i0: Math.floor((cam.x - R) / st), i1: Math.ceil((cam.x + R) / st), j: Math.floor((cam.z - R) / st), j1: Math.ceil((cam.z + R) / st), n: 0, nf: 0 };
     }
     const J = G.job;
     if (!J) return;
@@ -1635,9 +1729,19 @@ export class Scenery {
         const sc = (0.7 + rnd() * 0.8) * (1 - d / R * 0.35);
         _m.compose(_p.set(x, y - 0.03, z), _q.setFromEuler(_e.set(0, rnd() * 6.28, 0)), _s.set(sc, sc * (0.8 + rnd() * 0.6), sc));
         im.setMatrixAt(J.n, _m);
-        const v = 0.75 + rnd() * 0.45, dry = rnd() < 0.15 ? 0.25 : 0;
-        im.setColorAt(J.n, _c.setRGB(v + dry, v + dry * 0.6, v * (1 - dry)));
+        // Farbe in großen Flecken (saftig ↔ trocken) wie die Wiese darunter, dazu etwas Streuung je Büschel
+        const patch = Math.sin(x * 0.021 + Math.sin(z * 0.013) * 2) * Math.cos(z * 0.017 - x * 0.006);
+        const v = 0.78 + rnd() * 0.4, dry = Math.max(0, patch * 0.5 + (rnd() - 0.5) * 0.25) * 0.55;
+        im.setColorAt(J.n, _c.setRGB(v + dry, v + dry * 0.55, v * (1 - dry * 0.8)));
         J.n++;
+        // Wildblumen in Gruppen (Blumenwiesen dort, wo es saftig ist)
+        if (J.nf < G.fmax && rnd() < 0.05 + Math.max(0, -patch) * 0.12) {
+          const fs = 0.8 + rnd() * 0.5;
+          _m.compose(_p.set(x + 0.3, y - 0.03, z - 0.2), _q.setFromEuler(_e.set(0, rnd() * 6.28, 0)), _s.set(fs, fs, fs));
+          G.fim.setMatrixAt(J.nf, _m);
+          G.fim.setColorAt(J.nf, _c.set(FLOWER_COLS[Math.floor(rnd() * FLOWER_COLS.length)]));
+          J.nf++;
+        }
       }
       if (performance.now() - t0 > budget) { J.j++; break; }
     }
@@ -1645,6 +1749,10 @@ export class Scenery {
     im.count = done ? J.n : Math.max(im.count, J.n);
     im.instanceMatrix.needsUpdate = true;
     if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    const fim = G.fim;
+    fim.count = done ? J.nf : Math.max(fim.count, J.nf);
+    fim.instanceMatrix.needsUpdate = true;
+    if (fim.instanceColor) fim.instanceColor.needsUpdate = true;
     if (done) G.job = null;
   }
 

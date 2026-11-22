@@ -260,7 +260,7 @@ export class HUD {
     $('prompt-type').textContent = TYPE_NAMES[ev.type] + (ev.dirt ? ' · Schotter' : '');
     $('prompt-name').textContent = ev.name;
     const len = ev.sprint ? (ev.to - ev.at) * ev.path.length : ev.laps * ev.path.length;
-    $('prompt-info').textContent = `${ev.sprint ? 'Sprint' : ev.laps + ' Runden'} · ${(len / 1000).toFixed(1)} km · ${ev.ai} Gegner`;
+    $('prompt-info').textContent = `${ev.sprint ? 'Sprint' : ev.laps + ' Runden'} · ${(len / 1000).toFixed(1)} km · ${ev.show ? 'gegen den Kunstflieger' : ev.ai + ' Gegner'}`;
     const best = this.g.save.best[ev.id];
     $('prompt-best').textContent = best ? 'Bestzeit ' + fmtTime(best) : 'Noch nicht gefahren';
     p.dataset.id = ev.id;

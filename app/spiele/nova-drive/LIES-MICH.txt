@@ -68,6 +68,12 @@ Lenkrad
   Force-Feedback gibt es im Browser leider nicht.
   Am Handy: Einstellungen → Lenkung → „Lenkrad“ – Touch-Lenkrad unten links, am Kranz greifen und drehen.
 
+Showcase und Fortschritt
+-----------------------
+  ✈ Showcase „Kunstflieger“ (Küstenstraße): Rennen gegen ein Kunstflugzeug über der Straße – nur ein Sieg zählt.
+  Die schnellsten Autos gibt es erst ab einem Festival-Level (Garage zeigt „🔒 ab Level …“). Level steigen durch
+  Fans aus Rennen, Skill-Ketten, Aufgaben und Erfolgen; alle 5 Level gibt es einen Glücksrad-Dreh.
+
 Neu: Tempozonen und Scheunenfunde
 ---------------------------------
   Tempozone (⏱ auf der Karte): an der Lichtsäule durchfahren, dann zählt der Schnitt bis zum Ziel.

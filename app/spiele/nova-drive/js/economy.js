@@ -1,6 +1,6 @@
 // Geld & Co.: Tagesbonus, Tagesaufgaben, Glücksrad, Statistik, Verkaufswert.
 // Alles reine Spielwährung – es gibt keine Käufe mit echtem Geld.
-import { CARS, UPGRADES, EVENTS, CLASS_ORDER } from './data.js';
+import { CARS, UPGRADES, EVENTS, CLASS_ORDER, upgradeCost } from './data.js';
 import { mulberry32, fmtNum, clamp } from './util.js';
 
 const TASKS = [
@@ -17,17 +17,19 @@ const TASKS = [
   { type: 'skill', text: n => `Sichere eine Skill-Kette über ${fmtNum(n)}`, vals: [3000, 6000, 10000], cr: 9000, max: true },
 ];
 
-// Glücksrad: Segmentgröße = Wahrscheinlichkeit (ehrlich)
+// Glücksrad: Segmentgröße = Wahrscheinlichkeit (ehrlich). Im Schnitt ~7.500 CR je Dreh (vorher ~17.500);
+// als Auto gibt es nur Einsteiger- und Mittelklasse-Autos bis 60.000 CR.
 export const PRIZES = [
-  { label: '5.000', cr: 5000, w: 22, color: '#3fb8f0' },
-  { label: '10.000', cr: 10000, w: 19, color: '#7a6bff' },
-  { label: '+1.500 Fans', fans: 1500, w: 13, color: '#36e27a' },
-  { label: '15.000', cr: 15000, w: 15, color: '#ff8a00' },
-  { label: '25.000', cr: 25000, w: 11, color: '#ff3d7f' },
-  { label: 'AUTO!', car: true, w: 6, color: '#ffd23f' },
-  { label: '50.000', cr: 50000, w: 9, color: '#b84dff' },
-  { label: '100.000', cr: 100000, w: 5, color: '#ff3b3b' },
+  { label: '2.000', cr: 2000, w: 24, color: '#3fb8f0' },
+  { label: '4.000', cr: 4000, w: 22, color: '#7a6bff' },
+  { label: '+800 Fans', fans: 800, w: 14, color: '#36e27a' },
+  { label: '7.500', cr: 7500, w: 16, color: '#ff8a00' },
+  { label: '12.000', cr: 12000, w: 10, color: '#ff3d7f' },
+  { label: 'AUTO!', car: true, w: 3, color: '#ffd23f' },
+  { label: '25.000', cr: 25000, w: 7, color: '#b84dff' },
+  { label: '50.000', cr: 50000, w: 4, color: '#ff3b3b' },
 ];
+const WHEEL_CAR_MAX = 60000;
 
 // Kalenderwoche (ISO) als Schlüssel, z. B. „2026-W47“, und Tage bis Montag
 export function weekKey(d = new Date()) {
@@ -194,8 +196,8 @@ export class Economy {
     const p = PRIZES[i], g = this.g, s = g.save;
     s.stats.spins++;
     if (p.car) {
-      const free = CARS.filter(c => !s.owned[c.id]);
-      if (!free.length) { g.reward(150000, 0, false); return { title: 'Alle Autos schon da!', value: '+150.000 CR' }; }
+      const free = CARS.filter(c => !s.owned[c.id] && c.price <= WHEEL_CAR_MAX);
+      if (!free.length) { g.reward(25000, 0, false); return { title: 'Alle Rad-Autos schon da!', value: '+25.000 CR' }; }
       // günstigere Autos sind wahrscheinlicher
       const w = free.map(c => 1 / Math.sqrt(c.price));
       let r = Math.random() * w.reduce((a, b) => a + b, 0), car = free[0];
@@ -214,13 +216,13 @@ export class Economy {
     const c = CARS.find(x => x.id === id), own = this.g.save.owned[id];
     if (!c || !own) return 0;
     let up = 0;
-    for (const u of UPGRADES) for (let l = 0; l < (own.up[u.key] || 0); l++) up += u.cost[l];
-    return Math.round((c.price * 0.6 + up * 0.5) / 100) * 100;
+    for (const u of UPGRADES) for (let l = 0; l < (own.up[u.key] || 0); l++) up += upgradeCost(c, u, l);
+    return Math.round((c.price * 0.5 + up * 0.4) / 100) * 100;
   }
 
   // ---------- Rennen: Auszahlung aufschlüsseln
   racePayout(ev, pos, crashes, difficulty) {
-    const f = [1, 0.7, 0.5, 0.36, 0.27, 0.2, 0.15, 0.1][pos - 1] || 0.1;
+    const f = ev.show ? (pos === 1 ? 1 : 0.25) : [1, 0.7, 0.5, 0.36, 0.27, 0.2, 0.15, 0.1][pos - 1] || 0.1; // Showcase: Zweikampf
     const base = Math.round(ev.reward * f / 100) * 100;
     const lines = [[`${pos}. Platz`, base]];
     const clean = crashes === 0 ? Math.round(base * 0.2 / 100) * 100 : 0;

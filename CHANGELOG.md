@@ -2,6 +2,34 @@
 
 Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 
+## 22.11.2026
+- **Nova Drive: Balance – die besten Autos muss man sich erarbeiten** (Rückmeldung: Glücksrad, Levelaufstiege usw.
+  waren zu großzügig, Top-Autos zu schnell zu haben):
+  - Glücksrad: im Schnitt ~7.700 CR je Dreh statt ~17.500; „AUTO!“ seltener (3 % statt 6 %) und nur noch Autos bis
+    60.000 CR (vorher konnte der Phantom herauskommen).
+  - Festival-Level: mehr Fans je Level (1.200 + 450 × Level statt 1.000 + 260 × Level); Bonus 1.000 + 250 × Level
+    statt 1.500 × Level; Glücksrad-Dreh nur noch alle 5 Level (Level 1→12: 2 Drehs + 30.000 CR statt 11 Drehs +
+    115.000 CR). Fans aus Skill-Ketten (÷18 statt ÷6) und Erfolgen (÷30 statt ÷10) gesenkt, große Erfolgs-Prämien
+    etwa halbiert.
+  - Top-Autos teurer und erst ab Festival-Level kaufbar: ab Level 7 (Zephyra, Gruppo), 12 (Aurum 240.000), 18
+    (Strato 380.000, Volt 450.000), 25 (Phantom 750.000, Vortex 900.000); Garage zeigt „🔒 ab Level X“, beim
+    Aufstieg meldet das Spiel neu kaufbare Autos.
+  - Tuning kostet bei teuren Autos mehr (Phantom komplett ~550.000 statt 135.000); Motor-Tuning bringt +3 % Spitze
+    je Stufe statt +4,5 %. Hypercars etwas langsamer (Phantom 325, Vortex 318, Strato 290, Volt 285, Aurum 278 km/h).
+  - Scheunenfund Strato → Nordwind Kombi R; Meisterschafts-Preisgelder für B/S/X gesenkt; Doppel-Gewinn eines
+    vorhandenen Autos zahlt höchstens 60.000 CR. Schon gekaufte Autos und Guthaben bleiben unverändert.
+- **Neu: Showcase „Kunstflieger“** (✈ an der Küstenstraße): Duell gegen ein Kunstflugzeug (eigenes Blender-Modell
+  mit drehendem Propeller), das der Straße in ~20 m Höhe folgt. Es donnert kurz nach dem Start im Tiefflug über dich
+  hinweg und zieht davon; sein Tempo richtet sich nach deinem Auto und der Schwierigkeit, auf den letzten 400 m ohne
+  Gummiband. Schräglage in Kurven, Rollen auf Geraden, Rauschen beim Überflug; Zurückspulen nimmt es mit.
+  Sieg 26.000 CR, sonst ein Viertel.
+- **Grafik**: Gras aus feinen, gebogenen Halmen (statt breiter „Agaven“-Büschel), unten dunkler, mit strohigen Halmen
+  und wandernden Windböen; Wildblumen in sechs Farben; Wiesen mit großen saftigen und trockenen Flecken. Spiegelungen
+  aus einem gemalten Rundum-Himmel mit Wolken und dunkler Baum-/Hügelkante am Horizont (Lack, Scheiben, nasse
+  Straße glänzen sichtbarer). Nachts werfen Laternen Lichtkegel auf Straße und Boden.
+- Fehler behoben: Der Leuchtschein der Laternen saß hinter dem Mast statt am Leuchtkopf über der Straße (und war
+  übergroß); bei den einfachen Laternen zeigte der Arm von der Straße weg.
+
 ## 21.11.2026
 - **Nova Drive Mehrspieler: gleiche Plätze und Zeiten auf allen Geräten.** Vorher startete jedes Gerät seine
   Rennuhr, wenn die Startnachricht ankam (je nach Netz Zehntel bis Sekunden versetzt), rechnete die KI-Gegner selbst
