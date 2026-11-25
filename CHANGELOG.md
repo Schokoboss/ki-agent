@@ -2,6 +2,11 @@
 
 Neueste Änderungen oben. Jede Zeile mit Hash ist ein Commit im Repo.
 
+## 25.11.2026
+- **Nova Lauf** (`handy-lauf/`): eigene Android-App, die in Roblox den Joystick nach vorne hält (wie W gedrückt
+  halten) – schwebender Knopf im Spiel, Joystick-Platz einstellbar, Schutz gegen AFK-Kick, stoppt beim App-Wechsel.
+  GitHub baut die APK automatisch (`.github/workflows/handy-lauf-apk.yml`), Download unter Releases → `nova-lauf`.
+
 ## 04.11.2026
 - Startseite: Karte „Zum Startbildschirm hinzufügen“ (Installieren-Knopf, wo der Browser ihn anbietet).
 - Pausen im Zeit-Modus können nie negativ werden (Schutz gegen Uhr-Sprünge).

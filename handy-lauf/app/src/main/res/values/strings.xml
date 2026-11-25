@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Nova Lauf</string>
+    <string name="dienst_beschreibung">Hält in Roblox den Joystick nach vorne gedrückt – wie W gedrückt halten. Im Spiel erscheint dafür ein kleiner Knopf. Die App liest keine Bildschirminhalte, sie sieht nur, welche App gerade offen ist.</string>
+</resources>

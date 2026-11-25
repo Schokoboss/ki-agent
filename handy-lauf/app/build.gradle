@@ -1,0 +1,27 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'de.nova.lauf'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'de.nova.lauf'
+        minSdk 29
+        targetSdk 35
+        // Jeder GitHub-Bau zählt hoch, damit ein Update die alte Version ersetzt.
+        versionCode((System.getenv('GITHUB_RUN_NUMBER') ?: '1') as Integer)
+        versionName '1.0.' + (System.getenv('GITHUB_RUN_NUMBER') ?: '0')
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
